@@ -2,33 +2,32 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, Loader2, User, FileBadge, 
-  Briefcase, Calendar, DollarSign, IdCard 
+  Briefcase, Calendar, DollarSign, Hashtag 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
-// --- Configuración de Animación (Se mantiene el rebote suave) ---
+// Configuración de la animación de rebote (Spring)
 const modalVariants = {
   hidden: { 
     opacity: 0, 
-    scale: 0.95,
-    y: 20 // Entra desde abajo ligeramente
+    scale: 0.8,
+    y: -30 // Empieza un poco más arriba
   },
   visible: { 
     opacity: 1, 
     scale: 1,
     y: 0,
     transition: { 
-      type: "spring",
-      stiffness: 300,
-      damping: 25,
-      mass: 0.5
+      type: "spring", // Tipo resorte
+      stiffness: 350, // Tensión (más alto = más rápido/rígido)
+      damping: 25,    // Resistencia (más bajo = más rebote)
+      mass: 0.8       // Peso
     }
   },
   exit: {
     opacity: 0,
-    scale: 0.98,
-    y: 10,
-    transition: { duration: 0.15, ease: "easeOut" }
+    scale: 0.9,
+    transition: { duration: 0.2 }
   }
 };
 
@@ -36,7 +35,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     full_name: '',
-    document_type: 'DNI', 
+    document_type: 'DNI', // Valor por defecto
     document_number: '',
     position: '',
     entry_date: '',
@@ -52,110 +51,126 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('employees').insert([formData]);
+      // Enviamos los datos, incluyendo el nuevo document_type
+      const { error } = await supabase
+        .from('employees')
+        .insert([formData]);
+
       if (error) throw error;
 
-      setFormData({ full_name: '', document_type: 'DNI', document_number: '', position: '', entry_date: '', salary: '' });
-      onSuccess(); 
-      onClose();   
+      // Limpiar formulario
+      setFormData({ 
+        full_name: '', 
+        document_type: 'DNI', 
+        document_number: '', 
+        position: '', 
+        entry_date: '', 
+        salary: '' 
+      });
+      onSuccess(); // Recargar tabla padre
+      onClose();   // Cerrar modal
     } catch (error) {
       console.error('Error:', error.message);
-      // Idealmente usar un toast aquí
+      // Aquí podrías usar un toast notification en lugar de alert
+      alert('Error al guardar: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // Usamos AnimatePresence para que la animación de salida funcione
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
           
-          {/* Backdrop (Fondo oscurecido y desenfocado) */}
+          {/* Backdrop oscuro con desenfoque */}
           <motion.div 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-all"
-            onClick={onClose} 
+            className="fixed inset-0 bg-[#0F172A]/60 backdrop-blur-sm transition-all"
+            onClick={onClose} // Cerrar al hacer clic fuera
           />
 
-          {/* --- MODAL TODO BLANCO --- */}
+          {/* Contenedor del Modal */}
           <motion.div 
             variants={modalVariants}
             initial="hidden"
             animate="visible"
             exit="exit"
-            // Cambio clave: bg-white puro y una sombra suave y difusa
-            className="bg-white w-full max-w-2xl rounded-t-[2rem] sm:rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] relative z-10 overflow-hidden max-h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()} 
+            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden my-8"
+            onClick={(e) => e.stopPropagation()} // Evitar cerrar al hacer clic dentro
           >
-            
-            {/* --- Header Limpio (Blanco) --- */}
-            <div className="px-8 py-6 bg-white border-b border-slate-100 flex justify-between items-start shrink-0">
+            {/* Header Premium */}
+            <div className="bg-[#0F172A] px-8 py-5 flex justify-between items-center relative overflow-hidden">
+              {/* Decoración de fondo sutil */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-xl"></div>
+              
               <div>
-                {/* Título más grande y oscuro */}
-                <h3 className="text-slate-900 font-extrabold text-2xl tracking-tight mb-1">Nuevo Colaborador</h3>
-                <p className="text-slate-500 text-sm font-medium">Complete la información para el alta en planilla.</p>
+                <h3 className="text-white font-bold text-xl tracking-tight">Nuevo Colaborador</h3>
+                <p className="text-blue-200 text-sm">Complete la ficha de ingreso</p>
               </div>
-              {/* Botón de cierre oscuro para contrastar con el fondo blanco */}
               <button 
                 onClick={onClose} 
-                className="bg-slate-100 p-2 rounded-full text-slate-500 hover:text-slate-900 hover:bg-slate-200 transition mt-1"
+                className="bg-white/10 p-2 rounded-full text-white/70 hover:text-white hover:bg-white/20 transition"
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* --- Formulario --- */}
-            <form onSubmit={handleSubmit} className="p-8 space-y-8 overflow-y-auto custom-scrollbar">
+            {/* Formulario con Iconos y Secciones */}
+            <form onSubmit={handleSubmit} className="p-8 space-y-6">
               
-              {/* Sección 1 */}
-              <div className="space-y-4">
-                {/* Icono de sección ahora es gris neutro */}
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
-                  <User size={16} className="text-slate-400" /> Datos Personales
+              {/* --- SECCIÓN 1: Datos Personales --- */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <User size={18} className="text-blue-600" /> Datos Personales
                 </h4>
-                <div className="grid grid-cols-1 gap-5">
-                  <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-800 transition-colors" size={18} />
-                    {/* Los inputs mantienen un gris muy claro para diferenciarse del fondo blanco */}
+                <div className="grid grid-cols-1 gap-4">
+                  {/* Nombre Completo */}
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input 
                       name="full_name" 
                       required
                       value={formData.full_name}
                       onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 focus:ring-0 outline-none transition-all placeholder:text-slate-400 placeholder:font-medium"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:text-slate-400"
                       placeholder="Nombre Completo"
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-5">
-                    <div className="col-span-1 relative group">
-                      <FileBadge className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10 group-focus-within:text-slate-800 transition-colors" size={18} />
+                  {/* Grupo: Tipo y Número de Documento */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* Selector Tipo Documento */}
+                    <div className="col-span-1 relative">
+                      <FileBadge className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
                       <select 
                         name="document_type" 
                         value={formData.document_type}
                         onChange={handleChange}
-                        className="w-full pl-12 pr-10 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none transition-all appearance-none cursor-pointer relative z-0"
+                        className="w-full pl-12 pr-8 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer relative z-0"
                       >
                         <option value="DNI">DNI</option>
-                        <option value="CE">CE</option>
+                        <option value="CE">CE (Extranjería)</option>
                         <option value="PASAPORTE">Pasaporte</option>
                       </select>
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                      {/* Flecha personalizada para el select */}
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                       </div>
                     </div>
                     
-                    <div className="col-span-2 relative group">
-                      <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-800 transition-colors" size={18} />
+                    {/* Input Número Documento */}
+                    <div className="col-span-2 relative">
+                      <Hashtag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         name="document_number" 
                         required
                         value={formData.document_number}
                         onChange={handleChange}
-                        className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 focus:ring-0 outline-none transition-all placeholder:text-slate-400 font-mono placeholder:font-medium"
+                        className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 font-mono"
                         placeholder="Número de documento"
                       />
                     </div>
@@ -163,30 +178,32 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
                 </div>
               </div>
 
-              {/* Separador sutil */}
               <hr className="border-slate-100" />
 
-              {/* Sección 2 */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
-                  <Briefcase size={16} className="text-slate-400" /> Datos Laborales
+              {/* --- SECCIÓN 2: Datos Laborales --- */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <Briefcase size={18} className="text-blue-600" /> Datos Laborales & Económicos
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div className="md:col-span-2 relative group">
-                    <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-800 transition-colors" size={18} />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Puesto */}
+                  <div className="md:col-span-3 relative">
+                    <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input 
                       name="position" 
                       required
                       value={formData.position}
                       onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 focus:ring-0 outline-none transition-all placeholder:text-slate-400 placeholder:font-medium"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-slate-400"
                       placeholder="Cargo o Puesto de Trabajo"
                     />
                   </div>
                   
-                  <div className="relative group">
+                  {/* Fecha Ingreso */}
+                  <div className="relative">
+                     {/* Truco para que el icono no tape el selector de fecha nativo */}
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Calendar className="text-slate-400 group-focus-within:text-slate-800 transition-colors" size={18} />
+                      <Calendar className="text-slate-400" size={18} />
                     </div>
                     <input 
                       name="entry_date" 
@@ -194,43 +211,50 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
                       required
                       value={formData.entry_date}
                       onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-600 focus:text-slate-800 focus:bg-white focus:border-slate-800 focus:ring-0 outline-none transition-all"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 focus:bg-white focus:border-blue-500 outline-none transition-all"
                     />
                   </div>
 
-                   <div className="relative group">
-                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-800 transition-colors" size={18} />
+                   {/* Sueldo */}
+                   <div className="relative md:col-span-2">
+                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input 
                       name="salary" 
                       type="number"
                       required
-                      step="0.01"
+                      step="0.01" // Permitir decimales
                       value={formData.salary}
                       onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 focus:ring-0 outline-none transition-all placeholder:text-slate-400 placeholder:font-medium"
-                      placeholder="Sueldo Básico (S/)"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-slate-400"
+                      placeholder="Sueldo Básico Mensual (S/)"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* --- Footer --- */}
-              <div className="pt-6 flex flex-col-reverse sm:flex-row gap-3 border-t border-slate-50 shrink-0">
+              {/* Footer Botones */}
+              <div className="pt-6 flex gap-4 border-t border-slate-50">
                 <button 
                   type="button" 
                   onClick={onClose}
-                  className="px-6 py-3.5 border-2 border-slate-200 text-slate-700 rounded-2xl text-sm font-bold hover:bg-slate-50 hover:border-slate-300 transition-colors focus:ring-2 focus:ring-slate-200 focus:outline-none"
+                  className="px-6 py-3.5 border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 hover:text-slate-800 transition-colors"
                 >
                   Cancelar
                 </button>
-                {/* Botón Principal: Se mantiene oscuro para ser el único punto de contraste fuerte */}
                 <button 
                   type="submit" 
                   disabled={loading}
-                  className="flex-1 px-6 py-3.5 bg-[#0F172A] text-white rounded-2xl text-sm font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/10 transition-all hover:shadow-xl active:scale-[0.98] flex justify-center items-center gap-2 disabled:opacity-70 focus:ring-2 focus:ring-slate-800 focus:ring-offset-2 focus:outline-none"
+                  className="flex-1 px-6 py-3.5 bg-[#0F172A] text-white rounded-xl text-sm font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all hover:shadow-xl active:scale-[0.98] flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
-                  <span>Guardar Personal</span>
+                  {loading ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" /> Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={20} /> Guardar Personal
+                    </>
+                  )}
                 </button>
               </div>
 
