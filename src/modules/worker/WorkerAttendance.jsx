@@ -1,17 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom'; // <--- IMPORTANTE
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, MapPin, Search, CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft } from 'lucide-react'; // Agregué ArrowLeft
+import { 
+  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft, AlertCircle 
+} from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { compressImage } from '../../utils/imageCompressor';
+import logoFull from '../../assets/images/logo-lk-full.png';
 
 const WorkerAttendance = () => {
-  const locationState = useLocation(); // Hook para recibir datos
+  const contextData = useOutletContext();
+  const workerFromContext = contextData ? contextData.worker : null;
   const navigate = useNavigate();
 
-  const [step, setStep] = useState('search'); 
-  const [dni, setDni] = useState('');
-  const [worker, setWorker] = useState(null);
+  const [step, setStep] = useState(workerFromContext ? 'confirm' : 'search'); 
+  const [dni, setDni] = useState(workerFromContext?.document_number || '');
+  const [worker, setWorker] = useState(workerFromContext);
+  
   const [attendanceToday, setAttendanceToday] = useState(null); 
   const [actionType, setActionType] = useState(null); 
   
@@ -23,18 +28,12 @@ const WorkerAttendance = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // --- EFECTO: CARGAR DATOS SI VIENEN DEL LOGIN ---
   useEffect(() => {
-    // Si viene del Login con datos precargados
-    if (locationState.state?.preloadedWorker) {
-      const preload = locationState.state.preloadedWorker;
-      setWorker(preload);
-      setDni(preload.document_number);
-      checkAttendanceStatus(preload.id); // Función auxiliar para verificar estado
+    if (worker) {
+      checkAttendanceStatus(worker.id);
     }
-  }, [locationState]);
+  }, [worker]);
 
-  // Función separada para verificar estado del día
   const checkAttendanceStatus = async (workerId) => {
     setLoading(true);
     try {
@@ -48,7 +47,6 @@ const WorkerAttendance = () => {
 
       if (error) throw error;
       setAttendanceToday(data);
-      setStep('confirm'); // Saltamos directo a confirmar
     } catch (err) {
       console.error(err);
     } finally {
@@ -56,43 +54,13 @@ const WorkerAttendance = () => {
     }
   };
 
-  // 1. BUSCAR OBRERO (Manual)
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setErrorMsg('');
-
-    try {
-      const { data: workerData, error: workerError } = await supabase
-        .from('workers')
-        .select('*')
-        .eq('document_number', dni)
-        .single();
-
-      if (workerError || !workerData) throw new Error('DNI no encontrado.');
-      setWorker(workerData);
-      checkAttendanceStatus(workerData.id); // Usamos la misma función
-
-    } catch (error) {
-      setErrorMsg(error.message);
-      setLoading(false);
-    }
-  };
-
-  // ... (RESTO DEL CÓDIGO IGUAL: startProcess, startCamera, takePhoto, submitAttendance) ...
-  
-  // Solo asegúrate de copiar el resto de funciones (startProcess, etc.) del código anterior
-  // Si no quieres copiar y pegar, solo agrega el useEffect y la función checkAttendanceStatus arriba
-  
-  // Aquí te pongo el startProcess y demás para que tengas el archivo completo si prefieres copiar todo:
-
   const startProcess = async (type) => {
     setActionType(type);
     setLoading(true);
     setErrorMsg('');
 
     if (!navigator.geolocation) {
-      setErrorMsg('Navegador no soporta geolocalización.');
+      setErrorMsg('Tu dispositivo no soporta geolocalización.');
       setLoading(false);
       return;
     }
@@ -106,7 +74,7 @@ const WorkerAttendance = () => {
       },
       (error) => {
         setLoading(false);
-        setErrorMsg('Debes permitir la ubicación para marcar.');
+        setErrorMsg('⚠️ Debes permitir el acceso a tu ubicación.');
       },
       { enableHighAccuracy: true }
     );
@@ -114,10 +82,13 @@ const WorkerAttendance = () => {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' }, 
+        audio: false 
+      });
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) {
-      setErrorMsg('No se pudo acceder a la cámara.');
+      setErrorMsg('No se pudo acceder a la cámara. Verifica los permisos.');
     }
   };
 
@@ -131,11 +102,16 @@ const WorkerAttendance = () => {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       canvas.toBlob(async (blob) => {
+        if (!blob) return;
         const file = new File([blob], "foto.jpg", { type: "image/jpeg" });
-        const compressed = await compressImage(file);
-        setPhotoBlob(compressed);
-        const stream = video.srcObject;
-        stream?.getTracks().forEach(track => track.stop());
+        try {
+          const compressed = await compressImage(file);
+          setPhotoBlob(compressed);
+          const stream = video.srcObject;
+          if (stream) stream.getTracks().forEach(track => track.stop());
+        } catch (e) {
+          console.error("Error al procesar imagen", e);
+        }
       }, 'image/jpeg', 0.8);
     }
   };
@@ -192,104 +168,181 @@ const WorkerAttendance = () => {
     }
   };
 
-  const reset = () => {
-    // Si queremos volver al login principal al terminar
-    navigate('/');
+  const goBackToDashboard = () => {
+    navigate('/worker/dashboard', { state: { preloadedWorker: worker } });
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
+    // AJUSTE 1: Centrado vertical (justify-center) y fondo limpio
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
       
-      {step === 'search' && (
-        <div className="w-full max-w-md bg-white p-8 rounded-3xl shadow-xl relative">
-          <button onClick={() => navigate('/')} className="absolute top-6 left-6 text-slate-400 hover:text-slate-800">
-             <ArrowLeft />
-          </button>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2 mt-4 text-center">Marcación L&K</h2>
-          <p className="text-slate-500 mb-6 text-sm text-center">Ingresa tu DNI para registrar asistencia.</p>
-          <form onSubmit={handleSearch} className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                type="tel" 
-                value={dni} onChange={(e) => setDni(e.target.value)}
-                className="w-full pl-12 py-4 bg-slate-50 border rounded-2xl text-lg font-bold text-center tracking-widest outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="DNI" maxLength={15} required
-              />
-            </div>
-            <button disabled={loading} className="w-full py-4 bg-[#0F172A] text-white rounded-2xl font-bold hover:scale-[1.02] transition-transform">
-              {loading ? <RefreshCw className="animate-spin mx-auto"/> : 'Buscar'}
+      {/* Fondo Azul Curvo Superior (Más alto para cubrir el logo cómodamente) */}
+      <div className="absolute top-0 left-0 w-full h-[45vh] bg-[#003366] rounded-b-[4rem] z-0"></div>
+      
+      {/* Logo Header - Posicionado absolutamente para estar siempre arriba en lo azul */}
+      <div className="absolute top-12 z-10 w-full flex justify-center">
+         <img src={logoFull} alt="L&K" className="h-20 brightness-0 invert opacity-90 drop-shadow-sm" />
+      </div>
+
+      <AnimatePresence mode="wait">
+        
+        {/* PASO 1: CONFIRMACIÓN Y SELECCIÓN DE ACCIÓN */}
+        {step === 'confirm' && worker && (
+          <motion.div 
+            key="confirm"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -20, opacity: 0 }}
+            // AJUSTE 2: Diseño "Pegado atrás" (Sin sombra pesada, blanco limpio, estilo tarjeta nativa)
+            className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20"
+          >
+            <button 
+              onClick={goBackToDashboard} 
+              className="absolute top-6 left-6 p-2 text-slate-400 hover:text-[#003366] bg-slate-50 hover:bg-slate-100 rounded-full transition-all"
+            >
+               <ArrowLeft size={20} />
             </button>
-          </form>
-          {errorMsg && <p className="mt-4 text-red-500 text-center text-sm bg-red-50 p-2 rounded-lg">{errorMsg}</p>}
-        </div>
-      )}
 
-      {step === 'confirm' && worker && (
-        <div className="w-full max-w-md bg-white p-8 rounded-3xl shadow-xl text-center">
-          <h3 className="text-xl font-bold text-slate-800">{worker.full_name}</h3>
-          <p className="text-slate-500 text-sm mb-8">{worker.category}</p>
+            <div className="text-center mt-6">
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Registro Diario</h2>
+              <p className="text-slate-500 text-sm mt-1">Selecciona tu acción para hoy</p>
+            </div>
 
-          <div className="grid gap-4">
-            {!attendanceToday ? (
-              <button onClick={() => startProcess('CHECK_IN')} className="py-6 bg-green-50 border-2 border-green-100 rounded-2xl flex flex-col items-center gap-2 hover:bg-green-100 transition-colors">
-                <LogIn className="text-green-600 w-8 h-8" />
-                <span className="font-bold text-green-700">MARCAR ENTRADA</span>
-              </button>
-            ) : !attendanceToday.check_out_time ? (
-              <button onClick={() => startProcess('CHECK_OUT')} className="py-6 bg-orange-50 border-2 border-orange-100 rounded-2xl flex flex-col items-center gap-2 hover:bg-orange-100 transition-colors">
-                <LogOut className="text-orange-600 w-8 h-8" />
-                <span className="font-bold text-orange-700">MARCAR SALIDA</span>
-              </button>
-            ) : (
-              <div className="p-6 bg-blue-50 text-blue-800 rounded-2xl font-medium">
-                <CheckCircle className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-                Ya has completado tu jornada de hoy.
+            <div className="mt-8 space-y-5">
+              {!attendanceToday ? (
+                <button 
+                  onClick={() => startProcess('CHECK_IN')} 
+                  // AJUSTE 3: Botones más planos y elegantes
+                  className="w-full py-6 bg-emerald-50 rounded-3xl border border-emerald-100 flex flex-col items-center gap-3 hover:bg-emerald-100 active:scale-95 transition-all group"
+                >
+                  <div className="p-3 bg-white rounded-full text-emerald-600 shadow-sm">
+                    <LogIn size={26} strokeWidth={2.5} />
+                  </div>
+                  <span className="font-bold text-emerald-800 text-sm tracking-wide">MARCAR ENTRADA</span>
+                </button>
+              ) : !attendanceToday.check_out_time ? (
+                <button 
+                  onClick={() => startProcess('CHECK_OUT')} 
+                  className="w-full py-6 bg-orange-50 rounded-3xl border border-orange-100 flex flex-col items-center gap-3 hover:bg-orange-100 active:scale-95 transition-all group"
+                >
+                  <div className="p-3 bg-white rounded-full text-orange-600 shadow-sm">
+                    <LogOut size={26} strokeWidth={2.5} />
+                  </div>
+                  <span className="font-bold text-orange-800 text-sm tracking-wide">MARCAR SALIDA</span>
+                </button>
+              ) : (
+                <div className="py-10 bg-blue-50 rounded-3xl border border-blue-100 text-blue-800 flex flex-col items-center gap-3 text-center">
+                  <div className="p-3 bg-white rounded-full shadow-sm text-blue-600">
+                    <CheckCircle size={32} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg">¡Jornada Completa!</h3>
+                    <p className="text-xs text-blue-600/70 mt-1">Has registrado entrada y salida.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {loading && (
+              <div className="mt-8 flex justify-center text-slate-400">
+                <RefreshCw className="animate-spin" size={24} />
               </div>
             )}
-          </div>
-          
-          <button onClick={() => navigate('/')} className="mt-6 text-slate-400 text-sm underline">Cancelar y Salir</button>
-          {loading && <p className="mt-4 text-slate-500 animate-pulse">Procesando...</p>}
-          {errorMsg && <p className="mt-4 text-red-500 text-center text-sm">{errorMsg}</p>}
-        </div>
-      )}
 
-      {step === 'camera' && (
-        <div className="w-full max-w-md bg-black h-[500px] rounded-3xl overflow-hidden relative flex flex-col">
-          {!photoBlob ? (
-            <>
-              <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-              <div className="absolute bottom-6 inset-x-0 flex justify-center">
-                <button onClick={takePhoto} className="w-16 h-16 rounded-full border-4 border-white bg-white/20"></button>
+            {errorMsg && (
+              <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold text-center">
+                {errorMsg}
               </div>
-            </>
-          ) : (
-            <>
-              <img src={URL.createObjectURL(photoBlob)} className="flex-1 object-cover" />
-              <div className="p-4 bg-white flex gap-4">
-                <button onClick={() => setPhotoBlob(null)} className="flex-1 py-3 border rounded-xl font-bold">Repetir</button>
-                <button onClick={submitAttendance} disabled={loading} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold flex justify-center">
-                   {loading ? <RefreshCw className="animate-spin"/> : 'Confirmar'}
+            )}
+          </motion.div>
+        )}
+
+        {/* PASO 2: CÁMARA */}
+        {step === 'camera' && (
+          <motion.div 
+            key="camera"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="w-full max-w-sm bg-black h-[65vh] rounded-[2.5rem] overflow-hidden relative flex flex-col z-20 shadow-xl"
+          >
+            {!photoBlob ? (
+              <>
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-56 h-72 border-2 border-white/30 rounded-[2rem]"></div>
+                </div>
+                
+                <div className="absolute bottom-0 inset-x-0 p-8 flex justify-center pb-12 bg-gradient-to-t from-black/80 to-transparent">
+                  <button 
+                    onClick={takePhoto} 
+                    className="w-20 h-20 rounded-full border-[6px] border-white/30 bg-white active:scale-90 transition-transform"
+                  ></button>
+                </div>
+                
+                <button 
+                  onClick={() => {
+                      setStep('confirm');
+                      if (videoRef.current?.srcObject) {
+                          videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                      }
+                  }} 
+                  className="absolute top-6 left-6 p-3 bg-black/40 text-white rounded-full backdrop-blur-md"
+                >
+                  <ArrowLeft size={24} />
                 </button>
+              </>
+            ) : (
+              <div className="flex flex-col h-full bg-slate-900">
+                <img src={URL.createObjectURL(photoBlob)} className="flex-1 object-cover" alt="Preview" />
+                <div className="p-6 bg-white flex gap-4">
+                  <button 
+                    onClick={() => setPhotoBlob(null)} 
+                    className="flex-1 py-4 text-slate-600 font-bold bg-slate-100 rounded-2xl text-sm"
+                  >
+                    Repetir
+                  </button>
+                  <button 
+                    onClick={submitAttendance} 
+                    disabled={loading} 
+                    className="flex-1 py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg active:scale-95 transition-transform"
+                  >
+                     {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Confirmar'}
+                  </button>
+                </div>
               </div>
-            </>
-          )}
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
-      )}
+            )}
+            <canvas ref={canvasRef} className="hidden" />
+          </motion.div>
+        )}
 
-      {step === 'success' && (
-        <div className="w-full max-w-md bg-white p-12 rounded-3xl shadow-xl text-center">
-          <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6" />
-          <h2 className="text-3xl font-bold text-slate-800 mb-2">¡Listo!</h2>
-          <p className="text-slate-500 mb-8">
-            Tu {actionType === 'CHECK_IN' ? 'Entrada' : 'Salida'} ha sido registrada correctamente.
-          </p>
-          <button onClick={reset} className="w-full py-4 bg-[#0F172A] text-white rounded-2xl font-bold">Finalizar</button>
-        </div>
-      )}
+        {/* PASO 3: ÉXITO */}
+        {step === 'success' && (
+          <motion.div 
+            key="success"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20"
+          >
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
+              <CheckCircle size={40} strokeWidth={3} />
+            </div>
+            
+            <h2 className="text-2xl font-bold text-slate-800">¡Registrado!</h2>
+            <p className="text-slate-500 text-sm mt-2 mb-8">
+              Tu asistencia se ha guardado correctamente.
+            </p>
+            
+            <button 
+              onClick={goBackToDashboard} 
+              className="w-full py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm shadow-md active:scale-95 transition-transform"
+            >
+              Volver al Inicio
+            </button>
+          </motion.div>
+        )}
 
+      </AnimatePresence>
     </div>
   );
 };

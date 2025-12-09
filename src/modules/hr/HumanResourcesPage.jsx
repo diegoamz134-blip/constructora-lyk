@@ -42,7 +42,7 @@ const HumanResourcesPage = () => {
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-8"
+      className="space-y-8 pb-12" // Padding bottom para dar aire al final
     >
       
       {/* --- SECCIÓN DE TABS --- */}
@@ -78,7 +78,6 @@ const HumanResourcesPage = () => {
           color="bg-blue-50 text-blue-600" 
         />
         <KpiCard 
-          // CAMBIO: Refleja el tipo de pago
           title={activeTab === 'staff' ? "Total Sueldos" : "Total Pago Semanal"} 
           value={activeTab === 'staff' ? "S/ 84,000" : "S/ 32,500"} 
           icon={Wallet} 
@@ -147,7 +146,6 @@ const HumanResourcesPage = () => {
 
                         <th className="py-5 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Ingreso</th>
                         <th className="py-5 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-                          {/* CAMBIO: Etiqueta de la columna */}
                           {activeTab === 'staff' ? 'Salario Mensual' : 'Pago Semanal'}
                         </th>
                         <th className="py-5 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-right pr-8">Acciones</th>
@@ -169,6 +167,7 @@ const HumanResourcesPage = () => {
          )}
       </div>
 
+      {/* --- MODALES --- */}
       {activeTab === 'staff' ? (
         <AddEmployeeModal 
           isOpen={isModalOpen} 
@@ -183,10 +182,13 @@ const HumanResourcesPage = () => {
         />
       )}
 
+      {/* ¡AQUÍ ESTABA EL ERROR! EL BLOQUE AZUL HA SIDO ELIMINADO */}
+
     </motion.div>
   );
 };
 
+// Componentes Auxiliares
 const ModernTableRow = ({ data, index, type }) => {
   const getInitials = (name) => name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
   const colors = ['bg-blue-100 text-blue-700', 'bg-emerald-100 text-emerald-700', 'bg-purple-100 text-purple-700', 'bg-amber-100 text-amber-700'];
@@ -208,7 +210,7 @@ const ModernTableRow = ({ data, index, type }) => {
                 {getInitials(data.full_name)}
              </div>
              <div>
-               <p className="text-sm font-bold text-slate-700 group-hover:text-[#0F172A] transition-colors">{data.full_name}</p>
+               <p className="text-sm font-bold text-slate-700 group-hover:text-[#0F172A] transition-colors capitalize">{data.full_name}</p>
                <p className="text-[10px] text-slate-400 font-medium">ID: {data.id.toString().padStart(4, '0')}</p>
              </div>
           </div>
@@ -244,11 +246,10 @@ const ModernTableRow = ({ data, index, type }) => {
        )}
 
        <td className="py-4 px-4 text-sm text-slate-500 font-medium">
-          {new Date(data.start_date || data.entry_date).toLocaleDateString()}
+          {data.start_date || data.entry_date ? new Date(data.start_date || data.entry_date).toLocaleDateString() : '-'}
        </td>
 
        <td className="py-4 px-4 text-sm font-bold text-slate-700">
-          {/* CAMBIO: Muestra el campo correcto (salary o weekly_rate) */}
           S/ {Number(data.salary || data.weekly_rate).toLocaleString('es-PE', { minimumFractionDigits: 2 })}
        </td>
 

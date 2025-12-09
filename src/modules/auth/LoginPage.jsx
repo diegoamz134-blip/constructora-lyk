@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, User 
+  Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, User, KeyRound
 } from 'lucide-react';
 
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -15,18 +15,22 @@ const LoginPage = () => {
   // Estado para el modo de login: 'admin' | 'worker'
   const [loginMode, setLoginMode] = useState('admin');
   
-  // Estados de formularios
+  // Estados Admin
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  
+  // Estados Obrero
   const [dni, setDni] = useState('');
+  const [workerPassword, setWorkerPassword] = useState('');
   
   // Estados de UI
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false); // Para admin
+  const [showWorkerPassword, setShowWorkerPassword] = useState(false); // Para obrero
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
 
-  // --- LOGIN ADMINISTRATIVO ---
+  // --- LOGIN ADMINISTRATIVO (Correo y Contraseña) ---
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -46,35 +50,42 @@ const LoginPage = () => {
       }, 2500);
 
     } catch (error) {
-      setErrorMsg('Credenciales incorrectas. Verifique sus datos.');
+      setErrorMsg('Credenciales administrativas incorrectas.');
       setLoading(false);
     }
   };
 
-  // --- LOGIN OBRERO (SOLO DNI) ---
+  // --- LOGIN OBRERO (DNI + Contraseña) ---
   const handleWorkerSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      // 1. Verificar si el obrero existe en la DB
+      // Validar credenciales en la tabla workers
       const { data, error } = await supabase
         .from('workers')
         .select('*')
         .eq('document_number', dni)
+        .eq('password', workerPassword) // Verificamos que la contraseña coincida
         .single();
 
       if (error || !data) {
-        throw new Error('DNI no encontrado en el sistema.');
+        // Mensaje genérico por seguridad
+        throw new Error('Documento o contraseña incorrectos.');
       }
 
-      // 2. Si existe, redirigir al panel de asistencia
-      // Pasamos el DNI y los datos para que no tenga que buscarlos de nuevo
-      navigate('/asistencia', { state: { preloadedWorker: data } });
+      // Si es correcto, verificar estado del obrero
+      if (data.status !== 'Activo') {
+        throw new Error('Usuario inactivo. Contacte a RR.HH.');
+      }
+
+      // Login exitoso -> Redirigir al Dashboard del Obrero
+      navigate('/worker/dashboard', { state: { preloadedWorker: data } });
 
     } catch (error) {
-      setErrorMsg(error.message || 'Error al validar DNI.');
+      console.error(error);
+      setErrorMsg(error.message || 'Error de autenticación.');
       setLoading(false);
     }
   };
@@ -262,26 +273,50 @@ const LoginPage = () => {
               onSubmit={handleWorkerSubmit} 
               className="space-y-6"
             >
-              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 text-blue-800 text-sm mb-6">
-                <p className="flex gap-2">
-                  <User className="shrink-0" size={18} />
-                  <span>Ingrese su número de documento (DNI/CE) para registrar su <strong>Entrada</strong> o <strong>Salida</strong>.</span>
-                </p>
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 text-blue-800 text-sm mb-2 flex items-start gap-3">
+                <User className="shrink-0 mt-0.5" size={18} />
+                <span>Ingrese sus credenciales personales para acceder al panel.</span>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Número de Documento</label>
-                <div className="relative group">
-                  <HardHat className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-lk-blue transition-colors" size={20} />
-                  <input
-                    type="tel"
-                    required
-                    maxLength={15}
-                    value={dni}
-                    onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))} // Solo números
-                    className="block w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-lk-blue focus:bg-white focus:ring-0 transition-all font-bold text-lg tracking-widest"
-                    placeholder="00000000"
-                  />
+              <div className="space-y-5">
+                {/* Input DNI Obrero */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Documento (DNI/CE)</label>
+                  <div className="relative group">
+                    <HardHat className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-lk-blue transition-colors" size={20} />
+                    <input
+                      type="tel"
+                      required
+                      maxLength={15}
+                      value={dni}
+                      onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))} // Solo números
+                      className="block w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-lk-blue focus:bg-white focus:ring-0 transition-all font-bold text-lg tracking-widest"
+                      placeholder="00000000"
+                    />
+                  </div>
+                </div>
+
+                {/* Input Password Obrero */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Contraseña</label>
+                  <div className="relative group">
+                    <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-lk-blue transition-colors" size={20} />
+                    <input
+                      type={showWorkerPassword ? "text" : "password"}
+                      required
+                      value={workerPassword}
+                      onChange={(e) => setWorkerPassword(e.target.value)}
+                      className="block w-full pl-12 pr-12 py-4 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-lk-blue focus:bg-white focus:ring-0 transition-all font-medium text-lg"
+                      placeholder="••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowWorkerPassword(!showWorkerPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-lk-blue transition-colors"
+                    >
+                      {showWorkerPassword ? <span className="text-xs font-bold">OCULTAR</span> : <span className="text-xs font-bold">VER</span>}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -290,7 +325,7 @@ const LoginPage = () => {
                 disabled={loading}
                 className="w-full py-4 bg-lk-darkblue text-white rounded-xl font-bold text-lg hover:bg-lk-blue hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] transition-all flex justify-center items-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {loading ? <Loader2 className="animate-spin" /> : <>Continuar al Registro <ArrowRight size={20} /></>}
+                {loading ? <Loader2 className="animate-spin" /> : <>Ingresar al Panel <ArrowRight size={20} /></>}
               </button>
             </motion.form>
           )}

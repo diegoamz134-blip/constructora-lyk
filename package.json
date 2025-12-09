@@ -12,7 +12,11 @@
   "dependencies": {
     "@heroui/react": "^2.8.5",
     "@supabase/supabase-js": "^2.87.1",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "framer-motion": "^12.23.25",
+    "jspdf": "^3.0.4",
+    "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.556.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

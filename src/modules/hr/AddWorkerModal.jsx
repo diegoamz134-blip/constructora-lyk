@@ -1,197 +1,377 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  X, Save, Loader2, User, FileBadge, 
-  HardHat, Calendar, DollarSign, IdCard, MapPin
+  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft, AlertCircle, MapPin, Camera 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { compressImage } from '../../utils/imageCompressor';
+import logoFull from '../../assets/images/logo-lk-full.png';
 
-const modalVariants = {
-  hidden: { opacity: 0, scale: 0.95, y: 20 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 25 } },
-  exit: { opacity: 0, scale: 0.98, y: 10 }
-};
+const WorkerAttendance = () => {
+  const contextData = useOutletContext();
+  const workerFromContext = contextData ? contextData.worker : null;
+  const navigate = useNavigate();
 
-const AddWorkerModal = ({ isOpen, onClose, onSuccess }) => {
+  const [step, setStep] = useState(workerFromContext ? 'confirm' : 'search'); 
+  const [dni, setDni] = useState(workerFromContext?.document_number || '');
+  const [worker, setWorker] = useState(workerFromContext);
+  
+  const [attendanceToday, setAttendanceToday] = useState(null); 
+  const [actionType, setActionType] = useState(null); 
+  
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    full_name: '',
-    document_type: 'DNI',
-    document_number: '',
-    category: 'Peón',
-    project_assigned: '',
-    start_date: '',
-    weekly_rate: '' // CAMBIO: Ahora es pago semanal
-  });
+  const [location, setLocation] = useState(null);
+  const [photoBlob, setPhotoBlob] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (worker) {
+      checkAttendanceStatus(worker.id);
+    }
+  }, [worker]);
+
+  const checkAttendanceStatus = async (workerId) => {
     setLoading(true);
-
     try {
-      const { error } = await supabase.from('workers').insert([formData]);
-      if (error) throw error;
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('worker_id', workerId)
+        .eq('date', today)
+        .maybeSingle();
 
-      // Limpiar y cerrar
-      setFormData({ 
-        full_name: '', document_type: 'DNI', document_number: '', 
-        category: 'Peón', project_assigned: '', start_date: '', weekly_rate: '' 
-      });
-      onSuccess(); 
-      onClose();   
-    } catch (error) {
-      console.error('Error:', error.message);
-      alert('Error al guardar: ' + error.message);
+      if (error) throw error;
+      setAttendanceToday(data);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-6">
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-all"
-            onClick={onClose} 
-          />
+  const startProcess = async (type) => {
+    setActionType(type);
+    setLoading(true);
+    setErrorMsg('');
 
+    if (!navigator.geolocation) {
+      setErrorMsg('Tu dispositivo no soporta geolocalización.');
+      setLoading(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        // Guardamos las coordenadas
+        setLocation(`${position.coords.latitude},${position.coords.longitude}`);
+        setStep('camera');
+        startCamera();
+        setLoading(false);
+      },
+      (error) => {
+        setLoading(false);
+        setErrorMsg('⚠️ Debes permitir el acceso a tu ubicación.');
+      },
+      { enableHighAccuracy: true }
+    );
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' }, 
+        audio: false 
+      });
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (err) {
+      setErrorMsg('No se pudo acceder a la cámara. Verifica los permisos.');
+    }
+  };
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (video && canvas) {
+      const context = canvas.getContext('2d');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], "foto.jpg", { type: "image/jpeg" });
+        try {
+          const compressed = await compressImage(file);
+          setPhotoBlob(compressed);
+          const stream = video.srcObject;
+          if (stream) stream.getTracks().forEach(track => track.stop());
+        } catch (e) {
+          console.error("Error al procesar imagen", e);
+        }
+      }, 'image/jpeg', 0.8);
+    }
+  };
+
+  const submitAttendance = async () => {
+    if (!photoBlob || !location || !worker) return;
+    setLoading(true);
+
+    try {
+      const timestamp = Date.now();
+      const fileName = `${worker.document_number}_${actionType}_${timestamp}.jpg`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('attendance-photos')
+        .upload(fileName, photoBlob);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('attendance-photos')
+        .getPublicUrl(fileName);
+
+      const now = new Date().toISOString(); 
+
+      if (actionType === 'CHECK_IN') {
+        const { error: insertError } = await supabase
+          .from('attendance')
+          .insert([{
+            worker_id: worker.id,
+            date: new Date().toISOString().split('T')[0],
+            check_in_time: now,
+            check_in_photo: publicUrl,
+            check_in_location: location
+          }]);
+        if (insertError) throw insertError;
+      } else {
+        if (!attendanceToday) throw new Error("No hay registro de entrada.");
+        const { error: updateError } = await supabase
+          .from('attendance')
+          .update({
+            check_out_time: now,
+            check_out_photo: publicUrl,
+            check_out_location: location
+          })
+          .eq('id', attendanceToday.id);
+        if (updateError) throw updateError;
+      }
+      setStep('success');
+    } catch (error) {
+      console.error(error);
+      setErrorMsg('Error al guardar: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const goBackToDashboard = () => {
+    navigate('/worker/dashboard', { state: { preloadedWorker: worker } });
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
+      
+      {/* Fondo Azul Curvo Superior */}
+      <div className="absolute top-0 left-0 w-full h-[45vh] bg-[#003366] rounded-b-[4rem] z-0"></div>
+      
+      {/* Logo Header */}
+      <div className="absolute top-12 z-10 w-full flex justify-center">
+         <img src={logoFull} alt="L&K" className="h-20 brightness-0 invert opacity-90 drop-shadow-sm" />
+      </div>
+
+      <AnimatePresence mode="wait">
+        
+        {/* PASO 1: CONFIRMACIÓN Y SELECCIÓN */}
+        {step === 'confirm' && worker && (
           <motion.div 
-            variants={modalVariants}
-            initial="hidden" animate="visible" exit="exit"
-            className="bg-white w-full max-w-2xl rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl relative z-10 overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()} 
+            key="confirm"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -20, opacity: 0 }}
+            className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20 shadow-lg"
           >
-            {/* Header Limpio */}
-            <div className="px-8 py-6 bg-white border-b border-slate-100 flex justify-between items-start shrink-0">
-              <div>
-                <h3 className="text-slate-900 font-extrabold text-2xl tracking-tight mb-1">Nuevo Obrero</h3>
-                <p className="text-slate-500 text-sm font-medium">Registro de personal de campo (Régimen Semanal).</p>
-              </div>
-              <button onClick={onClose} className="bg-slate-100 p-2 rounded-full text-slate-500 hover:text-slate-900 transition mt-1">
-                <X size={20} />
-              </button>
+            <button 
+              onClick={goBackToDashboard} 
+              className="absolute top-6 left-6 p-2 text-slate-400 hover:text-[#003366] bg-slate-50 hover:bg-slate-100 rounded-full transition-all"
+            >
+               <ArrowLeft size={20} />
+            </button>
+
+            <div className="text-center mt-6">
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Registro Diario</h2>
+              <p className="text-slate-500 text-sm mt-1">Selecciona tu acción para hoy</p>
             </div>
 
-            {/* Formulario */}
-            <form onSubmit={handleSubmit} className="p-8 space-y-8 overflow-y-auto custom-scrollbar max-h-[75vh]">
-              
-              {/* Datos Personales */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
-                  <User size={16} className="text-slate-400" /> Datos Personales
-                </h4>
-                <div className="grid grid-cols-1 gap-5">
-                  <div className="relative group">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                      name="full_name" required value={formData.full_name} onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none transition-all"
-                      placeholder="Nombre Completo"
-                    />
+            <div className="mt-8 space-y-5">
+              {!attendanceToday ? (
+                <button 
+                  onClick={() => startProcess('CHECK_IN')} 
+                  className="w-full py-6 bg-emerald-50 rounded-3xl border border-emerald-100 flex flex-col items-center gap-3 hover:bg-emerald-100 active:scale-95 transition-all group"
+                >
+                  <div className="p-3 bg-white rounded-full text-emerald-600 shadow-sm">
+                    <LogIn size={26} strokeWidth={2.5} />
                   </div>
-
-                  <div className="grid grid-cols-3 gap-5">
-                    <div className="col-span-1 relative group">
-                      <FileBadge className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                      <select 
-                        name="document_type" value={formData.document_type} onChange={handleChange}
-                        className="w-full pl-12 pr-8 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none appearance-none cursor-pointer"
-                      >
-                        <option value="DNI">DNI</option>
-                        <option value="CE">CE</option>
-                        <option value="PASAPORTE">Pasaporte</option>
-                      </select>
-                    </div>
-                    
-                    <div className="col-span-2 relative group">
-                      <IdCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input 
-                        name="document_number" required value={formData.document_number} onChange={handleChange}
-                        className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none font-mono"
-                        placeholder="Número de documento"
-                      />
-                    </div>
+                  <span className="font-bold text-emerald-800 text-sm tracking-wide">MARCAR ENTRADA</span>
+                </button>
+              ) : !attendanceToday.check_out_time ? (
+                <button 
+                  onClick={() => startProcess('CHECK_OUT')} 
+                  className="w-full py-6 bg-orange-50 rounded-3xl border border-orange-100 flex flex-col items-center gap-3 hover:bg-orange-100 active:scale-95 transition-all group"
+                >
+                  <div className="p-3 bg-white rounded-full text-orange-600 shadow-sm">
+                    <LogOut size={26} strokeWidth={2.5} />
+                  </div>
+                  <span className="font-bold text-orange-800 text-sm tracking-wide">MARCAR SALIDA</span>
+                </button>
+              ) : (
+                <div className="py-10 bg-blue-50 rounded-3xl border border-blue-100 text-blue-800 flex flex-col items-center gap-3 text-center">
+                  <div className="p-3 bg-white rounded-full shadow-sm text-blue-600">
+                    <CheckCircle size={32} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg">¡Jornada Completa!</h3>
+                    <p className="text-xs text-blue-600/70 mt-1">Has registrado entrada y salida.</p>
                   </div>
                 </div>
+              )}
+            </div>
+            
+            {loading && (
+              <div className="mt-8 flex justify-center text-slate-400">
+                <RefreshCw className="animate-spin" size={24} />
               </div>
+            )}
 
-              <hr className="border-slate-100" />
-
-              {/* Datos de Obra */}
-              <div className="space-y-4">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
-                  <HardHat size={16} className="text-slate-400" /> Datos de Obra
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  
-                  {/* Categoría */}
-                  <div className="relative group">
-                    <HardHat className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                    <select 
-                      name="category" value={formData.category} onChange={handleChange}
-                      className="w-full pl-12 pr-8 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none appearance-none cursor-pointer"
-                    >
-                      <option value="Peón">Peón</option>
-                      <option value="Oficial">Oficial</option>
-                      <option value="Operario">Operario</option>
-                      <option value="Capataz">Capataz</option>
-                    </select>
-                  </div>
-
-                  {/* Obra Asignada */}
-                  <div className="relative group">
-                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                      name="project_assigned" required value={formData.project_assigned} onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none"
-                      placeholder="Obra Asignada"
-                    />
-                  </div>
-                  
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Calendar className="text-slate-400" size={18} />
-                    </div>
-                    <input 
-                      name="start_date" type="date" required value={formData.start_date} onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-600 focus:text-slate-800 focus:bg-white focus:border-slate-800 outline-none"
-                    />
-                  </div>
-
-                   <div className="relative group">
-                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                      name="weekly_rate" type="number" required step="0.01" value={formData.weekly_rate} onChange={handleChange}
-                      className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 focus:bg-white focus:border-slate-800 outline-none placeholder:text-slate-400"
-                      placeholder="Pago Semanal (S/)"
-                    />
-                  </div>
-                </div>
+            {errorMsg && (
+              <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold text-center">
+                {errorMsg}
               </div>
-
-              {/* Footer */}
-              <div className="pt-6 flex flex-col-reverse sm:flex-row gap-3 border-t border-slate-50">
-                <button type="button" onClick={onClose} className="px-6 py-3.5 border-2 border-slate-200 text-slate-700 rounded-2xl text-sm font-bold hover:bg-slate-50 transition-colors">
-                  Cancelar
-                </button>
-                <button type="submit" disabled={loading} className="flex-1 px-6 py-3.5 bg-[#0F172A] text-white rounded-2xl text-sm font-bold hover:bg-slate-800 shadow-lg flex justify-center items-center gap-2">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
-                  <span>Guardar Obrero</span>
-                </button>
-              </div>
-
-            </form>
+            )}
           </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+        )}
+
+        {/* PASO 2: CÁMARA y VISUALIZACIÓN */}
+        {step === 'camera' && (
+          <motion.div 
+            key="camera"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="w-full max-w-sm rounded-[2.5rem] overflow-hidden relative flex flex-col z-20 shadow-2xl bg-white mt-10"
+          >
+            {/* Si no hay foto aún, mostramos video */}
+            {!photoBlob ? (
+              <div className="relative h-[65vh] bg-black">
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                
+                {/* Guía Visual */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-64 h-80 border-2 border-white/40 rounded-[2rem]"></div>
+                </div>
+                
+                {/* Controles Cámara */}
+                <div className="absolute bottom-0 inset-x-0 p-8 flex justify-center pb-12 bg-gradient-to-t from-black/80 to-transparent">
+                  <button 
+                    onClick={takePhoto} 
+                    className="w-20 h-20 rounded-full border-[6px] border-white/30 bg-white active:scale-90 transition-transform shadow-lg"
+                  >
+                    <Camera className="w-8 h-8 text-slate-400 mx-auto" />
+                  </button>
+                </div>
+                
+                <button 
+                  onClick={() => {
+                      setStep('confirm');
+                      if (videoRef.current?.srcObject) {
+                          videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                      }
+                  }} 
+                  className="absolute top-6 left-6 p-3 bg-black/40 text-white rounded-full backdrop-blur-md"
+                >
+                  <ArrowLeft size={24} />
+                </button>
+              </div>
+            ) : (
+              /* VISTA PREVIA DE LA FOTO (NUEVO DISEÑO) */
+              <div className="flex flex-col h-full bg-white relative">
+                
+                {/* Imagen Capturada */}
+                <div className="relative flex-1 bg-slate-100 overflow-hidden">
+                  <img src={URL.createObjectURL(photoBlob)} className="w-full h-full object-cover" alt="Preview" />
+                  
+                  {/* Overlay de Ubicación (LO QUE PEDISTE) */}
+                  <div className="absolute bottom-4 left-4 right-4 bg-black/60 backdrop-blur-md p-3 rounded-xl flex items-center gap-3 text-white">
+                    <div className="bg-green-500 p-1.5 rounded-full animate-pulse">
+                      <MapPin size={16} fill="currentColor" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-green-400">Ubicación Detectada</p>
+                      <p className="text-xs font-mono opacity-90 truncate max-w-[200px]">{location}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botones de Acción */}
+                <div className="p-6 bg-white flex flex-col gap-3 border-t border-slate-100">
+                  <p className="text-center text-slate-500 text-xs font-medium mb-1">
+                    ¿La foto es clara y visible?
+                  </p>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => setPhotoBlob(null)} 
+                      className="flex-1 py-4 text-slate-600 font-bold bg-slate-50 border border-slate-200 rounded-2xl text-sm active:scale-95 transition-transform"
+                    >
+                      Repetir
+                    </button>
+                    <button 
+                      onClick={submitAttendance} 
+                      disabled={loading} 
+                      className="flex-1 py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg shadow-blue-900/20 active:scale-95 transition-transform"
+                    >
+                      {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Confirmar'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <canvas ref={canvasRef} className="hidden" />
+          </motion.div>
+        )}
+
+        {/* PASO 3: ÉXITO */}
+        {step === 'success' && (
+          <motion.div 
+            key="success"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20 shadow-xl"
+          >
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
+              <CheckCircle size={40} strokeWidth={3} />
+            </div>
+            
+            <h2 className="text-2xl font-bold text-slate-800">¡Registrado!</h2>
+            <p className="text-slate-500 text-sm mt-2 mb-8">
+              Tu asistencia se ha guardado correctamente.
+            </p>
+            
+            <button 
+              onClick={goBackToDashboard} 
+              className="w-full py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm shadow-md active:scale-95 transition-transform"
+            >
+              Volver al Inicio
+            </button>
+          </motion.div>
+        )}
+
+      </AnimatePresence>
+    </div>
   );
 };
 
-export default AddWorkerModal;
+export default WorkerAttendance;
