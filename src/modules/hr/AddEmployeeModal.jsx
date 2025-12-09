@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, Loader2, User, FileBadge, 
-  Briefcase, Calendar, DollarSign, Hashtag 
+  Briefcase, Calendar, DollarSign, Hash // CORREGIDO: Se cambió 'Hashtag' por 'Hash'
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
@@ -11,17 +11,17 @@ const modalVariants = {
   hidden: { 
     opacity: 0, 
     scale: 0.8,
-    y: -30 // Empieza un poco más arriba
+    y: -30 
   },
   visible: { 
     opacity: 1, 
     scale: 1,
     y: 0,
     transition: { 
-      type: "spring", // Tipo resorte
-      stiffness: 350, // Tensión (más alto = más rápido/rígido)
-      damping: 25,    // Resistencia (más bajo = más rebote)
-      mass: 0.8       // Peso
+      type: "spring", 
+      stiffness: 350, 
+      damping: 25,    
+      mass: 0.8       
     }
   },
   exit: {
@@ -35,7 +35,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     full_name: '',
-    document_type: 'DNI', // Valor por defecto
+    document_type: 'DNI', 
     document_number: '',
     position: '',
     entry_date: '',
@@ -51,7 +51,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
     setLoading(true);
 
     try {
-      // Enviamos los datos, incluyendo el nuevo document_type
       const { error } = await supabase
         .from('employees')
         .insert([formData]);
@@ -67,18 +66,16 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
         entry_date: '', 
         salary: '' 
       });
-      onSuccess(); // Recargar tabla padre
-      onClose();   // Cerrar modal
+      onSuccess(); 
+      onClose();   
     } catch (error) {
       console.error('Error:', error.message);
-      // Aquí podrías usar un toast notification en lugar de alert
       alert('Error al guardar: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Usamos AnimatePresence para que la animación de salida funcione
   return (
     <AnimatePresence>
       {isOpen && (
@@ -90,7 +87,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-[#0F172A]/60 backdrop-blur-sm transition-all"
-            onClick={onClose} // Cerrar al hacer clic fuera
+            onClick={onClose} 
           />
 
           {/* Contenedor del Modal */}
@@ -100,7 +97,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
             animate="visible"
             exit="exit"
             className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden my-8"
-            onClick={(e) => e.stopPropagation()} // Evitar cerrar al hacer clic dentro
+            onClick={(e) => e.stopPropagation()} 
           >
             {/* Header Premium */}
             <div className="bg-[#0F172A] px-8 py-5 flex justify-between items-center relative overflow-hidden">
@@ -164,7 +161,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
                     
                     {/* Input Número Documento */}
                     <div className="col-span-2 relative">
-                      <Hashtag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      {/* CORREGIDO: Se usa el componente Hash en lugar de Hashtag */}
+                      <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
                         name="document_number" 
                         required
