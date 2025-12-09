@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { 
   Edit2, Save, Camera, Lock, Trash2, UserX, Loader2
 } from 'lucide-react';
@@ -8,6 +9,7 @@ import { supabase } from '../../services/supabase';
 import { compressImage } from '../../utils/imageCompressor';
 
 const UserProfilePage = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -33,30 +35,38 @@ const UserProfilePage = () => {
     avatar_url: '' 
   });
 
-  // Cargar perfil al inicio
+  // --- 1. CARGA DE PERFIL BLINDADA ---
   const fetchProfile = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // Obtenemos la sesión actual
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
       
-      if (user) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
+      // Si no hay usuario o hay error de auth, redirigir al login
+      if (authError || !user) {
+        console.warn("No se detectó sesión activa. Redirigiendo...");
+        navigate('/'); 
+        return;
+      }
 
-        if (data) {
-          setProfile(data);
-        } else {
-          setProfile(prev => ({
-            ...prev,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || ''
-          }));
-        }
+      // Intentar buscar el perfil en la tabla
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (data) {
+        setProfile(data);
+      } else {
+        // Si no existe perfil en DB, usamos los datos básicos de la cuenta
+        setProfile(prev => ({
+          ...prev,
+          email: user.email || '',
+          full_name: user.user_metadata?.full_name || ''
+        }));
       }
     } catch (error) {
-      console.error('Error cargando perfil:', error);
+      console.error('Error general cargando perfil:', error);
     } finally {
       setLoading(false);
     }
@@ -66,7 +76,7 @@ const UserProfilePage = () => {
     fetchProfile();
   }, []);
 
-  // --- MANEJO DE FOTO DE PERFIL ---
+  // --- 2. MANEJO DE FOTO (CORREGIDO) ---
   const handleAvatarClick = () => {
     fileInputRef.current.click();
   };
@@ -78,12 +88,15 @@ const UserProfilePage = () => {
 
       setUploading(true);
 
-      // 1. Comprimir
-      const compressedFile = await compressImage(file);
-
-      // 2. Subir
+      // Verificación de seguridad antes de procesar
       const { data: { user } } = await supabase.auth.getUser();
-      // Usamos un timestamp para evitar caché del navegador
+      if (!user) {
+        alert("Tu sesión ha expirado. Por favor inicia sesión nuevamente.");
+        navigate('/');
+        return;
+      }
+
+      const compressedFile = await compressImage(file);
       const fileName = `${user.id}-${Date.now()}.jpg`;
 
       const { error: uploadError } = await supabase.storage
@@ -95,63 +108,70 @@ const UserProfilePage = () => {
 
       if (uploadError) throw uploadError;
 
-      // 3. Obtener URL Pública
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(fileName);
 
-      // 4. Guardar URL en DB
+      // Actualizar DB con el ID seguro
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', user.id);
+        .upsert({ 
+            id: user.id, 
+            avatar_url: publicUrl,
+            updated_at: new Date()
+        });
 
       if (updateError) throw updateError;
 
-      // 5. Actualizar estado local
       setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
       
-      // Disparar evento para que el Layout se entere (opcional, pero útil)
+      // Notificar al resto de la app
       window.dispatchEvent(new Event('profileUpdated'));
       
       alert("¡Foto actualizada correctamente!");
 
     } catch (error) {
       console.error('Error subiendo foto:', error);
-      alert('Error al subir la imagen. Verifica que el bucket "avatars" sea PÚBLICO.');
+      alert('Error al subir la imagen. Verifica tu conexión.');
     } finally {
       setUploading(false);
     }
   };
 
-  // --- GUARDAR DATOS ---
+  // --- 3. GUARDAR DATOS (CORREGIDO) ---
   const handleUpdate = async (section) => {
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No hay usuario autenticado");
+      
+      if (!user) {
+        alert("No hay usuario autenticado. Recarga la página.");
+        return;
+      }
 
       const cleanProfile = {
         ...profile,
+        id: user.id, // Forzamos el ID del usuario autenticado
         entry_date: profile.entry_date === '' ? null : profile.entry_date,
         birth_date: profile.birth_date === '' ? null : profile.birth_date,
         team_size: Number(profile.team_size) || 0,
-        experience_years: Number(profile.experience_years) || 0
+        experience_years: Number(profile.experience_years) || 0,
+        updated_at: new Date()
       };
 
       const { error } = await supabase
         .from('profiles')
-        .upsert({ id: user.id, ...cleanProfile, updated_at: new Date() });
+        .upsert(cleanProfile);
 
       if (error) throw error;
       
       if (section === 'personal') setIsEditingPersonal(false);
       if (section === 'work') setIsEditingWork(false);
       
-      // Actualizar estado local explícitamente con los datos limpios
+      // Actualizamos estado local para reflejar cambios
       setProfile(cleanProfile);
       
-      // Disparar evento global para actualizar el Layout
+      // Evento para actualizar el Sidebar
       window.dispatchEvent(new Event('profileUpdated'));
       
       alert("¡Datos guardados con éxito!");
@@ -186,13 +206,14 @@ const UserProfilePage = () => {
           
           <div className="relative mb-4 group cursor-pointer" onClick={handleAvatarClick}>
             <div className={`p-1 rounded-full border-4 border-slate-50 ${uploading ? 'opacity-50' : ''}`}>
+               {/* CORRECCIÓN: Usamos imgProps en lugar de srcProps */}
                <Avatar 
                  key={profile.avatar_url} 
                  src={profile.avatar_url} 
                  className="w-32 h-32 text-large" 
                  showFallback
                  name={profile.full_name} 
-                 srcProps={{ referrerPolicy: "no-referrer" }} 
+                 imgProps={{ referrerPolicy: "no-referrer" }} 
                />
             </div>
             <div className="absolute bottom-2 right-2 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-600 hover:text-[#0F172A] transition-colors">
@@ -207,7 +228,7 @@ const UserProfilePage = () => {
             />
           </div>
 
-          <h2 className="text-2xl font-bold text-slate-800">{profile.full_name || 'Usuario'}</h2>
+          <h2 className="text-2xl font-bold text-slate-800 capitalize">{profile.full_name || 'Usuario'}</h2>
           <p className="text-slate-400 text-sm mt-1">{profile.email}</p>
           
           <div className="mt-4 mb-8">
@@ -322,6 +343,7 @@ const UserProfilePage = () => {
   );
 };
 
+// Componente Field Helper
 const Field = ({ label, name, value, onChange, isEditing, type = "text", suffix = "" }) => (
   <div className="flex flex-col gap-2">
     <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400">{label}</label>
