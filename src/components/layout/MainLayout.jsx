@@ -1,143 +1,210 @@
-import React, { useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
-
-// Tu logo
+import React, { useState, useEffect } from 'react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { motion } from "framer-motion";
+import { 
+  LayoutDashboard, 
+  Building2, 
+  Users, 
+  FileText, 
+  Settings, 
+  LogOut,
+  Briefcase,
+  Bell,
+  ChevronDown
+} from 'lucide-react';
+import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
+import { supabase } from '../../services/supabase'; // Importante importar supabase
+
+const navItems = [
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/proyectos', icon: Building2, label: 'Proyectos' },
+  { path: '/users', icon: Users, label: 'Recursos Humanos' },
+  { path: '/finanzas', icon: Briefcase, label: 'Contabilidad' },
+  { path: '/reportes', icon: FileText, label: 'Reportes' },
+];
 
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  
+  // Estado para guardar la info básica del usuario actual (nombre y foto)
+  const [currentUser, setCurrentUser] = useState({
+    name: 'Cargando...',
+    role: 'Usuario',
+    avatar_url: ''
+  });
 
-  const handleLogout = async () => {
+  // Función para cargar los datos del usuario actual
+  const fetchCurrentUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('full_name, role, avatar_url')
+          .eq('id', user.id)
+          .single();
+        
+        if (data) {
+          setCurrentUser({
+            name: data.full_name || user.email,
+            role: data.role || 'Colaborador',
+            avatar_url: data.avatar_url
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching user for layout:", error);
+    }
+  };
+
+  useEffect(() => {
+    // 1. Cargar datos al montar
+    fetchCurrentUser();
+
+    // 2. Escuchar evento personalizado para actualizar si se edita el perfil
+    window.addEventListener('profileUpdated', fetchCurrentUser);
+
+    // Limpieza
+    return () => {
+      window.removeEventListener('profileUpdated', fetchCurrentUser);
+    };
+  }, []);
+
+  const handleLogout = () => {
     setIsLoggingOut(true);
     setTimeout(async () => {
       await supabase.auth.signOut();
       navigate('/');
-    }, 2000);
+    }, 1500);
   };
 
   return (
-    // FONDO GENERAL: Azul Oscuro de la marca (actúa como fondo del Sidebar)
-    <div className="flex h-screen bg-lk-darkblue font-sans overflow-hidden relative">
+    <div className="flex h-screen bg-[#F1F5F9] p-3 gap-3 font-sans overflow-hidden">
       
-      {/* --- PANTALLA DE SALIDA (Overlay) --- */}
-      <div className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-lk-darkblue text-white transition-all duration-700 ${isLoggingOut ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-lk-blue/40 via-lk-darkblue to-lk-darkblue"></div>
-         <div className="relative z-10 flex flex-col items-center animate-pulse">
-            <img src={logoFull} alt="L&K" className="h-24 object-contain mb-6 drop-shadow-2xl brightness-0 invert" />
-            <h2 className="text-3xl font-bold">Cerrando sesión...</h2>
-         </div>
-      </div>
-
-      {/* --- SIDEBAR (Izquierda) --- */}
-      <aside className="w-72 flex flex-col py-6 z-10">
-        
-        {/* Logo L&K en blanco */}
-        <div className="px-8 mb-10 flex items-center gap-3">
-           <img src={logoFull} alt="L&K" className="h-10 object-contain brightness-0 invert" />
-           <div className="text-white">
-             <h1 className="font-bold text-lg leading-tight">L&K</h1>
-             <p className="text-[10px] opacity-70 tracking-widest uppercase">Constructora</p>
-           </div>
+      {/* --- SIDEBAR FLOTANTE --- */}
+      <motion.aside 
+        initial={{ x: -20, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ duration: 0.4 }}
+        className="w-72 bg-[#0F172A] rounded-2xl flex flex-col shadow-xl z-20 relative overflow-hidden"
+      >
+        <div className="p-6 flex justify-center items-center h-20 border-b border-white/5">
+          <img 
+            src={logoFull} 
+            alt="L&K Logo" 
+            className="h-10 object-contain brightness-0 invert" 
+          />
         </div>
 
-        {/* Menú de Navegación */}
-        <nav className="flex-1 px-4 space-y-3">
-          <NavItem to="/dashboard" icon={<HomeIcon />} label="Panel Principal" active={location.pathname === '/dashboard'} />
-          <NavItem to="/projects" icon={<HardHatIcon />} label="Proyectos" active={location.pathname === '/projects'} />
-          <NavItem to="/users" icon={<UsersIcon />} label="Personal" active={location.pathname === '/users'} />
-          <NavItem to="/cashflow" icon={<CashIcon />} label="Finanzas" active={location.pathname === '/cashflow'} />
-          <NavItem to="/tickets" icon={<ClipboardIcon />} label="Reportes" active={location.pathname === '/tickets'} />
+        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
+          {navItems.map((item) => {
+            const isActive = location.pathname === item.path;
+            return (
+              <NavLink 
+                key={item.path} 
+                to={item.path} 
+                className="block relative group"
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="active-pill"
+                    className="absolute inset-0 bg-white rounded-xl shadow-md"
+                    initial={false}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  />
+                )}
+                
+                <div className={`relative z-10 flex items-center gap-3 px-4 py-3 transition-colors duration-200 ${isActive ? 'text-[#0F172A]' : 'text-slate-400 group-hover:text-white'}`}>
+                  <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                  <span className={`text-sm font-medium tracking-wide ${isActive ? 'font-bold' : ''}`}>
+                    {item.label}
+                  </span>
+                </div>
+              </NavLink>
+            );
+          })}
         </nav>
 
-        {/* Soporte / Logout Abajo */}
-        <div className="px-4 mt-auto">
-          <div className="bg-lk-blue/20 rounded-2xl p-4 mb-4 text-center">
-             <div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 text-lk-accent">
-               <SupportIcon />
-             </div>
-             <p className="text-white text-xs font-medium mb-2">¿Necesitas ayuda?</p>
-             <button className="text-xs text-lk-accent hover:text-white transition">Contactar Soporte</button>
-          </div>
-          
-          <button onClick={handleLogout} className="flex items-center w-full px-6 py-3 text-sm font-medium text-red-200 hover:bg-white/5 rounded-xl transition-colors">
-            <LogoutIcon />
-            <span className="ml-3">Salir del Sistema</span>
-          </button>
+        <div className="p-4 border-t border-white/5 bg-[#0b1120]">
+           <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
+              <Settings size={20} />
+              <span className="text-sm font-medium">Configuración</span>
+           </NavLink>
+           <button 
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl"
+           >
+              <LogOut size={20} />
+              <span className="text-sm font-medium">Cerrar Sesión</span>
+           </button>
         </div>
-      </aside>
+      </motion.aside>
 
-      {/* --- CONTENIDO PRINCIPAL (Derecha) --- */}
-      {/* CLAVE DEL DISEÑO: 'rounded-l-[40px]' 
-          Esto crea la curva grande en la esquina superior e inferior izquierda,
-          dando el efecto de "tarjeta flotante" sobre el fondo azul.
-      */}
-      <main className="flex-1 bg-[#F3F4F6] h-screen relative rounded-l-[40px] shadow-2xl overflow-hidden flex flex-col">
-        {/* Header Superior (Dentro del área blanca) */}
-        <header className="px-8 py-6 flex justify-between items-center bg-white/50 backdrop-blur-sm sticky top-0 z-20">
+      {/* --- CONTENIDO PRINCIPAL --- */}
+      <main className="flex-1 h-full flex flex-col overflow-hidden relative">
+        
+        {/* Header Superior */}
+        <header className="h-20 flex justify-between items-center px-6 bg-transparent shrink-0">
            <div>
-             <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
-             <p className="text-sm text-gray-500">Bienvenido al panel de control</p>
+             <h1 className="text-2xl font-bold text-slate-800">
+                {navItems.find(item => item.path === location.pathname)?.label || 'Panel de Control'}
+             </h1>
            </div>
            
            <div className="flex items-center gap-4">
-             {/* Botón de Notificación */}
-             <button className="p-2 text-gray-400 hover:text-lk-blue transition relative">
-                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-                <BellIcon />
-             </button>
-             {/* Perfil */}
-             <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-                <div className="text-right hidden md:block">
-                  <p className="text-sm font-bold text-gray-700">Admin L&K</p>
-                  <p className="text-xs text-gray-400">Ingeniero Residente</p>
+              <button className="relative p-2.5 bg-white rounded-xl text-slate-500 hover:text-[#0F172A] shadow-sm hover:shadow transition-all">
+                <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white"></span>
+                <Bell size={20} />
+              </button>
+
+              {/* Perfil Usuario (DINÁMICO) */}
+              <div 
+                onClick={() => navigate('/profile')} 
+                className="flex items-center gap-3 bg-white pl-2 pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group"
+                title="Ver mi perfil"
+              >
+                <Avatar 
+                  key={currentUser.avatar_url} // Forzar re-render si cambia la foto
+                  src={currentUser.avatar_url} 
+                  name={currentUser.name}
+                  className="w-9 h-9 ring-2 ring-transparent group-hover:ring-[#0F172A]/10 transition-all"
+                />
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">
+                    {currentUser.name}
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    {currentUser.role}
+                  </p>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-lk-darkblue text-white flex items-center justify-center font-bold shadow-lg border-2 border-white">
-                  A
-                </div>
-             </div>
+                <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+              </div>
            </div>
         </header>
 
-        {/* Área scrolleable para las páginas */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto px-6 pb-6 scrollbar-hide">
            <Outlet />
         </div>
       </main>
 
+      {/* Overlay Logout */}
+      {isLoggingOut && (
+        <motion.div 
+          initial={{ opacity: 0 }} 
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-50 flex items-center justify-center"
+        >
+           <div className="text-center">
+              <div className="w-12 h-12 border-4 border-t-white border-white/20 rounded-full animate-spin mx-auto mb-4"></div>
+              <h2 className="text-white text-lg font-medium tracking-wide">Cerrando sesión...</h2>
+           </div>
+        </motion.div>
+      )}
     </div>
   );
 };
-
-// --- Componente de Item de Menú (Estilo Pill) ---
-const NavItem = ({ icon, label, to, active }) => {
-    const navigate = useNavigate();
-    return (
-      <div 
-        onClick={() => navigate(to)}
-        className={`flex items-center px-6 py-4 cursor-pointer transition-all duration-300 rounded-2xl group
-        ${active 
-            ? 'bg-white text-lk-darkblue shadow-lg translate-x-2' // Activo: Blanco, texto azul, desplazado
-            : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}
-      >
-        <span className={`text-xl ${active ? 'text-lk-accent' : 'text-gray-400 group-hover:text-white'}`}>
-            {icon}
-        </span>
-        <span className="ml-4 font-medium tracking-wide">{label}</span>
-      </div>
-    )
-};
-
-// Iconos (Simples SVG)
-const HomeIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
-const HardHatIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>;
-const UsersIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
-const CashIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-const ClipboardIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
-const LogoutIcon = () => <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>;
-const BellIcon = () => <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>;
-const SupportIcon = () => <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
 
 export default MainLayout;

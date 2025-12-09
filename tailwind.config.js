@@ -1,4 +1,3 @@
-// tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -7,6 +6,10 @@ export default {
   ],
   theme: {
     extend: {
+      // AQUÍ AGREGAMOS LA FUENTE
+      fontFamily: {
+        sans: ['Comfortaa', 'sans-serif'], // Esto reemplaza la fuente por defecto
+      },
       colors: {
         // Tus colores personalizados (MANTENLOS)
         lk: {
@@ -16,21 +19,16 @@ export default {
           green: '#4caf50',
         }
       },
-      // --- NUEVO: DEFINICIÓN DE LA ANIMACIÓN ---
+      // Tus animaciones (MANTENLAS)
       keyframes: {
-        // Definimos un movimiento sutil de escala (zoom)
         'slow-pan': {
           '0%': { transform: 'scale(1)' },
-          '100%': { transform: 'scale(1.1)' }, // Aumenta un 10% el tamaño
+          '100%': { transform: 'scale(1.1)' },
         }
       },
       animation: {
-        // Creamos la clase de utilidad.
-        // 30s: dura 30 segundos. linear: velocidad constante.
-        // infinite: se repite por siempre. alternate: va y vuelve.
         'slow-pan': 'slow-pan 30s linear infinite alternate',
       }
-      // ------------------------------------------
     },
   },
   plugins: [],
