@@ -12,13 +12,14 @@ import DashboardPage from './modules/admin-control/DashboardPage';
 import UserProfilePage from './modules/admin-control/UserProfilePage';
 import ReportsPage from './modules/admin-control/ReportsPage';
 import HumanResourcesPage from './modules/hr/HumanResourcesPage';
-import ProjectsPage from './modules/projects/ProjectsPage'; // Módulo de Proyectos (Admin)
+import ProjectsPage from './modules/projects/ProjectsPage'; // Módulo de Proyectos
+import DocumentationPage from './modules/hr/DocumentationPage'; // Módulo de Documentación
 
 // Módulos del Panel de Obrero
 import WorkerDashboard from './modules/worker/WorkerDashboard';
 import WorkerAttendance from './modules/worker/WorkerAttendance';
-import WorkerProjectLog from './modules/worker/WorkerProjectLog'; // Bitácora Obrero
-import WorkerProjectView from './modules/worker/WorkerProjectView'; // Detalle Proyecto Obrero
+import WorkerProjectLog from './modules/worker/WorkerProjectLog';
+import WorkerProjectView from './modules/worker/WorkerProjectView';
 
 // Provider de Auth
 import { WorkerAuthProvider } from './context/WorkerAuthContext';
@@ -51,8 +52,9 @@ function App() {
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           
-          {/* Gestión de Recursos Humanos */}
+          {/* Gestión de Recursos Humanos (Submenús) */}
           <Route path="/users" element={<HumanResourcesPage />} />
+          <Route path="/documentacion" element={<DocumentationPage />} />
           
           {/* Perfil del Administrador */}
           <Route path="/profile" element={<UserProfilePage />} />
@@ -60,10 +62,10 @@ function App() {
           {/* Reportes de Asistencia */}
           <Route path="/reportes" element={<ReportsPage />} />
 
-          {/* Gestión de Proyectos (Admin: Cronograma, Bitácora, Galería) */}
+          {/* Gestión de Proyectos */}
           <Route path="/proyectos" element={<ProjectsPage />} />
 
-          {/* Placeholders para futuros módulos */}
+          {/* Placeholders */}
           <Route path="/finanzas" element={<div className="p-10 text-slate-400 font-bold text-xl">Módulo de Finanzas en construcción...</div>} />
           <Route path="/configuracion" element={<div className="p-10 text-slate-400 font-bold text-xl">Configuración del Sistema</div>} />
         </Route>
