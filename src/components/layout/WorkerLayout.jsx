@@ -1,29 +1,39 @@
 import React, { useEffect } from 'react';
-import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, MapPin, User, LogOut } from 'lucide-react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Home, MapPin, LogOut } from 'lucide-react';
+// [NUEVO] Importamos el hook
+import { useWorkerAuth } from '../../context/WorkerAuthContext';
 
 const WorkerLayout = () => {
-  const location = useLocation();
   const navigate = useNavigate();
-  // Recuperamos los datos del obrero pasados desde el Login
-  const workerData = location.state?.preloadedWorker;
+  // [NUEVO] Obtenemos el usuario y funciones desde el contexto
+  const { worker, logoutWorker, loading } = useWorkerAuth();
 
   useEffect(() => {
-    // Seguridad básica: Si no hay datos del obrero (por recargar página), volver al login
-    if (!workerData) {
+    // Si terminó de cargar y no hay usuario, mandar al login
+    if (!loading && !worker) {
       navigate('/');
     }
-  }, [workerData, navigate]);
+  }, [worker, loading, navigate]);
 
-  if (!workerData) return null;
+  // Pantalla de carga mientras verificamos el localStorage
+  if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400">Cargando sesión...</div>;
+  
+  // Si no hay obrero (y ya cargó), no mostramos nada para evitar parpadeos antes del redirect
+  if (!worker) return null;
+
+  const handleLogout = () => {
+    logoutWorker();
+    navigate('/');
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
       
       {/* --- CONTENIDO PRINCIPAL SCROLLEABLE --- */}
       <main className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
-        {/* Pasamos los datos del obrero a las páginas hijas (Dashboard, Asistencia) */}
-        <Outlet context={{ worker: workerData }} />
+        {/* Pasamos los datos del obrero a las páginas hijas vía Context de Outlet */}
+        <Outlet context={{ worker }} />
       </main>
 
       {/* --- BARRA DE NAVEGACIÓN INFERIOR (Bottom Tab Bar) --- */}
@@ -31,7 +41,6 @@ const WorkerLayout = () => {
         
         <NavLink 
           to="/worker/dashboard" 
-          state={{ preloadedWorker: workerData }} // Mantenemos el estado al navegar
           className={({ isActive }) => `flex flex-col items-center gap-1 transition-colors ${isActive ? 'text-[#003366]' : 'text-slate-400'}`}
         >
           <Home size={24} strokeWidth={2.5} />
@@ -42,20 +51,19 @@ const WorkerLayout = () => {
         <div className="relative -top-8">
           <NavLink 
             to="/worker/asistencia" 
-            state={{ preloadedWorker: workerData }}
             className="w-16 h-16 bg-[#003366] rounded-full flex items-center justify-center text-white shadow-lg shadow-blue-900/30 border-4 border-slate-50 transform transition-transform active:scale-95"
           >
             <MapPin size={28} />
           </NavLink>
         </div>
 
-        <NavLink 
-          to="/" // Botón de salir temporal
+        <button 
+          onClick={handleLogout}
           className="flex flex-col items-center gap-1 text-slate-400 hover:text-red-500 transition-colors"
         >
           <LogOut size={24} strokeWidth={2.5} />
           <span className="text-[10px] font-bold">Salir</span>
-        </NavLink>
+        </button>
       </div>
     </div>
   );

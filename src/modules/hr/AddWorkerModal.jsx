@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, Loader2, User, FileBadge, 
-  HardHat, Calendar, MapPin, Hash
+  HardHat, Calendar, MapPin, Hash, DollarSign
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import bcrypt from 'bcryptjs';
 
 // Variantes de animación estándar para el modal
 const overlayVariants = {
@@ -26,11 +27,13 @@ const modalVariants = {
 
 const AddWorkerModal = ({ isOpen, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
+  
   // Estado para los datos del obrero
   const [formData, setFormData] = useState({
     full_name: '',
     document_number: '',
     category: 'Peón', // Valor por defecto
+    weekly_rate: '',  // [NUEVO] Campo para el sueldo semanal
     project_assigned: '',
     start_date: '',
     status: 'Activo',
@@ -46,27 +49,41 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess }) => {
     setLoading(true);
 
     try {
-      // Insertar en la tabla 'workers'
+      // 1. Encriptación de contraseña
+      const rawPassword = formData.password || formData.document_number;
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(rawPassword, salt);
+
+      // 2. Preparar datos (convertir sueldo a número)
+      const dataToSubmit = {
+        ...formData,
+        weekly_rate: parseFloat(formData.weekly_rate) || 0, // Asegurar que sea número
+        password: hashedPassword 
+      };
+
+      // 3. Insertar en la tabla 'workers'
       const { error } = await supabase
         .from('workers')
-        .insert([{
-            ...formData,
-            // Si no ponen contraseña, se usa el DNI
-            password: formData.password || formData.document_number 
-        }]);
+        .insert([dataToSubmit]);
 
       if (error) throw error;
 
+      // Limpiar formulario
       setFormData({ 
-        full_name: '', document_number: '', category: 'Peón', 
-        project_assigned: '', start_date: '', status: 'Activo', password: ''
+        full_name: '', 
+        document_number: '', 
+        category: 'Peón', 
+        weekly_rate: '', 
+        project_assigned: '', 
+        start_date: '', 
+        status: 'Activo', 
+        password: ''
       });
       
       onSuccess();
       onClose();
     } catch (error) {
       console.error('Error:', error.message);
-      // Aquí podrías usar un toast notification en lugar de alert
       alert('Error al guardar: ' + error.message);
     } finally {
       setLoading(false);
@@ -203,6 +220,24 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess }) => {
                             </div>
                         </div>
                     </div>
+
+                    {/* [NUEVO] Campo Sueldo Semanal */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">Jornal Semanal (S/)</label>
+                        <div className="relative">
+                            <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <input 
+                            name="weekly_rate" 
+                            type="number"
+                            required
+                            step="0.01"
+                            value={formData.weekly_rate}
+                            onChange={handleChange}
+                            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all placeholder:text-slate-400"
+                            placeholder="0.00"
+                            />
+                        </div>
+                    </div>
                     
                     {/* Fecha Inicio */}
                     <div className="space-y-2">
@@ -223,8 +258,8 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess }) => {
                     </div>
 
                    {/* Proyecto Asignado */}
-                   <div className="md:col-span-2 space-y-2">
-                        <label className="text-sm font-medium text-slate-700">Obra / Proyecto Asignado</label>
+                   <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700">Obra / Proyecto</label>
                         <div className="relative">
                             <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                             <input 

@@ -5,12 +5,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, User, KeyRound
 } from 'lucide-react';
+import bcrypt from 'bcryptjs';
+// [NUEVO] Usamos el hook del contexto
+import { useWorkerAuth } from '../../context/WorkerAuthContext';
 
 import logoFull from '../../assets/images/logo-lk-full.png';
 import bgImage from '../../assets/images/fondo-login.jpg';
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const { loginWorker } = useWorkerAuth(); // [NUEVO] Extraemos la función login
   
   // Estado para el modo de login: 'admin' | 'worker'
   const [loginMode, setLoginMode] = useState('admin');
@@ -24,13 +28,13 @@ const LoginPage = () => {
   const [workerPassword, setWorkerPassword] = useState('');
   
   // Estados de UI
-  const [showPassword, setShowPassword] = useState(false); // Para admin
-  const [showWorkerPassword, setShowWorkerPassword] = useState(false); // Para obrero
+  const [showPassword, setShowPassword] = useState(false);
+  const [showWorkerPassword, setShowWorkerPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
 
-  // --- LOGIN ADMINISTRATIVO (Correo y Contraseña) ---
+  // --- LOGIN ADMINISTRATIVO ---
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -55,33 +59,40 @@ const LoginPage = () => {
     }
   };
 
-  // --- LOGIN OBRERO (DNI + Contraseña) ---
+  // --- LOGIN OBRERO (CON CONTEXTO Y HASH) ---
   const handleWorkerSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      // Validar credenciales en la tabla workers
+      // 1. Buscar al obrero
       const { data, error } = await supabase
         .from('workers')
         .select('*')
         .eq('document_number', dni)
-        .eq('password', workerPassword) // Verificamos que la contraseña coincida
-        .single();
+        .maybeSingle();
 
       if (error || !data) {
-        // Mensaje genérico por seguridad
-        throw new Error('Documento o contraseña incorrectos.');
+        throw new Error('Documento no encontrado o credenciales incorrectas.');
       }
 
-      // Si es correcto, verificar estado del obrero
+      // 2. Verificar contraseña (HASH)
+      const isMatch = await bcrypt.compare(workerPassword, data.password);
+      if (!isMatch) {
+        throw new Error('Contraseña incorrecta.');
+      }
+
+      // 3. Verificar estado
       if (data.status !== 'Activo') {
         throw new Error('Usuario inactivo. Contacte a RR.HH.');
       }
 
-      // Login exitoso -> Redirigir al Dashboard del Obrero
-      navigate('/worker/dashboard', { state: { preloadedWorker: data } });
+      // 4. [CAMBIO] Guardar sesión en Contexto/LocalStorage
+      loginWorker(data);
+
+      // 5. Redirigir (ya no enviamos state)
+      navigate('/worker/dashboard');
 
     } catch (error) {
       console.error(error);
@@ -90,12 +101,10 @@ const LoginPage = () => {
     }
   };
 
+  // ... (El resto del return del componente se mantiene IDÉNTICO, solo cambiamos la lógica arriba)
   return (
     <div className="h-screen w-full flex overflow-hidden bg-white relative font-sans">
       
-      {/* ========================================================= */}
-      {/* PANTALLA DE BIENVENIDA (Transición Admin)                 */}
-      {/* ========================================================= */}
       <AnimatePresence>
         {showWelcome && (
           <motion.div 
@@ -121,9 +130,6 @@ const LoginPage = () => {
         )}
       </AnimatePresence>
 
-      {/* ========================================================= */}
-      {/* LADO IZQUIERDO: Imagen y Branding                         */}
-      {/* ========================================================= */}
       <div className="hidden md:block md:w-[60%] relative h-full overflow-hidden">
         <img 
           src={bgImage} 
@@ -145,13 +151,8 @@ const LoginPage = () => {
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* LADO DERECHO: Formulario Dinámico                         */}
-      {/* ========================================================= */}
       <div className="w-full md:w-[45%] h-full bg-white flex flex-col justify-center p-8 md:p-12 lg:p-20 relative z-10 md:rounded-l-[4rem] md:-ml-24 shadow-2xl">
-        
         <div className="w-full max-w-md mx-auto">
-          {/* Logo Móvil */}
           <div className="md:hidden text-center mb-8">
             <img src={logoFull} alt="L&K Logo" className="h-16 mx-auto" />
           </div>
@@ -161,7 +162,6 @@ const LoginPage = () => {
             <p className="text-gray-500 mt-2 text-lg">Seleccione su tipo de perfil para continuar.</p>
           </div>
 
-          {/* SELECTOR DE MODO (TABS) */}
           <div className="bg-slate-100 p-1.5 rounded-2xl flex mb-8">
             <button
               onClick={() => { setLoginMode('admin'); setErrorMsg(null); }}
@@ -185,7 +185,6 @@ const LoginPage = () => {
             </button>
           </div>
 
-          {/* MENSAJES DE ERROR */}
           <AnimatePresence>
             {errorMsg && (
               <motion.div 
@@ -200,7 +199,6 @@ const LoginPage = () => {
             )}
           </AnimatePresence>
 
-          {/* --- FORMULARIO ADMINISTRATIVO --- */}
           {loginMode === 'admin' && (
             <motion.form 
               initial={{ opacity: 0, x: -20 }}
@@ -264,7 +262,6 @@ const LoginPage = () => {
             </motion.form>
           )}
 
-          {/* --- FORMULARIO OBRERO --- */}
           {loginMode === 'worker' && (
             <motion.form 
               initial={{ opacity: 0, x: 20 }}
@@ -279,7 +276,6 @@ const LoginPage = () => {
               </div>
 
               <div className="space-y-5">
-                {/* Input DNI Obrero */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Documento (DNI/CE)</label>
                   <div className="relative group">
@@ -289,14 +285,13 @@ const LoginPage = () => {
                       required
                       maxLength={15}
                       value={dni}
-                      onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))} // Solo números
+                      onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))}
                       className="block w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-100 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-lk-blue focus:bg-white focus:ring-0 transition-all font-bold text-lg tracking-widest"
                       placeholder="00000000"
                     />
                   </div>
                 </div>
 
-                {/* Input Password Obrero */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Contraseña</label>
                   <div className="relative group">

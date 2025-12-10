@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft, AlertCircle 
+  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft
 } from 'lucide-react';
-import { supabase } from '../../services/supabase';
-import { compressImage } from '../../utils/imageCompressor';
-import logoFull from '../../assets/images/logo-lk-full.png';
+import { supabase } from '../../services/supabase'; //
+import { compressImage } from '../../utils/imageCompressor'; //
+import logoFull from '../../assets/images/logo-lk-full.png'; //
 
 const WorkerAttendance = () => {
   const contextData = useOutletContext();
@@ -14,7 +14,6 @@ const WorkerAttendance = () => {
   const navigate = useNavigate();
 
   const [step, setStep] = useState(workerFromContext ? 'confirm' : 'search'); 
-  const [dni, setDni] = useState(workerFromContext?.document_number || '');
   const [worker, setWorker] = useState(workerFromContext);
   
   const [attendanceToday, setAttendanceToday] = useState(null); 
@@ -105,6 +104,7 @@ const WorkerAttendance = () => {
         if (!blob) return;
         const file = new File([blob], "foto.jpg", { type: "image/jpeg" });
         try {
+          // Comprimimos la foto antes de guardarla en el estado
           const compressed = await compressImage(file);
           setPhotoBlob(compressed);
           const stream = video.srcObject;
@@ -124,6 +124,7 @@ const WorkerAttendance = () => {
       const timestamp = Date.now();
       const fileName = `${worker.document_number}_${actionType}_${timestamp}.jpg`;
       
+      // 1. Subir Foto Comprimida
       const { error: uploadError } = await supabase.storage
         .from('attendance-photos')
         .upload(fileName, photoBlob);
@@ -136,6 +137,7 @@ const WorkerAttendance = () => {
 
       const now = new Date().toISOString(); 
 
+      // 2. Guardar registro en BD (Incluyendo el nombre del proyecto)
       if (actionType === 'CHECK_IN') {
         const { error: insertError } = await supabase
           .from('attendance')
@@ -144,11 +146,13 @@ const WorkerAttendance = () => {
             date: new Date().toISOString().split('T')[0],
             check_in_time: now,
             check_in_photo: publicUrl,
-            check_in_location: location
+            check_in_location: location,
+            project_name: worker.project_assigned // [IMPORTANTE] Guardamos el proyecto actual
           }]);
         if (insertError) throw insertError;
       } else {
         if (!attendanceToday) throw new Error("No hay registro de entrada.");
+        // Al marcar salida, solo actualizamos hora y foto de salida
         const { error: updateError } = await supabase
           .from('attendance')
           .update({
@@ -169,17 +173,16 @@ const WorkerAttendance = () => {
   };
 
   const goBackToDashboard = () => {
-    navigate('/worker/dashboard', { state: { preloadedWorker: worker } });
+    navigate('/worker/dashboard');
   };
 
   return (
-    // AJUSTE 1: Centrado vertical (justify-center) y fondo limpio
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
       
-      {/* Fondo Azul Curvo Superior (Más alto para cubrir el logo cómodamente) */}
+      {/* Fondo Azul Curvo Superior */}
       <div className="absolute top-0 left-0 w-full h-[45vh] bg-[#003366] rounded-b-[4rem] z-0"></div>
       
-      {/* Logo Header - Posicionado absolutamente para estar siempre arriba en lo azul */}
+      {/* Logo Header */}
       <div className="absolute top-12 z-10 w-full flex justify-center">
          <img src={logoFull} alt="L&K" className="h-20 brightness-0 invert opacity-90 drop-shadow-sm" />
       </div>
@@ -193,8 +196,7 @@ const WorkerAttendance = () => {
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -20, opacity: 0 }}
-            // AJUSTE 2: Diseño "Pegado atrás" (Sin sombra pesada, blanco limpio, estilo tarjeta nativa)
-            className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20"
+            className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20 shadow-xl"
           >
             <button 
               onClick={goBackToDashboard} 
@@ -206,13 +208,16 @@ const WorkerAttendance = () => {
             <div className="text-center mt-6">
               <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Registro Diario</h2>
               <p className="text-slate-500 text-sm mt-1">Selecciona tu acción para hoy</p>
+              {/* Mostramos el proyecto actual para confirmación visual */}
+              <div className="mt-2 inline-block px-3 py-1 bg-blue-50 text-[#003366] text-xs font-bold rounded-full border border-blue-100">
+                Obra: {worker.project_assigned || 'Sin Asignar'}
+              </div>
             </div>
 
             <div className="mt-8 space-y-5">
               {!attendanceToday ? (
                 <button 
                   onClick={() => startProcess('CHECK_IN')} 
-                  // AJUSTE 3: Botones más planos y elegantes
                   className="w-full py-6 bg-emerald-50 rounded-3xl border border-emerald-100 flex flex-col items-center gap-3 hover:bg-emerald-100 active:scale-95 transition-all group"
                 >
                   <div className="p-3 bg-white rounded-full text-emerald-600 shadow-sm">
@@ -322,7 +327,7 @@ const WorkerAttendance = () => {
             key="success"
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20"
+            className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20 shadow-xl"
           >
             <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
               <CheckCircle size={40} strokeWidth={3} />

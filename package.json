@@ -12,6 +12,7 @@
   "dependencies": {
     "@heroui/react": "^2.8.5",
     "@supabase/supabase-js": "^2.87.1",
+    "bcryptjs": "^3.0.3",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "framer-motion": "^12.23.25",
