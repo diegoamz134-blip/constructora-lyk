@@ -1,13 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, MapPin, LogOut } from 'lucide-react';
-// [NUEVO] Importamos el hook
+import { Home, MapPin, LogOut, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
+import logoFull from '../../assets/images/logo-lk-full.png';
 
 const WorkerLayout = () => {
   const navigate = useNavigate();
-  // [NUEVO] Obtenemos el usuario y funciones desde el contexto
   const { worker, logoutWorker, loading } = useWorkerAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     // Si terminó de cargar y no hay usuario, mandar al login
@@ -16,23 +17,48 @@ const WorkerLayout = () => {
     }
   }, [worker, loading, navigate]);
 
-  // Pantalla de carga mientras verificamos el localStorage
+  const handleLogout = () => {
+    setIsLoggingOut(true);
+    // Simular tiempo de carga para la animación de despedida
+    setTimeout(() => {
+      logoutWorker();
+      navigate('/');
+    }, 2000); // 2 segundos de despedida
+  };
+
+  // Pantalla de carga inicial mientras se recupera la sesión
   if (loading) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400">Cargando sesión...</div>;
   
-  // Si no hay obrero (y ya cargó), no mostramos nada para evitar parpadeos antes del redirect
   if (!worker) return null;
-
-  const handleLogout = () => {
-    logoutWorker();
-    navigate('/');
-  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
       
+      {/* --- OVERLAY DE SALIDA (DESPEDIDA) --- */}
+      <AnimatePresence>
+        {isLoggingOut && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#003366] text-white"
+          >
+             <motion.div 
+              initial={{ scale: 0.9, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              className="flex flex-col items-center p-6 text-center"
+            >
+              <img src={logoFull} alt="Logo" className="h-24 brightness-0 invert mb-6 opacity-90" />
+              <h2 className="text-2xl font-bold mb-2">¡Hasta luego, {worker.full_name.split(' ')[0]}!</h2>
+              <p className="text-blue-200 text-sm mb-8">Cerrando sesión de forma segura...</p>
+              <Loader2 className="animate-spin text-[#f0c419]" size={32} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* --- CONTENIDO PRINCIPAL SCROLLEABLE --- */}
       <main className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
-        {/* Pasamos los datos del obrero a las páginas hijas vía Context de Outlet */}
         <Outlet context={{ worker }} />
       </main>
 

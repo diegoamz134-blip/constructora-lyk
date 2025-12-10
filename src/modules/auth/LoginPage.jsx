@@ -33,7 +33,7 @@ const LoginPage = () => {
   const [errorMsg, setErrorMsg] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
 
-  // --- LÓGICA DE LOGIN (INTACTA) ---
+  // --- LÓGICA DE LOGIN ADMIN ---
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -47,6 +47,7 @@ const LoginPage = () => {
 
       if (error) throw error;
 
+      // Mostrar pantalla de bienvenida antes de redirigir
       setShowWelcome(true);
       setTimeout(() => {
         navigate('/dashboard');
@@ -58,6 +59,7 @@ const LoginPage = () => {
     }
   };
 
+  // --- LÓGICA DE LOGIN OBRERO ---
   const handleWorkerSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -77,8 +79,14 @@ const LoginPage = () => {
 
       if (data.status !== 'Activo') throw new Error('Usuario inactivo.');
 
+      // Guardar sesión en el contexto
       loginWorker(data);
-      navigate('/worker/dashboard');
+      
+      // Mostrar pantalla de bienvenida antes de redirigir
+      setShowWelcome(true);
+      setTimeout(() => {
+        navigate('/worker/dashboard');
+      }, 2000);
 
     } catch (error) {
       console.error(error);
@@ -91,7 +99,7 @@ const LoginPage = () => {
     <div className="min-h-screen w-full flex bg-gray-50 font-sans">
       
       {/* ========================================================= */}
-      {/* PANTALLA DE BIENVENIDA (Overlay)                          */}
+      {/* PANTALLA DE BIENVENIDA (Overlay Global)                   */}
       {/* ========================================================= */}
       <AnimatePresence>
         {showWelcome && (
@@ -223,7 +231,7 @@ const LoginPage = () => {
                     <input
                         type="email"
                         required
-                        autoComplete="email" // Permite autocompletar
+                        autoComplete="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all"
@@ -239,7 +247,7 @@ const LoginPage = () => {
                     <input
                         type={showPassword ? "text" : "password"}
                         required
-                        autoComplete="current-password" // Permite recordar contraseña
+                        autoComplete="current-password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="w-full pl-14 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all"
@@ -283,7 +291,7 @@ const LoginPage = () => {
                     <input
                         type="tel"
                         required
-                        autoComplete="username" // Ayuda al navegador a entender que es el usuario
+                        autoComplete="username"
                         maxLength={15}
                         value={dni}
                         onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))}
