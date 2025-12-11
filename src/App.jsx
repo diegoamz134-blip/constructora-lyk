@@ -6,14 +6,16 @@ import WorkerLayout from './components/layout/WorkerLayout';
 
 // Módulos de Autenticación
 import LoginPage from './modules/auth/LoginPage';
+// [CORRECCIÓN]: Importamos desde 'modules' en lugar de 'components'
+import AdminProtectedRoute from './modules/auth/AdminProtectedRoute'; 
 
 // Módulos del Panel Administrativo
 import DashboardPage from './modules/admin-control/DashboardPage';
 import UserProfilePage from './modules/admin-control/UserProfilePage';
 import ReportsPage from './modules/admin-control/ReportsPage';
 import HumanResourcesPage from './modules/hr/HumanResourcesPage';
-import ProjectsPage from './modules/projects/ProjectsPage'; // Módulo de Proyectos
-import DocumentationPage from './modules/hr/DocumentationPage'; // Módulo de Documentación
+import ProjectsPage from './modules/projects/ProjectsPage'; 
+import DocumentationPage from './modules/hr/DocumentationPage'; 
 
 // Módulos del Panel de Obrero
 import WorkerDashboard from './modules/worker/WorkerDashboard';
@@ -35,39 +37,35 @@ function App() {
         
         {/* 2. Rutas del Panel de Obrero (Layout Móvil) */}
         <Route path="/worker" element={<WorkerLayout />}>
-           {/* Pantalla Principal */}
            <Route path="dashboard" element={<WorkerDashboard />} />
-           
-           {/* Registro de Asistencia */}
            <Route path="asistencia" element={<WorkerAttendance />} />
-           
-           {/* Bitácora de Obra (Solo Capataz/Operario) */}
            <Route path="bitacora" element={<WorkerProjectLog />} />
-           
-           {/* Detalle de Mi Obra (Subir fotos, ver cronograma) */}
            <Route path="proyecto" element={<WorkerProjectView />} />
         </Route>
 
         {/* 3. Rutas del Panel Administrativo (Layout de Escritorio) */}
-        <Route element={<MainLayout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-          
-          {/* Gestión de Recursos Humanos (Submenús) */}
-          <Route path="/users" element={<HumanResourcesPage />} />
-          <Route path="/documentacion" element={<DocumentationPage />} />
-          
-          {/* Perfil del Administrador */}
-          <Route path="/profile" element={<UserProfilePage />} />
-          
-          {/* Reportes de Asistencia */}
-          <Route path="/reportes" element={<ReportsPage />} />
+        {/* Protegemos estas rutas con el componente que está en modules/auth */}
+        <Route element={<AdminProtectedRoute />}>
+          <Route element={<MainLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            
+            {/* Gestión de Recursos Humanos (Submenús) */}
+            <Route path="/users" element={<HumanResourcesPage />} />
+            <Route path="/documentacion" element={<DocumentationPage />} />
+            
+            {/* Perfil del Administrador */}
+            <Route path="/profile" element={<UserProfilePage />} />
+            
+            {/* Reportes de Asistencia */}
+            <Route path="/reportes" element={<ReportsPage />} />
 
-          {/* Gestión de Proyectos */}
-          <Route path="/proyectos" element={<ProjectsPage />} />
+            {/* Gestión de Proyectos */}
+            <Route path="/proyectos" element={<ProjectsPage />} />
 
-          {/* Placeholders */}
-          <Route path="/finanzas" element={<div className="p-10 text-slate-400 font-bold text-xl">Módulo de Finanzas en construcción...</div>} />
-          <Route path="/configuracion" element={<div className="p-10 text-slate-400 font-bold text-xl">Configuración del Sistema</div>} />
+            {/* Placeholders */}
+            <Route path="/finanzas" element={<div className="p-10 text-slate-400 font-bold text-xl">Módulo de Finanzas en construcción...</div>} />
+            <Route path="/configuracion" element={<div className="p-10 text-slate-400 font-bold text-xl">Configuración del Sistema</div>} />
+          </Route>
         </Route>
 
       </Routes>

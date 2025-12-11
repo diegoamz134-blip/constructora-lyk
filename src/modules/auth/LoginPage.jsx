@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, User, KeyRound, Eye, EyeOff
+  Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, KeyRound, Eye, EyeOff
 } from 'lucide-react';
 import bcrypt from 'bcryptjs';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
@@ -13,7 +13,7 @@ import bgImage from '../../assets/images/fondo-login.jpg';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { loginWorker } = useWorkerAuth();
+  const { loginWorker, worker } = useWorkerAuth(); // Traemos 'worker' para verificar sesión obrera
   
   // Estado para el modo de login: 'admin' | 'worker'
   const [loginMode, setLoginMode] = useState('admin');
@@ -33,6 +33,23 @@ const LoginPage = () => {
   const [errorMsg, setErrorMsg] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
 
+  // --- [NUEVO] EFECTO DE SEGURIDAD: Si ya hay sesión, redirigir automáticamente ---
+  useEffect(() => {
+    const checkSession = async () => {
+      // 1. Verificar si hay sesión de Admin activa
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+      // 2. Verificar si hay sesión de Obrero activa
+      if (worker) { 
+        navigate('/worker/dashboard', { replace: true });
+      }
+    };
+    checkSession();
+  }, [worker, navigate]);
+
   // --- LÓGICA DE LOGIN ADMIN ---
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
@@ -50,7 +67,8 @@ const LoginPage = () => {
       // Mostrar pantalla de bienvenida antes de redirigir
       setShowWelcome(true);
       setTimeout(() => {
-        navigate('/dashboard');
+        // [MODIFICADO] Usamos replace: true para no dejar historial del login
+        navigate('/dashboard', { replace: true });
       }, 2000);
 
     } catch (error) {
@@ -85,7 +103,8 @@ const LoginPage = () => {
       // Mostrar pantalla de bienvenida antes de redirigir
       setShowWelcome(true);
       setTimeout(() => {
-        navigate('/worker/dashboard');
+        // [MODIFICADO] Usamos replace: true para no dejar historial del login
+        navigate('/worker/dashboard', { replace: true });
       }, 2000);
 
     } catch (error) {
@@ -98,9 +117,7 @@ const LoginPage = () => {
   return (
     <div className="min-h-screen w-full flex bg-gray-50 font-sans">
       
-      {/* ========================================================= */}
-      {/* PANTALLA DE BIENVENIDA (Overlay Global)                   */}
-      {/* ========================================================= */}
+      {/* PANTALLA DE BIENVENIDA (Overlay Global) */}
       <AnimatePresence>
         {showWelcome && (
           <motion.div 
@@ -122,26 +139,17 @@ const LoginPage = () => {
         )}
       </AnimatePresence>
 
-      {/* ========================================================= */}
-      {/* PANEL IZQUIERDO (Tarjeta Flotante con Imagen)             */}
-      {/* ========================================================= */}
+      {/* PANEL IZQUIERDO (Tarjeta Flotante con Imagen) */}
       <div className="hidden lg:flex w-1/2 p-6 items-center justify-center relative">
-        
-        {/* Tarjeta contenedora con sombras y bordes redondeados */}
         <div className="w-full h-full relative rounded-[3rem] shadow-2xl overflow-hidden bg-[#003366] z-10">
-            
-            {/* Imagen de Fondo con Animación */}
             <img 
               src={bgImage} 
               alt="Construcción L&K" 
               className="absolute inset-0 w-full h-full object-cover animate-slow-pan scale-110"
             />
-            
-            {/* Capas de Color (Overlay) para legibilidad y tinte azul */}
             <div className="absolute inset-0 bg-gradient-to-tr from-[#003366]/95 via-[#003366]/60 to-transparent mix-blend-multiply"></div>
             <div className="absolute inset-0 bg-gradient-to-t from-[#001a33] via-transparent to-transparent opacity-90"></div>
             
-            {/* Contenido sobre la imagen */}
             <div className="relative z-10 h-full flex flex-col justify-between p-16 text-white">
                 <div>
                     <img src={logoFull} alt="L&K" className="h-16 brightness-0 invert opacity-90 drop-shadow-lg" />
@@ -155,7 +163,6 @@ const LoginPage = () => {
                         Plataforma integral de gestión de obras y control de personal en tiempo real.
                     </p>
                 </div>
-                {/* Indicadores decorativos */}
                 <div className="flex gap-2">
                     <div className="w-12 h-1.5 bg-white rounded-full backdrop-blur-md"></div>
                     <div className="w-3 h-1.5 bg-white/40 rounded-full backdrop-blur-md"></div>
@@ -165,11 +172,8 @@ const LoginPage = () => {
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* PANEL DERECHO (Formulario)                                */}
-      {/* ========================================================= */}
+      {/* PANEL DERECHO (Formulario) */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 lg:p-24 bg-white relative z-0">
-        
         <div className="w-full max-w-md space-y-10 relative z-10">
           
           <div className="text-center lg:text-left">
@@ -177,7 +181,6 @@ const LoginPage = () => {
             <p className="text-slate-500 text-lg">Bienvenido de nuevo a L&K Construcciones.</p>
           </div>
 
-          {/* Selector de Tabs Mejorado */}
           <div className="flex p-1.5 bg-slate-100 rounded-2xl">
             <button
               onClick={() => { setLoginMode('admin'); setErrorMsg(null); }}

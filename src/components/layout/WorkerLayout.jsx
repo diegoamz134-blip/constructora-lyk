@@ -13,7 +13,8 @@ const WorkerLayout = () => {
   useEffect(() => {
     // Si terminó de cargar y no hay usuario, mandar al login
     if (!loading && !worker) {
-      navigate('/');
+      // [MODIFICADO] Usamos replace: true para borrar historial
+      navigate('/', { replace: true });
     }
   }, [worker, loading, navigate]);
 
@@ -22,8 +23,8 @@ const WorkerLayout = () => {
     // Simular tiempo de carga para la animación de despedida
     setTimeout(() => {
       logoutWorker();
-      navigate('/');
-    }, 2000); // 2 segundos de despedida
+      navigate('/', { replace: true }); // También usamos replace al salir voluntariamente
+    }, 2000); 
   };
 
   // Pantalla de carga inicial mientras se recupera la sesión
