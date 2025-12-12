@@ -6,8 +6,7 @@ import WorkerLayout from './components/layout/WorkerLayout';
 
 // Módulos de Autenticación
 import LoginPage from './modules/auth/LoginPage';
-// [CORRECCIÓN]: Importamos desde 'modules' en lugar de 'components'
-import AdminProtectedRoute from './modules/auth/AdminProtectedRoute'; 
+import AdminProtectedRoute from './modules/auth/AdminProtectedRoute'; // Ruta protegida
 
 // Módulos del Panel Administrativo
 import DashboardPage from './modules/admin-control/DashboardPage';
@@ -16,6 +15,10 @@ import ReportsPage from './modules/admin-control/ReportsPage';
 import HumanResourcesPage from './modules/hr/HumanResourcesPage';
 import ProjectsPage from './modules/projects/ProjectsPage'; 
 import DocumentationPage from './modules/hr/DocumentationPage'; 
+
+// NUEVO: Módulos de Licitaciones
+import TendersPage from './modules/licitaciones/TendersPage';
+import TenderDetail from './modules/licitaciones/TenderDetail';
 
 // Módulos del Panel de Obrero
 import WorkerDashboard from './modules/worker/WorkerDashboard';
@@ -44,12 +47,12 @@ function App() {
         </Route>
 
         {/* 3. Rutas del Panel Administrativo (Layout de Escritorio) */}
-        {/* Protegemos estas rutas con el componente que está en modules/auth */}
+        {/* Envolvemos en la Ruta Protegida */}
         <Route element={<AdminProtectedRoute />}>
           <Route element={<MainLayout />}>
             <Route path="/dashboard" element={<DashboardPage />} />
             
-            {/* Gestión de Recursos Humanos (Submenús) */}
+            {/* Gestión de Recursos Humanos */}
             <Route path="/users" element={<HumanResourcesPage />} />
             <Route path="/documentacion" element={<DocumentationPage />} />
             
@@ -61,6 +64,10 @@ function App() {
 
             {/* Gestión de Proyectos */}
             <Route path="/proyectos" element={<ProjectsPage />} />
+
+            {/* NUEVO: Gestión de Licitaciones */}
+            <Route path="/licitaciones" element={<TendersPage />} />
+            <Route path="/licitaciones/:id" element={<TenderDetail />} />
 
             {/* Placeholders */}
             <Route path="/finanzas" element={<div className="p-10 text-slate-400 font-bold text-xl">Módulo de Finanzas en construcción...</div>} />

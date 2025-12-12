@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MapPin, Calendar, Clock, FileSpreadsheet, FileDown, Filter, Camera } from 'lucide-react';
+import { MapPin, Calendar, Clock, FileSpreadsheet, FileText, Filter, Camera } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -82,7 +82,7 @@ const ReportsPage = () => {
     }
     const { data: allWorkers } = await workerQuery;
 
-    // --- ESTILOS EXCEL (Inspirados en tu imagen) ---
+    // --- ESTILOS EXCEL ---
     const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B0F0' } }; // Azul Claro
     const titleFont = { name: 'Arial', size: 14, bold: true, underline: true };
     const headerFont = { name: 'Arial', size: 8, bold: true };
@@ -111,14 +111,10 @@ const ReportsPage = () => {
 
     // Días de la semana
     let colIndex = 6; // Columna F
-    const daysNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-
+    
     weekDates.forEach((date, i) => {
         const colLetter = worksheet.getColumn(colIndex).letter;
-        // Fila 1: Fecha (14-jul)
         worksheet.getCell(`${colLetter}${headerRowIdx}`).value = `${date.getDate()}-${date.toLocaleDateString('es-PE', { month: 'short' })}`;
-        // Fila 2: Día (Lun) - simulado en misma celda con salto o estilo
-        // Para simplificar, ponemos la fecha arriba.
         
         // Color rojo para domingo
         if (i === 6) {
@@ -204,7 +200,7 @@ const ReportsPage = () => {
     saveAs(new Blob([buffer]), `Tareo_Semanal_${selectedProject.replace(/\s+/g, '_')}.xlsx`);
   };
 
-  // --- FUNCIÓN 2: EXPORTAR PDF (ACTUALIZADA) ---
+  // --- FUNCIÓN 2: EXPORTAR PDF ---
   const exportToPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
     const img = new Image();
@@ -271,6 +267,7 @@ const ReportsPage = () => {
         </div>
         
         <div className="flex flex-wrap gap-3 items-center">
+            {/* Filtro de Obras */}
             <div className="relative group">
                 <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
                 <select 
@@ -283,11 +280,15 @@ const ReportsPage = () => {
                 </select>
             </div>
 
-            <button onClick={exportToPDF} className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 transition shadow-sm hover:shadow-md active:scale-95">
-                <FileDown size={18} /> PDF
+            {/* BOTONES DE REPORTE CON NUEVO ESTILO */}
+            <button onClick={generateWeeklyTareo} className="flex flex-col items-center justify-center w-16 h-14 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 transition border border-green-200 shadow-sm active:scale-95">
+                <FileSpreadsheet size={20} />
+                <span className="text-[10px] font-bold mt-1">Excel</span>
             </button>
-             <button onClick={generateWeeklyTareo} className="flex items-center gap-2 px-4 py-2.5 bg-[#1D6F42] text-white rounded-xl text-sm font-bold hover:bg-[#155734] transition shadow-sm hover:shadow-md active:scale-95">
-                <FileSpreadsheet size={18} /> Tareo Semanal (Excel)
+            
+            <button onClick={exportToPDF} className="flex flex-col items-center justify-center w-16 h-14 bg-red-50 text-red-700 rounded-xl hover:bg-red-100 transition border border-red-200 shadow-sm active:scale-95">
+                <FileText size={20} />
+                <span className="text-[10px] font-bold mt-1">PDF</span>
             </button>
         </div>
       </div>
