@@ -1,12 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Search, FolderOpen, User, HardHat, FileCheck } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, FolderOpen, User, HardHat, ChevronRight } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import EmployeeDocumentsModal from './components/EmployeeDocumentsModal';
 
 const DocumentationPage = () => {
   const [activeTab, setActiveTab] = useState('staff'); // 'staff' | 'workers'
-  const [list, setList] = useState([]);
+  
+  // [OPTIMIZACIÓN] Estados separados para caché local (cambio instantáneo)
+  const [staffList, setStaffList] = useState([]);
+  const [workersList, setWorkersList] = useState([]);
+  
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -14,28 +18,52 @@ const DocumentationPage = () => {
   const [selectedPerson, setSelectedPerson] = useState(null);
 
   useEffect(() => {
-    fetchData();
-  }, [activeTab]);
+    fetchAllData();
+  }, []);
 
-  const fetchData = async () => {
+  // [OPTIMIZACIÓN] Carga paralela de ambas listas y selección de columnas específicas
+  const fetchAllData = async () => {
     setLoading(true);
-    const table = activeTab === 'staff' ? 'employees' : 'workers';
-    const { data } = await supabase.from(table).select('*').eq(activeTab === 'workers' ? 'status' : 'id', activeTab === 'workers' ? 'Activo' : undefined || 'id'); // Truco: traer todos si es staff
-    
-    // Si es staff no tiene campo status a veces, mejor traer todos.
-    // Corrección consulta:
-    let query = supabase.from(table).select('*');
-    if (activeTab === 'workers') query = query.eq('status', 'Activo');
-    
-    const { data: results } = await query;
-    setList(results || []);
-    setLoading(false);
+    try {
+        // 1. Cargar Staff
+        const staffQuery = supabase
+            .from('employees')
+            .select('id, full_name, document_number, position') // Solo lo necesario
+            .order('full_name');
+
+        // 2. Cargar Obreros Activos
+        const workersQuery = supabase
+            .from('workers')
+            .select('id, full_name, document_number, category') // Solo lo necesario
+            .eq('status', 'Activo')
+            .order('full_name');
+
+        // Ejecutar ambas peticiones al mismo tiempo (mucho más rápido)
+        const [staffRes, workersRes] = await Promise.all([staffQuery, workersQuery]);
+
+        if (staffRes.error) throw staffRes.error;
+        if (workersRes.error) throw workersRes.error;
+
+        setStaffList(staffRes.data || []);
+        setWorkersList(workersRes.data || []);
+
+    } catch (err) {
+        console.error("Error cargando legajos:", err);
+    } finally {
+        setLoading(false);
+    }
   };
 
-  const filteredList = list.filter(item => 
-    item.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.document_number.includes(searchTerm)
-  );
+  // Determinar qué lista mostrar según el tab activo
+  const currentList = activeTab === 'staff' ? staffList : workersList;
+
+  // [OPTIMIZACIÓN] Filtrado memorizado para búsqueda fluida
+  const filteredList = useMemo(() => {
+    return currentList.filter(item => 
+      item.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.document_number.includes(searchTerm)
+    );
+  }, [currentList, searchTerm]);
 
   const openLegajo = (person) => {
     setSelectedPerson({ ...person, type: activeTab === 'staff' ? 'staff' : 'worker' });
@@ -71,34 +99,47 @@ const DocumentationPage = () => {
       </div>
 
       {/* Grid de Tarjetas */}
+      {/* [OPTIMIZACIÓN] Animación ligera sin 'layout' prop para evitar recálculos pesados */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredList.map((item) => (
-            <motion.div 
-                key={item.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer group"
-                onClick={() => openLegajo(item)}
-            >
-                <div className="flex justify-between items-start mb-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${activeTab === 'staff' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
-                        {item.full_name.charAt(0)}
+        <AnimatePresence mode="popLayout">
+            {filteredList.map((item) => (
+                <motion.div 
+                    key={item.id} 
+                    initial={{ opacity: 0, y: 10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                    className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+                    onClick={() => openLegajo(item)}
+                >
+                    <div className="flex justify-between items-start mb-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${activeTab === 'staff' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {item.full_name.charAt(0)}
+                        </div>
+                        <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-[#003366] group-hover:bg-blue-50 transition-colors">
+                            <FolderOpen size={20} />
+                        </div>
                     </div>
-                    <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-[#003366] group-hover:bg-blue-50 transition-colors">
-                        <FolderOpen size={20} />
+                    
+                    <h3 className="font-bold text-slate-800 truncate">{item.full_name}</h3>
+                    <p className="text-xs text-slate-400 font-mono mb-4">DNI: {item.document_number}</p>
+                    
+                    <div className="pt-3 border-t border-slate-50 flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{item.position || item.category}</span>
+                        <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
+                            Ver Documentos <ChevronRight size={14} />
+                        </span>
                     </div>
-                </div>
-                
-                <h3 className="font-bold text-slate-800 truncate">{item.full_name}</h3>
-                <p className="text-xs text-slate-400 font-mono mb-4">DNI: {item.document_number}</p>
-                
-                <div className="pt-3 border-t border-slate-50 flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{item.position || item.category}</span>
-                    <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
-                        Ver Documentos <ChevronRight size={14} />
-                    </span>
-                </div>
-            </motion.div>
-        ))}
+                </motion.div>
+            ))}
+        </AnimatePresence>
       </div>
+
+      {!loading && filteredList.length === 0 && (
+          <div className="text-center py-12 text-slate-400">
+              <p>No se encontraron resultados.</p>
+          </div>
+      )}
 
       {/* Modal de Documentos */}
       <EmployeeDocumentsModal 
@@ -110,8 +151,5 @@ const DocumentationPage = () => {
     </div>
   );
 };
-
-// Helper Icon
-const ChevronRight = ({size}) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
 
 export default DocumentationPage;
