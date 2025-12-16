@@ -39,4 +39,4 @@ export const WorkerAuthProvider = ({ children }) => {
   );
 };
 
-export const useWorkerAuth = () => useContext(WorkerAuthContext);
+export const useWorkerAuth = () => useContext(WorkerAuthContext);s

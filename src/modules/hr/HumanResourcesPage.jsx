@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../services/supabase';
 import { 
   Users, UserPlus, Search, Filter, Wallet, 
-  ShieldCheck, Banknote, HardHat, AlertTriangle, CalendarX, Pencil
+  Banknote, HardHat, CalendarX, Pencil,
+  Briefcase // Icono estándar en lugar de Building2
 } from 'lucide-react';
 import CreateUserModal from './components/CreateUserModal';
 import AddAdvanceModal from './components/AddAdvanceModal';
@@ -17,17 +18,13 @@ const HumanResourcesPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Estados de Modales
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
   const [isPPEModalOpen, setIsPPEModalOpen] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState(null);
-  
   const [userToEdit, setUserToEdit] = useState(null);
 
-  useEffect(() => {
-    fetchData();
-  }, [activeTab]);
+  useEffect(() => { fetchData(); }, [activeTab]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -40,15 +37,12 @@ const HumanResourcesPage = () => {
       if (error) throw error;
       setPeople(peopleData || []);
 
-      // Cargar Adelantos y EPPs (Para AMBOS: Staff y Obreros)
-      // Ajustamos la consulta según la pestaña activa
       let advancesQuery = supabase.from('advances').select('worker_id, employee_id, amount').eq('status', 'Pendiente');
       let ppeQuery = supabase.from('worker_ppe').select('worker_id, employee_id');
 
       const { data: advancesData } = await advancesQuery;
       const { data: ppeData } = await ppeQuery;
 
-      // Procesar Adelantos
       const advancesMap = {};
       advancesData?.forEach(adv => {
         const id = activeTab === 'staff' ? adv.employee_id : adv.worker_id;
@@ -56,7 +50,6 @@ const HumanResourcesPage = () => {
       });
       setAdvances(advancesMap);
 
-      // Procesar EPPs
       const ppeMap = {};
       ppeData?.forEach(item => {
         const id = activeTab === 'staff' ? item.employee_id : item.worker_id;
@@ -69,7 +62,6 @@ const HumanResourcesPage = () => {
 
   const handleOpenAdvance = (person) => { setSelectedPerson(person); setIsAdvanceModalOpen(true); };
   const handleOpenPPE = (person) => { setSelectedPerson(person); setIsPPEModalOpen(true); };
-  
   const handleCreate = () => { setUserToEdit(null); setIsModalOpen(true); };
   const handleEdit = (person) => { setUserToEdit(person); setIsModalOpen(true); };
 
@@ -104,7 +96,6 @@ const HumanResourcesPage = () => {
 
   return (
     <div className="space-y-6 pb-10">
-      
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Recursos Humanos</h2>
@@ -124,7 +115,6 @@ const HumanResourcesPage = () => {
           <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Users size={24} /></div>
         </div>
 
-        {/* Tarjeta Dinámica Central (Ahora para AMBOS: Staff y Obreros) */}
         {contractsAlertCount > 0 ? (
         <div className="bg-white p-6 rounded-2xl border border-red-100 shadow-sm flex items-center justify-between relative overflow-hidden">
             <div className="absolute left-0 top-0 w-1 h-full bg-red-500"></div>
@@ -159,21 +149,18 @@ const HumanResourcesPage = () => {
       <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-          <input type="text" placeholder="Buscar empleado..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003366]/20"/>
+          <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003366]/20"/>
         </div>
         <div className="flex gap-2">
           <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition"><Filter size={18} /> Filtrar</button>
-          <button 
-            onClick={handleCreate} 
-            className="flex items-center gap-2 px-4 py-2 bg-[#0F172A] text-white rounded-xl text-sm font-bold hover:bg-[#1e293b] shadow-lg active:scale-95 transition"
-          >
-            <UserPlus size={18} /> Nuevo Empleado
+          <button onClick={handleCreate} className="flex items-center gap-2 px-4 py-2 bg-[#0F172A] text-white rounded-xl text-sm font-bold hover:bg-[#1e293b] shadow-lg active:scale-95 transition">
+            <UserPlus size={18} /> {activeTab === 'staff' ? 'Nuevo Empleado' : 'Nuevo Obrero'}
           </button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {loading ? <div className="p-10 text-center text-slate-400">Cargando personal...</div> : (
+        {loading ? <div className="p-10 text-center text-slate-400">Cargando...</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50/50 border-b border-slate-100">
@@ -181,8 +168,10 @@ const HumanResourcesPage = () => {
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Nombre</th>
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Documento</th>
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Cargo</th>
+                  <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">AFP</th>
+                  <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Hijos</th>
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ingreso</th>
-                  <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Estado Contrato</th>
+                  <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Contrato</th>
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">{activeTab === 'staff' ? 'Salario' : 'Jornal'}</th>
                   <th className="p-4 text-xs font-bold text-red-400 uppercase tracking-wider">Adelantos</th>
                   <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Acciones</th>
@@ -194,20 +183,29 @@ const HumanResourcesPage = () => {
                   const ppeCount = ppeCounts[person.id] || 0;
                   const contractStatus = getContractStatus(person.contract_end_date);
                   const moneyValue = person.weekly_rate || person.salary || 0; 
-
                   return (
                     <tr key={person.id} className="hover:bg-slate-50/50 transition">
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${activeTab === 'staff' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>{person.full_name.charAt(0)}</div>
-                          <div>
-                            <p className="font-bold text-slate-700 text-sm">{person.full_name}</p>
-                            <p className="text-xs text-slate-400">ID: {person.id.toString().padStart(4, '0')}</p>
-                          </div>
+                          <div><p className="font-bold text-slate-700 text-sm">{person.full_name}</p><p className="text-xs text-slate-400">ID: {person.id.toString().padStart(4, '0')}</p></div>
                         </div>
                       </td>
                       <td className="p-4"><span className="px-2 py-1 border border-slate-200 rounded text-xs font-mono text-slate-600 bg-white">{person.document_type || 'DNI'}: {person.document_number}</span></td>
                       <td className="p-4"><span className={`px-3 py-1 rounded-full text-xs font-bold ${activeTab === 'staff' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{person.position || person.category}</span></td>
+                      
+                      {/* CELDAS AFP e HIJOS (Seguras) */}
+                      <td className="p-4">
+                            {person.afp ? (
+                                <span className="flex items-center gap-1 text-slate-600 text-sm"><Briefcase size={14} className="text-blue-500"/> {person.afp}</span>
+                            ) : <span className="text-slate-300 text-xs">-</span>}
+                      </td>
+                      <td className="p-4">
+                            {person.has_children ? (
+                                <span className="flex items-center gap-1 text-slate-600 text-sm"><Users size={14} className="text-pink-500"/> {person.children_count}</span>
+                            ) : <span className="text-slate-300 text-xs">No</span>}
+                      </td>
+
                       <td className="p-4 text-sm text-slate-600">{new Date(person.start_date || person.entry_date || person.created_at).toLocaleDateString()}</td>
                       
                       <td className="p-4 text-center">
@@ -216,9 +214,7 @@ const HumanResourcesPage = () => {
                                 <span className="text-[10px] font-bold uppercase">{contractStatus.label}</span>
                                 <span className="text-[9px] opacity-80">{new Date(person.contract_end_date).toLocaleDateString()}</span>
                             </div>
-                        ) : (
-                            <span className="text-slate-300 text-xs italic">Indefinido</span>
-                        )}
+                        ) : <span className="text-slate-300 text-xs italic">Indefinido</span>}
                       </td>
 
                       <td className="p-4 text-sm font-bold text-slate-700">S/ {parseFloat(moneyValue).toLocaleString()}</td>
@@ -226,40 +222,14 @@ const HumanResourcesPage = () => {
                       <td className="p-4">
                         {debt > 0 ? (
                             <span className="text-red-600 font-bold bg-red-50 px-2 py-1 rounded-lg border border-red-100">- S/ {debt.toLocaleString()}</span>
-                        ) : (
-                            <span className="text-slate-300 text-xs">-</span>
-                        )}
+                        ) : <span className="text-slate-300 text-xs">-</span>}
                       </td>
 
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          
-                          {/* Botón Editar */}
-                          <button 
-                            onClick={() => handleEdit(person)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                            title="Editar Datos"
-                          >
-                            <Pencil size={18} />
-                          </button>
-
-                          {/* Botones de Acción (EPP y Vales) AHORA DISPONIBLES PARA TODOS */}
-                          <button 
-                            onClick={() => handleOpenPPE(person)}
-                            className={`p-2 rounded-lg transition ${ppeCount > 0 ? 'text-slate-400 hover:text-[#003366] hover:bg-blue-50' : 'text-orange-400 hover:text-orange-600 hover:bg-orange-50 animate-pulse'}`}
-                            title="Kardex de EPPs"
-                          >
-                            <HardHat size={18} />
-                          </button>
-                          
-                          <button 
-                            onClick={() => handleOpenAdvance(person)}
-                            className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
-                            title="Registrar Adelanto/Vale"
-                          >
-                            <Banknote size={18} />
-                          </button>
-
+                          <button onClick={() => handleEdit(person)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Editar"><Pencil size={18} /></button>
+                          <button onClick={() => handleOpenPPE(person)} className={`p-2 rounded-lg transition ${ppeCount > 0 ? 'text-slate-400 hover:text-[#003366] hover:bg-blue-50' : 'text-orange-400 hover:text-orange-600 hover:bg-orange-50 animate-pulse'}`} title="EPPs"><HardHat size={18} /></button>
+                          <button onClick={() => handleOpenAdvance(person)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="Adelanto"><Banknote size={18} /></button>
                         </div>
                       </td>
                     </tr>
@@ -271,18 +241,10 @@ const HumanResourcesPage = () => {
         )}
       </div>
 
-      <CreateUserModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        activeTab={activeTab} 
-        onSuccess={fetchData} 
-        userToEdit={userToEdit}
-      />
-      
+      <CreateUserModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} activeTab={activeTab} onSuccess={fetchData} userToEdit={userToEdit} />
       <AddAdvanceModal isOpen={isAdvanceModalOpen} onClose={() => setIsAdvanceModalOpen(false)} person={selectedPerson} onSuccess={fetchData} type={activeTab} />
       <ManagePPEModal isOpen={isPPEModalOpen} onClose={() => setIsPPEModalOpen(false)} person={selectedPerson} type={activeTab} />
     </div>
   );
 };
-
 export default HumanResourcesPage;

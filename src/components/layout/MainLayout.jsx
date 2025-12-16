@@ -3,8 +3,8 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   LayoutDashboard, Building2, Users, FileText, Settings, 
-  LogOut, Briefcase, Bell, ChevronDown, ChevronRight, FolderOpen,
-  FileSpreadsheet, Menu, X // Importamos Menu y X para el modo móvil
+  LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
+  FileSpreadsheet, Menu, X 
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -19,11 +19,11 @@ const navItems = [
     icon: Users,
     children: [
       { path: '/users', label: 'Planilla y Personal' },
-      { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen }
+      { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
+      { path: '/reportes', icon: FileText, label: 'Reportes' } // MOVIDO AQUÍ
     ]
   },
   { path: '/finanzas', icon: Briefcase, label: 'Contabilidad' },
-  { path: '/reportes', icon: FileText, label: 'Reportes' },
 ];
 
 const MainLayout = () => {
@@ -32,11 +32,11 @@ const MainLayout = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [currentUser, setCurrentUser] = useState({ name: 'Cargando...', role: '...', avatar_url: '' });
   
-  // Estado para el menú móvil
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Lógica actualizada para mantener abierto el menú si estamos en /reportes
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': location.pathname.includes('/users') || location.pathname.includes('/documentacion')
+    'Recursos Humanos': location.pathname.includes('/users') || location.pathname.includes('/documentacion') || location.pathname.includes('/reportes')
   });
 
   const toggleMenu = (label) => {
@@ -59,7 +59,6 @@ const MainLayout = () => {
     return () => window.removeEventListener('profileUpdated', fetchCurrentUser);
   }, []);
 
-  // Cerrar menú móvil al cambiar de ruta
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
@@ -69,7 +68,6 @@ const MainLayout = () => {
     setTimeout(async () => { await supabase.auth.signOut(); navigate('/'); }, 1500);
   };
 
-  // Componente interno para el contenido del Sidebar (para reutilizar)
   const SidebarContent = () => (
     <>
       <div className="p-6 flex justify-center items-center h-20 border-b border-white/5">
@@ -157,8 +155,6 @@ const MainLayout = () => {
 
   return (
     <div className="flex h-screen bg-[#F1F5F9] md:p-3 font-sans overflow-hidden">
-      
-      {/* SIDEBAR DE ESCRITORIO (Oculto en móvil 'hidden md:flex') */}
       <motion.aside 
         initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.4 }}
         className="hidden md:flex w-72 bg-[#0F172A] rounded-2xl flex-col shadow-xl z-20 relative overflow-hidden"
@@ -166,28 +162,21 @@ const MainLayout = () => {
         <SidebarContent />
       </motion.aside>
 
-      {/* MENÚ MÓVIL (DRAWER) */}
       <AnimatePresence>
         {isMobileMenuOpen && (
           <>
-            {/* Fondo oscuro (backdrop) */}
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
               className="fixed inset-0 bg-slate-900/60 z-40 md:hidden backdrop-blur-sm"
             />
-            {/* Panel lateral móvil */}
             <motion.aside
               initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="fixed inset-y-0 left-0 w-72 bg-[#0F172A] z-50 flex flex-col md:hidden shadow-2xl"
             >
                <SidebarContent />
-               {/* Botón Cerrar en móvil */}
-               <button 
-                 onClick={() => setIsMobileMenuOpen(false)}
-                 className="absolute top-4 right-4 text-slate-400 hover:text-white p-2"
-               >
+               <button onClick={() => setIsMobileMenuOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white p-2">
                  <X size={24} />
                </button>
             </motion.aside>
@@ -195,20 +184,12 @@ const MainLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
-        
-        {/* HEADER */}
         <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-10">
            <div className="flex items-center gap-3">
-             {/* BOTÓN HAMBURGUESA (Solo visible en móvil 'md:hidden') */}
-             <button 
-               onClick={() => setIsMobileMenuOpen(true)}
-               className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden"
-             >
+             <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden">
                <Menu size={24} />
              </button>
-
              <h1 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-none">
                {location.pathname === '/documentacion' ? 'Gestión Documental' : 
                 location.pathname.includes('/licitaciones') ? 'Gestión de Licitaciones' :
@@ -234,13 +215,11 @@ const MainLayout = () => {
            </div>
         </header>
 
-        {/* CONTENIDO INTERNO */}
         <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide">
            <Outlet />
         </div>
       </main>
 
-      {/* Overlay Logout */}
       {isLoggingOut && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-[60] flex items-center justify-center">
            <div className="text-center">
