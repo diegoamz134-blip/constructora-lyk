@@ -103,8 +103,26 @@ const HumanResourcesPage = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Recursos Humanos</h2>
           <div className="flex bg-slate-100 p-1 rounded-xl mt-4 inline-flex">
-            <button onClick={() => setActiveTab('staff')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'staff' ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>Planilla del Staff</button>
-            <button onClick={() => setActiveTab('workers')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'workers' ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>Planilla Obrera</button>
+            <button
+              onClick={() => setActiveTab('staff')}
+              className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'staff'
+                  ? 'bg-[#003366] text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Planilla del Staff
+            </button>
+            <button
+              onClick={() => setActiveTab('workers')}
+              className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'workers'
+                  ? 'bg-[#003366] text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Planilla Obrera
+            </button>
           </div>
         </div>
       </div>
@@ -115,10 +133,12 @@ const HumanResourcesPage = () => {
             <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Personal Activo</p>
             <h3 className="text-3xl font-bold text-slate-800 mt-1">{people.length}</h3>
           </div>
-          <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Users size={24} /></div>
+          <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+            <Users size={24} />
+          </div>
         </div>
 
-                {activeTab === 'staff' && (
+        {activeTab === 'staff' && (
           contractsAlertCount > 0 ? (
             <div className="bg-white p-6 rounded-2xl border border-red-100 shadow-sm flex items-center justify-between relative overflow-hidden">
               <div className="absolute left-0 top-0 w-1 h-full bg-red-500"></div>
@@ -126,17 +146,22 @@ const HumanResourcesPage = () => {
                 <p className="text-red-400 text-xs font-bold uppercase tracking-wider">Contratos/Seguros</p>
                 <h3 className="text-3xl font-bold text-red-600 mt-1">{contractsAlertCount} Alertas</h3>
                 <p className="text-[10px] text-red-400 font-medium">Vencidos o por vencer</p>
-                          </div>
-              <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-500 animate-pulse"><CalendarX size={24} /></div>
-        </div>
-        ) : (
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-            <div>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Vales por Descontar</p>
-            <h3 className="text-3xl font-bold text-slate-800 mt-1">S/ {totalAdvances.toLocaleString()}</h3>
+              </div>
+              <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-500 animate-pulse">
+                <CalendarX size={24} />
+              </div>
             </div>
-            <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center text-orange-600"><Banknote size={24} /></div>
-        </div>
+          ) : (
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">Vales por Descontar</p>
+                <h3 className="text-3xl font-bold text-slate-800 mt-1">S/ {totalAdvances.toLocaleString()}</h3>
+              </div>
+              <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center text-orange-600">
+                <Banknote size={24} />
+              </div>
+            </div>
+          )
         )}
 
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
