@@ -13,7 +13,8 @@ import bgImage from '../../assets/images/fondo-login.jpg';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { loginWorker, worker } = useWorkerAuth(); // Traemos 'worker' para verificar sesión obrera
+  const { loginWorker, worker } = useWorkerAuth()
+  const ADMIN_SESSION_KEY = 'lyk_admin_session';; // Traemos 'worker' para verificar sesión obrera
   
   // Estado para el modo de login: 'admin' | 'worker'
   const [loginMode, setLoginMode] = useState('admin');
@@ -38,7 +39,9 @@ const LoginPage = () => {
     const checkSession = async () => {
       // 1. Verificar si hay sesión de Admin activa
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+            const storedAdmin = localStorage.getItem(ADMIN_SESSION_KEY);
+
+      if (session || storedAdmin) {
         navigate('/dashboard', { replace: true });
         return;
       }
@@ -57,22 +60,46 @@ const LoginPage = () => {
     setErrorMsg(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+            // 1) Intentar autenticación estándar de Supabase
+      const { error, data } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
       });
 
-      if (error) throw error;
+            if (!error && data.session) {
+        setShowWelcome(true);
+        setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
+        return;
+      }
 
       // Mostrar pantalla de bienvenida antes de redirigir
+            // 2) Fallback: validar contra tabla "employees" con contraseña encriptada
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (employeeError || !employee) throw new Error('Usuario no encontrado.');
+
+      const isMatch = await bcrypt.compare(password, employee.password || '');
+      if (!isMatch) throw new Error('Contraseña incorrecta.');
+
+      // Guardar sesión básica en localStorage para proteger rutas del panel
+      const sessionPayload = {
+        id: employee.id,
+        full_name: employee.full_name,
+        email: employee.email,
+        role: employee.role || 'admin'
+      };
+
+            localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(sessionPayload));
+
       setShowWelcome(true);
-      setTimeout(() => {
-        // [MODIFICADO] Usamos replace: true para no dejar historial del login
-        navigate('/dashboard', { replace: true });
-      }, 2000);
+      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
 
     } catch (error) {
-      setErrorMsg('Credenciales incorrectas.');
+            setErrorMsg(error.message || 'Credenciales incorrectas.');
       setLoading(false);
     }
   };

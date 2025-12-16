@@ -10,6 +10,9 @@ import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
 import { supabase } from '../../services/supabase';
 
+const ADMIN_SESSION_KEY = 'lyk_admin_session';
+
+
 const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/proyectos', icon: Building2, label: 'Proyectos' },

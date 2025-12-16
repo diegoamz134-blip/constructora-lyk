@@ -88,11 +88,14 @@ const HumanResourcesPage = () => {
     return { color: 'bg-green-50 text-green-700 border-green-200', label: 'Vigente', days: diffDays };
   };
 
-  const contractsAlertCount = people.filter(p => {
-    if (!p.contract_end_date) return false;
-    const status = getContractStatus(p.contract_end_date);
-    return status.label === 'Vencido' || status.label === 'Por Vencer';
-  }).length;
+  const contractsAlertCount =
+    activeTab === 'staff'
+      ? people.filter(p => {
+          if (!p.contract_end_date) return false;
+          const status = getContractStatus(p.contract_end_date);
+          return status.label === 'Vencido' || status.label === 'Por Vencer';
+        }).length
+      : 0;
 
   return (
     <div className="space-y-6 pb-10">
@@ -115,15 +118,16 @@ const HumanResourcesPage = () => {
           <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600"><Users size={24} /></div>
         </div>
 
-        {contractsAlertCount > 0 ? (
-        <div className="bg-white p-6 rounded-2xl border border-red-100 shadow-sm flex items-center justify-between relative overflow-hidden">
-            <div className="absolute left-0 top-0 w-1 h-full bg-red-500"></div>
-            <div>
+                {activeTab === 'staff' && (
+          contractsAlertCount > 0 ? (
+            <div className="bg-white p-6 rounded-2xl border border-red-100 shadow-sm flex items-center justify-between relative overflow-hidden">
+              <div className="absolute left-0 top-0 w-1 h-full bg-red-500"></div>
+              <div>
                 <p className="text-red-400 text-xs font-bold uppercase tracking-wider">Contratos/Seguros</p>
                 <h3 className="text-3xl font-bold text-red-600 mt-1">{contractsAlertCount} Alertas</h3>
                 <p className="text-[10px] text-red-400 font-medium">Vencidos o por vencer</p>
-            </div>
-            <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-500 animate-pulse"><CalendarX size={24} /></div>
+                          </div>
+              <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center text-red-500 animate-pulse"><CalendarX size={24} /></div>
         </div>
         ) : (
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
