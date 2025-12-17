@@ -12,7 +12,6 @@ import { supabase } from '../../services/supabase';
 
 const ADMIN_SESSION_KEY = 'lyk_admin_session';
 
-
 const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/proyectos', icon: Building2, label: 'Proyectos' },
@@ -23,7 +22,7 @@ const navItems = [
     children: [
       { path: '/users', label: 'Planilla y Personal' },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
-      { path: '/reportes', icon: FileText, label: 'Reportes' } // MOVIDO AQUÍ
+      { path: '/reportes', icon: FileText, label: 'Reportes' } 
     ]
   },
   { path: '/finanzas', icon: Briefcase, label: 'Contabilidad' },
@@ -37,7 +36,6 @@ const MainLayout = () => {
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Lógica actualizada para mantener abierto el menú si estamos en /reportes
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': location.pathname.includes('/users') || location.pathname.includes('/documentacion') || location.pathname.includes('/reportes')
   });
@@ -52,6 +50,13 @@ const MainLayout = () => {
       if (user) {
         const { data } = await supabase.from('profiles').select('full_name, role, avatar_url').eq('id', user.id).single();
         if (data) setCurrentUser({ name: data.full_name || user.email, role: data.role || 'Colaborador', avatar_url: data.avatar_url });
+      } else {
+          // Fallback para leer de LocalStorage si no hay sesión activa en Supabase
+          const stored = localStorage.getItem(ADMIN_SESSION_KEY);
+          if (stored) {
+              const u = JSON.parse(stored);
+              setCurrentUser({ name: u.full_name, role: u.role, avatar_url: '' });
+          }
       }
     } catch (error) { console.error(error); }
   };
@@ -68,7 +73,17 @@ const MainLayout = () => {
 
   const handleLogout = () => {
     setIsLoggingOut(true);
-    setTimeout(async () => { await supabase.auth.signOut(); navigate('/'); }, 1500);
+    setTimeout(async () => { 
+        // 1. Cerrar sesión en Supabase
+        await supabase.auth.signOut(); 
+        
+        // 2. Limpiar TODAS las claves de sesión local
+        localStorage.removeItem(ADMIN_SESSION_KEY);
+        localStorage.removeItem('lyk_worker_session'); // Por si acaso
+
+        // 3. Redirigir
+        navigate('/'); 
+    }, 1500);
   };
 
   const SidebarContent = () => (

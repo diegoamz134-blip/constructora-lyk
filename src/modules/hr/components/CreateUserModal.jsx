@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, User, Briefcase, DollarSign, Loader2, 
-  Baby, BookOpen, FileBadge, ChevronDown, Check 
+  Baby, BookOpen, FileBadge, ChevronDown, Check,
+  Mail, Lock, Shield, KeyRound 
 } from 'lucide-react';
 import { supabase } from '../../../services/supabase';
 import bcrypt from 'bcryptjs';
@@ -30,6 +31,7 @@ const dropdownVariants = {
 // --- Listas de Opciones Estáticas ---
 const CATEGORIES = ['Peón', 'Oficial', 'Operario', 'Capataz'];
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
+const ROLES = ['Usuario', 'Admin', 'Supervisor', 'Residente'];
 
 const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) => {
   const [loading, setLoading] = useState(false);
@@ -39,11 +41,13 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
   const [showDocTypeMenu, setShowDocTypeMenu] = useState(false);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [showAfpMenu, setShowAfpMenu] = useState(false);
+  const [showRoleMenu, setShowRoleMenu] = useState(false); 
 
   // --- Refs para detectar clics fuera de los menús ---
   const docTypeRef = useRef(null);
   const categoryRef = useRef(null);
   const afpRef = useRef(null);
+  const roleRef = useRef(null); 
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -57,21 +61,18 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     password: '',
     afp: '', 
     has_children: false,
-    children_count: 0
+    children_count: 0,
+    email: '',
+    role: 'Usuario'
   });
 
   // --- Cerrar dropdowns al hacer clic fuera ---
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (docTypeRef.current && !docTypeRef.current.contains(event.target)) {
-        setShowDocTypeMenu(false);
-      }
-      if (categoryRef.current && !categoryRef.current.contains(event.target)) {
-        setShowCategoryMenu(false);
-      }
-      if (afpRef.current && !afpRef.current.contains(event.target)) {
-        setShowAfpMenu(false);
-      }
+      if (docTypeRef.current && !docTypeRef.current.contains(event.target)) setShowDocTypeMenu(false);
+      if (categoryRef.current && !categoryRef.current.contains(event.target)) setShowCategoryMenu(false);
+      if (afpRef.current && !afpRef.current.contains(event.target)) setShowAfpMenu(false);
+      if (roleRef.current && !roleRef.current.contains(event.target)) setShowRoleMenu(false); 
     };
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
@@ -94,7 +95,9 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         password: '',
         afp: userToEdit.afp || '',
         has_children: userToEdit.has_children || false,
-        children_count: userToEdit.children_count || 0
+        children_count: userToEdit.children_count || 0,
+        email: userToEdit.email || '',
+        role: userToEdit.role || 'Usuario'
       });
     } else {
       setFormData({
@@ -109,7 +112,9 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         password: '',
         afp: '',
         has_children: false,
-        children_count: 0
+        children_count: 0,
+        email: '',
+        role: 'Usuario'
       });
     }
   }, [userToEdit, isOpen]);
@@ -125,6 +130,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     if (field === 'document_type') setShowDocTypeMenu(false);
     if (field === 'category') setShowCategoryMenu(false);
     if (field === 'afp') setShowAfpMenu(false);
+    if (field === 'role') setShowRoleMenu(false); 
   };
 
   const handleDocumentChange = (e) => {
@@ -164,26 +170,37 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0
       };
 
-      if (!userToEdit || formData.password) {
-        const plainPassword = formData.password || formData.document_number;
+      // Encriptar contraseña
+      let passwordHash = null;
+      if (formData.password) {
         const salt = await bcrypt.genSalt(10);
-        payload.password = await bcrypt.hash(plainPassword, salt);
+        passwordHash = await bcrypt.hash(formData.password, salt);
+        payload.password = passwordHash;
+      } else if (!userToEdit) {
+        // Contraseña por defecto: el mismo número de documento
+        const plainPassword = formData.document_number;
+        const salt = await bcrypt.genSalt(10);
+        passwordHash = await bcrypt.hash(plainPassword, salt);
+        payload.password = passwordHash;
       }
 
       if (activeTab === 'staff') {
-        // --- LÓGICA ADMINISTRATIVOS ---
         payload.entry_date = formData.start_date;
         payload.position = formData.position;
         payload.salary = parseFloat(formData.amount || 0); 
         payload.contract_end_date = formData.contract_end_date || null;
+        payload.email = formData.email;
+        payload.role = formData.role;
         
-        // [CORRECCIÓN] Asignar estado Activo por defecto si es nuevo
         if (!userToEdit) {
             payload.status = 'Activo';
         }
 
+        if (!formData.email && activeTab === 'staff') {
+            throw new Error("El correo electrónico es obligatorio para el personal administrativo.");
+        }
+
       } else {
-        // --- LÓGICA OBREROS ---
         payload.start_date = formData.start_date;
         payload.category = formData.category;
         payload.weekly_rate = parseFloat(formData.amount || 0);
@@ -204,6 +221,29 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
       }
 
       if (error) throw error;
+
+      // Sincronizar con Profiles (Solo Staff)
+      if (activeTab === 'staff') {
+          const { data: existingProfile } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('email', formData.email)
+              .maybeSingle();
+
+          const profileData = {
+              full_name: formData.full_name,
+              email: formData.email,
+              role: formData.role,
+              status: 'Activo',
+          };
+
+          if (existingProfile) {
+              await supabase.from('profiles').update(profileData).eq('id', existingProfile.id);
+          } else {
+              const newProfileId = crypto.randomUUID(); 
+              await supabase.from('profiles').insert([{ id: newProfileId, ...profileData }]);
+          }
+      }
 
       setNotification({
         isOpen: true,
@@ -233,7 +273,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     }
   };
 
-  // --- Componente Reutilizable para Opciones del Menú ---
   const DropdownOption = ({ label, isSelected, onClick }) => (
     <button
         type="button"
@@ -274,11 +313,11 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                 <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200 transition"><X size={20}/></button>
               </div>
 
-              {/* Formulario con Scroll */}
+              {/* Formulario */}
               <div className="overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200">
                 <form onSubmit={handleSubmit} className="space-y-5">
                   
-                  {/* Nombre Completo */}
+                  {/* Nombre */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase ml-1">Nombre Completo</label>
                     <div className="relative group">
@@ -291,16 +330,14 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     </div>
                   </div>
 
-                  {/* --- INPUT GROUP UNIFICADO: Documento + Input --- */}
+                  {/* Documento y Salario */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5 z-30">
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">Documento</label>
-                        
                         <div 
                             ref={docTypeRef}
                             className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl focus-within:border-[#003366] focus-within:ring-1 focus-within:ring-blue-900/20 transition-all h-[48px]"
                         >
-                            {/* Selector Desplegable Personalizado */}
                             <div className="relative h-full">
                                 <button 
                                     type="button"
@@ -310,8 +347,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                                     {formData.document_type}
                                     <ChevronDown size={16} className={`text-slate-400 transition-transform duration-300 ${showDocTypeMenu ? 'rotate-180' : ''}`} />
                                 </button>
-
-                                {/* Menú Flotante Animado */}
                                 <AnimatePresence>
                                     {showDocTypeMenu && (
                                         <motion.div 
@@ -333,8 +368,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                                     )}
                                 </AnimatePresence>
                             </div>
-
-                            {/* Input Numérico Integrado */}
                             <div className="flex-1 relative h-full">
                                 <FileBadge className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
                                 <input 
@@ -347,7 +380,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                         </div>
                     </div>
 
-                    {/* Salario */}
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                           {activeTab === 'staff' ? 'Salario Mensual' : 'Jornal Semanal'}
@@ -363,7 +395,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     </div>
                   </div>
 
-                  {/* Fechas y Cargo */}
+                  {/* Fechas */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className={`space-y-1.5 ${activeTab !== 'staff' ? 'col-span-2' : ''}`}>
                       <label className="text-xs font-bold text-slate-500 uppercase ml-1">Fecha Ingreso</label>
@@ -372,7 +404,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all text-slate-600 h-[48px]"
                       />
                     </div>
-                    
                     {activeTab === 'staff' && (
                       <div className="space-y-1.5">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">Fin Contrato</label>
@@ -388,9 +419,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                       {activeTab === 'staff' ? 'Cargo' : 'Categoría'}
                     </label>
-                    
                     {activeTab === 'staff' ? (
-                      // Input normal para Administrativos
                       <div className="relative group h-[48px]">
                         <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
                         <input 
@@ -400,7 +429,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                         />
                       </div>
                     ) : (
-                      // --- SELECT ANIMADO PARA CATEGORÍA (Obreros) ---
                       <div ref={categoryRef} className="relative h-[48px]">
                         <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={18} />
                         <button
@@ -411,7 +439,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                             <span className="text-slate-700">{formData.category}</span>
                             <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showCategoryMenu ? 'rotate-180' : ''}`} />
                         </button>
-
                         <AnimatePresence>
                             {showCategoryMenu && (
                                 <motion.div 
@@ -433,7 +460,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     )}
                   </div>
 
-                  {/* Sección AFP y Familia */}
                   <div className="pt-5 mt-2 border-t border-slate-100 z-10">
                     <h4 className="text-sm font-bold text-[#003366] mb-4 flex items-center gap-2">
                       <div className="p-1.5 bg-blue-50 rounded-lg"><BookOpen size={16}/></div> 
@@ -441,7 +467,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     </h4>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* --- SELECT ANIMADO PARA AFP --- */}
                       <div className="space-y-1.5 relative" ref={afpRef}>
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">Régimen Pensionario</label>
                         <div className="relative h-[48px]">
@@ -455,7 +480,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                                 </span>
                                 <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showAfpMenu ? 'rotate-180' : ''}`} />
                             </button>
-
                             <AnimatePresence>
                                 {showAfpMenu && (
                                     <motion.div 
@@ -476,7 +500,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                         </div>
                       </div>
 
-                      {/* Switch Hijos */}
                       <div className="flex flex-col justify-end">
                          <div 
                            onClick={() => setFormData(prev => ({ ...prev, has_children: !prev.has_children }))}
@@ -486,7 +509,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                               <Baby size={18} className={formData.has_children ? 'text-[#003366]' : 'text-slate-400'}/>
                               ¿Tiene Hijos?
                             </label>
-                            
                             <div className={`w-11 h-6 rounded-full relative transition-colors ${formData.has_children ? 'bg-[#003366]' : 'bg-slate-300'}`}>
                                 <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full shadow-sm transition-transform ${formData.has_children ? 'translate-x-5' : 'translate-x-0'}`}></div>
                             </div>
@@ -494,7 +516,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                       </div>
                     </div>
                     
-                    {/* Input condicional Hijos */}
                     <AnimatePresence>
                       {formData.has_children && (
                         <motion.div 
@@ -520,7 +541,85 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     </AnimatePresence>
                   </div>
 
-                  {/* Footer Botones */}
+                  {activeTab === 'staff' && (
+                    <div className="pt-5 mt-2 border-t border-slate-100 z-0">
+                        <h4 className="text-sm font-bold text-[#003366] mb-4 flex items-center gap-2">
+                            <div className="p-1.5 bg-blue-50 rounded-lg"><KeyRound size={16}/></div> 
+                            Credenciales de Acceso
+                        </h4>
+                        
+                        <div className="space-y-1.5 mb-4">
+                            <label className="text-xs font-bold text-slate-500 uppercase ml-1">Correo Electrónico (Usuario)</label>
+                            <div className="relative group">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
+                                <input 
+                                    type="email" name="email" required value={formData.email} onChange={handleChange}
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
+                                    placeholder="usuario@empresa.com"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Contraseña</label>
+                                <div className="relative group">
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
+                                    <input 
+                                        type="password" name="password" value={formData.password} onChange={handleChange}
+                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
+                                        placeholder={userToEdit ? "(Sin cambios)" : "••••••••"}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* --- SELECT ANIMADO PARA ROL --- */}
+                            <div className="space-y-1.5" ref={roleRef}>
+                                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Rol / Permisos</label>
+                                <div className="relative h-[48px]">
+                                    <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={18} />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowRoleMenu(!showRoleMenu)}
+                                        className={`w-full h-full pl-10 pr-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showRoleMenu ? 'border-[#003366] ring-1 ring-blue-900/20' : 'border-slate-200 hover:border-slate-300'}`}
+                                    >
+                                        <span className="text-slate-700">{formData.role}</span>
+                                        <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showRoleMenu ? 'rotate-180' : ''}`} />
+                                    </button>
+                                    <AnimatePresence>
+                                        {showRoleMenu && (
+                                            <motion.div 
+                                                variants={dropdownVariants}
+                                                initial="hidden" animate="visible" exit="exit"
+                                                className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden"
+                                            >
+                                                {ROLES.map(role => (
+                                                    <DropdownOption 
+                                                        key={role} label={role} 
+                                                        isSelected={formData.role === role}
+                                                        onClick={() => handleSelectOption('role', role)}
+                                                    />
+                                                ))}
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  )}
+
+                  {activeTab !== 'staff' && userToEdit && (
+                      <div className="pt-5 mt-2 border-t border-slate-100 space-y-1.5">
+                          <label className="text-xs font-bold text-slate-500 uppercase ml-1">Cambiar Contraseña (Opcional)</label>
+                          <input 
+                              type="password" name="password" value={formData.password} onChange={handleChange}
+                              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all"
+                              placeholder="Dejar vacío para mantener actual"
+                          />
+                      </div>
+                  )}
+
                   <div className="pt-6 flex gap-3 z-0 relative">
                     <button type="button" onClick={onClose} className="flex-1 py-3.5 text-slate-600 font-bold text-sm bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">Cancelar</button>
                     <button disabled={loading} className="flex-1 py-3.5 bg-[#003366] text-white font-bold text-sm rounded-xl hover:bg-blue-900 flex justify-center items-center gap-2 shadow-lg shadow-blue-900/20 active:scale-[0.98] transition-all">
