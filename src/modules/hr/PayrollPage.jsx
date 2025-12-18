@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   DollarSign, Calculator, Calendar, 
-  Printer, HardHat, UserCog, AlertCircle 
+  Printer, HardHat, UserCog, AlertCircle,
+  FileSpreadsheet // <-- Importamos el icono para Excel
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
@@ -11,8 +12,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable'; 
 
 // --- IMPORTACIÓN DEL LOGO ---
-// Asegúrate de que esta ruta sea correcta en tu proyecto
 import logoLyk from '../../assets/images/logo-lk-full.png';
+
+// --- IMPORTACIÓN DEL MODAL EXCEL (NUEVO) ---
+import PayrollModal from './components/PayrollModal';
 
 const PayrollPage = () => {
   const [activeTab, setActiveTab] = useState('workers'); // 'workers' | 'staff'
@@ -23,6 +26,9 @@ const PayrollPage = () => {
     end: new Date().toISOString().split('T')[0]
   });
   const [calculatedPayroll, setCalculatedPayroll] = useState([]);
+
+  // Estado para el Modal de Excel
+  const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
 
   // --- 1. Cargar Personal ---
   useEffect(() => {
@@ -389,25 +395,36 @@ const PayrollPage = () => {
           <p className="text-slate-500 text-sm">Emisión de boletas y cálculo de remuneraciones.</p>
         </div>
         
-        <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-          <input 
-            type="date" 
-            value={weekRange.start}
-            onChange={(e) => setWeekRange({...weekRange, start: e.target.value})}
-            className="text-sm outline-none font-bold text-slate-600 px-2"
-          />
-          <span className="text-slate-400 self-center">-</span>
-          <input 
-            type="date" 
-            value={weekRange.end}
-            onChange={(e) => setWeekRange({...weekRange, end: e.target.value})}
-            className="text-sm outline-none font-bold text-slate-600 px-2"
-          />
+        <div className="flex gap-2 items-center flex-wrap justify-end">
+          <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+            <input 
+              type="date" 
+              value={weekRange.start}
+              onChange={(e) => setWeekRange({...weekRange, start: e.target.value})}
+              className="text-sm outline-none font-bold text-slate-600 px-2"
+            />
+            <span className="text-slate-400 self-center">-</span>
+            <input 
+              type="date" 
+              value={weekRange.end}
+              onChange={(e) => setWeekRange({...weekRange, end: e.target.value})}
+              className="text-sm outline-none font-bold text-slate-600 px-2"
+            />
+            <button 
+              onClick={calculatePayroll}
+              className="bg-[#003366] text-white p-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 shadow-sm"
+            >
+              <Calculator size={18} /> <span className="text-xs font-bold hidden md:inline">Calcular</span>
+            </button>
+          </div>
+
+          {/* --- BOTÓN NUEVO: EXPORTAR EXCEL --- */}
           <button 
-            onClick={calculatePayroll}
-            className="bg-[#003366] text-white p-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 shadow-sm"
+            onClick={() => setIsPayrollModalOpen(true)}
+            className="bg-green-600 text-white p-2.5 rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-sm border border-green-700/20"
           >
-            <Calculator size={18} /> <span className="text-xs font-bold hidden md:inline">Calcular</span>
+            <FileSpreadsheet size={20} /> 
+            <span className="text-sm font-bold hidden md:inline">Exportar Excel</span>
           </button>
         </div>
       </div>
@@ -502,6 +519,14 @@ const PayrollPage = () => {
           </div>
         )}
       </div>
+
+      {/* --- RENDERIZAR EL MODAL NUEVO --- */}
+      <PayrollModal 
+        isOpen={isPayrollModalOpen}
+        onClose={() => setIsPayrollModalOpen(false)}
+        workers={people} // Pasamos la lista actual de personas (Obreros o Staff según el tab)
+      />
+
     </div>
   );
 };
