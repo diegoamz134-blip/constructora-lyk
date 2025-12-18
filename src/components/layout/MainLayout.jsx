@@ -4,7 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
-  FileSpreadsheet, Menu, X 
+  FileSpreadsheet, Menu, X, 
+  ClipboardCheck, // Icono Tareo
+  HeartPulse,     // Icono Vacaciones/Salud (Si falla usa Activity)
+  DollarSign      // Icono Planillas
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -20,9 +23,12 @@ const navItems = [
     label: 'Recursos Humanos', 
     icon: Users,
     children: [
-      { path: '/users', label: 'Planilla y Personal' },
+      { path: '/users', label: 'Personal y Contratos' },
+      { path: '/asistencia-admin', label: 'Control de Tareo', icon: ClipboardCheck },
+      { path: '/ausencias', label: 'Vacaciones y Médicos', icon: HeartPulse },
+      { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
-      { path: '/reportes', icon: FileText, label: 'Reportes' } 
+      { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
     ]
   },
   { path: '/finanzas', icon: Briefcase, label: 'Contabilidad' },
@@ -36,8 +42,14 @@ const MainLayout = () => {
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Mantener abierto el menú si estamos en alguna sub-ruta de RRHH
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': location.pathname.includes('/users') || location.pathname.includes('/documentacion') || location.pathname.includes('/reportes')
+    'Recursos Humanos': location.pathname.includes('/users') || 
+                        location.pathname.includes('/documentacion') || 
+                        location.pathname.includes('/reportes') ||
+                        location.pathname.includes('/asistencia-admin') ||
+                        location.pathname.includes('/ausencias') ||
+                        location.pathname.includes('/planillas')
   });
 
   const toggleMenu = (label) => {
@@ -51,7 +63,6 @@ const MainLayout = () => {
         const { data } = await supabase.from('profiles').select('full_name, role, avatar_url').eq('id', user.id).single();
         if (data) setCurrentUser({ name: data.full_name || user.email, role: data.role || 'Colaborador', avatar_url: data.avatar_url });
       } else {
-          // Fallback para leer de LocalStorage si no hay sesión activa en Supabase
           const stored = localStorage.getItem(ADMIN_SESSION_KEY);
           if (stored) {
               const u = JSON.parse(stored);
@@ -74,14 +85,9 @@ const MainLayout = () => {
   const handleLogout = () => {
     setIsLoggingOut(true);
     setTimeout(async () => { 
-        // 1. Cerrar sesión en Supabase
         await supabase.auth.signOut(); 
-        
-        // 2. Limpiar TODAS las claves de sesión local
         localStorage.removeItem(ADMIN_SESSION_KEY);
-        localStorage.removeItem('lyk_worker_session'); // Por si acaso
-
-        // 3. Redirigir
+        localStorage.removeItem('lyk_worker_session'); 
         navigate('/'); 
     }, 1500);
   };
@@ -171,6 +177,19 @@ const MainLayout = () => {
     </>
   );
 
+  // Títulos dinámicos para el Header
+  const getPageTitle = () => {
+    if (location.pathname === '/documentacion') return 'Gestión Documental';
+    if (location.pathname.includes('/licitaciones')) return 'Gestión de Licitaciones';
+    if (location.pathname.includes('/asistencia-admin')) return 'Control de Tareo y Asistencia';
+    if (location.pathname.includes('/ausencias')) return 'Gestión de Vacaciones y Médicos';
+    if (location.pathname.includes('/planillas')) return 'Planillas y Boletas de Pago';
+    
+    return navItems.find(item => item.path === location.pathname)?.label || 
+           navItems.find(i => i.children)?.children.find(c => c.path === location.pathname)?.label || 
+           'Panel de Control';
+  };
+
   return (
     <div className="flex h-screen bg-[#F1F5F9] md:p-3 font-sans overflow-hidden">
       <motion.aside 
@@ -209,11 +228,7 @@ const MainLayout = () => {
                <Menu size={24} />
              </button>
              <h1 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-none">
-               {location.pathname === '/documentacion' ? 'Gestión Documental' : 
-                location.pathname.includes('/licitaciones') ? 'Gestión de Licitaciones' :
-                navItems.find(item => item.path === location.pathname)?.label || 
-                navItems.find(i => i.children)?.children.find(c => c.path === location.pathname)?.label || 
-                'Panel de Control'}
+               {getPageTitle()}
              </h1>
            </div>
            
