@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { 
   MapPin, Calendar, Clock, FileSpreadsheet, FileText, Filter, 
   Camera, User, HardHat, UserCog, Loader2, Search, 
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight 
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  BarChart3, TrendingUp, Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../services/supabase';
@@ -22,9 +23,9 @@ const ReportsPage = () => {
 
   // --- PAGINACIÓN ---
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 8; 
 
-  // --- Filtros de Fecha (Semana Actual por defecto) ---
+  // --- Filtros de Fecha ---
   const getStartOfWeek = () => {
     const d = new Date();
     const day = d.getDay();
@@ -50,7 +51,7 @@ const ReportsPage = () => {
     isOpen: false, type: '', title: '', message: '' 
   });
 
-  // 1. Cargar Proyectos
+  // --- Carga Inicial de Proyectos ---
   useEffect(() => {
     const fetchProjects = async () => {
       try {
@@ -61,10 +62,10 @@ const ReportsPage = () => {
     fetchProjects();
   }, []);
 
-  // 2. Cargar Asistencia
+  // --- Cargar Asistencia ---
   const fetchAttendance = async () => {
     setLoading(true);
-    setCurrentPage(1); // Resetear página al filtrar
+    setCurrentPage(1);
     try {
       let query = supabase
         .from('attendance')
@@ -89,7 +90,7 @@ const ReportsPage = () => {
 
     } catch (error) {
       console.error('Error reportes:', error);
-      setNotification({ isOpen: true, type: 'error', title: 'Error de Carga', message: 'No se pudieron cargar los registros.' });
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudieron cargar los registros.' });
     } finally {
       setLoading(false);
     }
@@ -107,13 +108,44 @@ const ReportsPage = () => {
     return { id: 'N/A', name: 'Desconocido', role: '-', doc: '-', date: null, type: 'unknown' };
   };
 
-  // --- FILTRO VISUAL TABS ---
-  const filteredData = attendanceData.filter(item => {
-    const user = getUserData(item);
-    if (activeTab === 'workers') return user.type === 'worker';
-    if (activeTab === 'staff') return user.type === 'staff';
-    return false;
-  });
+  // --- FILTRO Y PROCESAMIENTO DE DATOS ---
+  const filteredData = useMemo(() => {
+    return attendanceData.filter(item => {
+      const user = getUserData(item);
+      if (activeTab === 'workers') return user.type === 'worker';
+      if (activeTab === 'staff') return user.type === 'staff';
+      return false;
+    });
+  }, [attendanceData, activeTab]);
+
+  // --- DATOS PARA EL GRÁFICO (CSS PURO) ---
+  const chartData = useMemo(() => {
+    const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const counts = { 'Lunes': 0, 'Martes': 0, 'Miércoles': 0, 'Jueves': 0, 'Viernes': 0, 'Sábado': 0, 'Domingo': 0 };
+    
+    filteredData.forEach(item => {
+        const datePart = item.date.split('-');
+        const date = new Date(datePart[0], datePart[1] - 1, datePart[2]);
+        let dayIndex = date.getDay(); 
+        let adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1;
+        const dayName = days[adjustedIndex];
+        if (counts[dayName] !== undefined) counts[dayName]++;
+    });
+
+    const maxVal = Math.max(...Object.values(counts));
+
+    return Object.keys(counts).map(day => ({
+        name: day.substring(0, 3), 
+        fullName: day,
+        asistencias: counts[day],
+        heightPct: maxVal > 0 ? (counts[day] / maxVal) * 100 : 0
+    }));
+  }, [filteredData]);
+
+  // --- KPIS ---
+  const totalAttendance = filteredData.length;
+  const uniquePersonnel = new Set(filteredData.map(item => getUserData(item).id)).size;
+  const avgDaily = chartData.length > 0 ? Math.round(totalAttendance / 6) : 0; 
 
   // --- LÓGICA DE PAGINACIÓN ---
   const indexOfLastItem = currentPage * itemsPerPage;
@@ -121,18 +153,15 @@ const ReportsPage = () => {
   const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
 
-  const goToPage = (pageNumber) => {
-    if (pageNumber >= 1 && pageNumber <= totalPages) {
-      setCurrentPage(pageNumber);
-    }
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
-  const getMapLink = (locationString) => {
-    if (!locationString || locationString.includes('Panel')) return '#';
-    return `https://www.google.com/maps/search/?api=1&query=${locationString}`;
-  };
+  const getMapLink = (loc) => (!loc || loc.includes('Panel')) ? '#' : `https://www.google.com/maps/search/?api=1&query=${loc}`;
 
-  // --- CALCULADORA DE HORAS (TU LÓGICA ORIGINAL) ---
+  // =========================================================
+  //  LÓGICA ORIGINAL DE EXPORTACIÓN EXCEL (SENATI)
+  // =========================================================
   const calculateTareoValues = (checkOutTime) => {
     if (!checkOutTime) return { n: 1, he60: 0, he100: 0 }; 
     const exitDate = new Date(checkOutTime);
@@ -145,21 +174,15 @@ const ReportsPage = () => {
 
     const diffMs = exitDate - limitDate;
     const extraHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-    let val60 = 0;
-    let val100 = 0;
+    let val60 = 0, val100 = 0;
 
     if (extraHours > 0) {
         val60 = Math.min(extraHours, 2);
-        const remainder = extraHours - 2;
-        if (remainder > 0) val100 = remainder;
+        if (extraHours > 2) val100 = extraHours - 2;
     }
     return { n: 1, he60: val60, he100: val100 };
   };
 
-  // =========================================================
-  //  EXPORTACIÓN EXCEL (TU LÓGICA ORIGINAL)
-  // =========================================================
   const generateWeeklyTareo = async () => {
     try {
         const workbook = new ExcelJS.Workbook();
@@ -403,7 +426,7 @@ const ReportsPage = () => {
   };
 
   // =========================================================
-  //  EXPORTACIÓN PDF (TU LÓGICA ORIGINAL)
+  //  LÓGICA ORIGINAL EXPORTACIÓN PDF
   // =========================================================
   const exportToPDF = () => {
     try {
@@ -484,11 +507,11 @@ const ReportsPage = () => {
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
              <FileText className="text-[#003366]"/> Reportes de Asistencia
           </h2>
-          <p className="text-slate-500 text-sm">Control detallado de personal y tareos.</p>
+          <p className="text-slate-500 text-sm">Control visual y detallado de personal.</p>
         </div>
         
         <div className="flex flex-wrap gap-3 items-center w-full lg:w-auto">
-            {/* TABS DE FILTRADO */}
+            {/* TABS */}
             <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
                 <button onClick={() => { setActiveTab('workers'); setCurrentPage(1); }} className={`flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'workers' ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
                     <HardHat size={18}/> Obreros
@@ -498,7 +521,7 @@ const ReportsPage = () => {
                 </button>
             </div>
 
-            {/* FILTROS: FECHAS */}
+            {/* FILTROS */}
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
                 <div className="relative"><input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="pl-2 pr-1 py-2 bg-transparent text-sm font-medium text-slate-700 focus:outline-none w-28" /></div>
                 <span className="text-slate-300">|</span>
@@ -506,7 +529,6 @@ const ReportsPage = () => {
                 <button onClick={fetchAttendance} className="p-2 bg-white rounded-lg border border-slate-200 hover:bg-slate-50 text-[#003366]"><Search size={16}/></button>
             </div>
 
-            {/* FILTRO PROYECTO */}
             <div className="relative group flex-1 sm:flex-none">
                 <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
                 <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)} className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#003366]/20 appearance-none cursor-pointer hover:border-slate-300 transition-colors">
@@ -514,14 +536,70 @@ const ReportsPage = () => {
                     {projects.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
             </div>
-
-            {/* BOTONES EXPORTAR */}
-            <button onClick={generateWeeklyTareo} className="flex flex-col items-center justify-center w-14 h-12 bg-green-600 text-white rounded-xl hover:bg-green-700 transition shadow-md active:scale-95"><FileSpreadsheet size={18} /><span className="text-[9px] font-bold mt-0.5">Excel</span></button>
-            <button onClick={exportToPDF} className="flex flex-col items-center justify-center w-14 h-12 bg-red-600 text-white rounded-xl hover:bg-red-700 transition shadow-md active:scale-95"><FileText size={18} /><span className="text-[9px] font-bold mt-0.5">PDF</span></button>
         </div>
       </div>
 
-      {/* TABLA PRINCIPAL CON PAGINACIÓN */}
+      {/* --- SECCIÓN VISUAL (KPIS + GRÁFICO CSS PURO) --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* KPI CARDS */}
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Total Asistencias</p>
+                      <h3 className="text-2xl font-bold text-slate-800">{totalAttendance}</h3>
+                  </div>
+                  <div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><Users size={24}/></div>
+              </div>
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Personal Único</p>
+                      <h3 className="text-2xl font-bold text-slate-800">{uniquePersonnel}</h3>
+                  </div>
+                  <div className="p-3 bg-orange-50 text-orange-600 rounded-xl"><UserCog size={24}/></div>
+              </div>
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Promedio Diario</p>
+                      <h3 className="text-2xl font-bold text-slate-800">~{avgDaily}</h3>
+                  </div>
+                  <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><TrendingUp size={24}/></div>
+              </div>
+          </div>
+
+          {/* GRÁFICO DE BARRAS (SIN RECHARTS) */}
+          <div className="lg:col-span-3 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-[280px] flex flex-col">
+              <h3 className="font-bold text-slate-700 mb-6 flex items-center gap-2">
+                  <BarChart3 size={18} className="text-[#003366]"/> Asistencia por Día de la Semana
+              </h3>
+              <div className="flex-1 flex items-end justify-between gap-2 px-2">
+                  {chartData.map((data, index) => (
+                      <div key={index} className="flex flex-col items-center justify-end w-full h-full group relative">
+                          <div 
+                            className="w-full max-w-[50px] bg-[#003366] rounded-t-md transition-all duration-500 hover:bg-[#0ea5e9] relative"
+                            style={{ height: `${data.heightPct}%` }}
+                          >
+                             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 font-bold">
+                                {data.asistencias} Asistencias
+                             </div>
+                          </div>
+                          <span className="text-[10px] sm:text-xs font-medium text-slate-500 mt-2">{data.name}</span>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      </div>
+
+      {/* --- BOTONES EXPORTAR --- */}
+      <div className="flex justify-end gap-3 mt-4">
+          <button onClick={generateWeeklyTareo} className="px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 transition shadow-sm flex items-center gap-2 font-bold text-sm">
+              <FileSpreadsheet size={18} /> Exportar Excel
+          </button>
+          <button onClick={exportToPDF} className="px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-700 transition shadow-sm flex items-center gap-2 font-bold text-sm">
+              <FileText size={18} /> Exportar PDF
+          </button>
+      </div>
+
+      {/* TABLA PRINCIPAL CON PAGINACIÓN CENTRADA */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
         {loading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-3">
@@ -530,7 +608,7 @@ const ReportsPage = () => {
         ) : filteredData.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-4">
                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center"><Calendar size={32} className="opacity-40" /></div>
-               <div className="text-center"><h3 className="font-bold text-slate-700">Sin registros</h3><p className="text-sm">No hay asistencia registrada en este rango.</p></div>
+               <div className="text-center"><h3 className="font-bold text-slate-700">Sin registros</h3><p className="text-sm">No hay asistencia registrada.</p></div>
             </div>
         ) : (
           <>
@@ -600,13 +678,10 @@ const ReportsPage = () => {
             {/* --- COMPONENTE DE PAGINACIÓN CENTRADA --- */}
             {totalPages > 1 && (
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
-                    
-                    {/* Texto Izquierda */}
                     <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
                         Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, filteredData.length)} de {filteredData.length}
                     </div>
                     
-                    {/* Botones Centrales */}
                     <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
                         <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
                         <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
