@@ -1,532 +1,381 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  DollarSign, Calculator, Calendar, 
-  Printer, HardHat, UserCog, AlertCircle,
-  FileSpreadsheet // <-- Importamos el icono para Excel
+  DollarSign, Calculator, Printer, HardHat, UserCog, 
+  AlertCircle, FileSpreadsheet, FileDown, Calendar, RefreshCw,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
-// --- IMPORTACIONES PDF ---
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable'; 
+// Importamos las funciones de PDF
+import { generatePayslip, generateBulkPayslips } from '../../utils/pdfGenerator';
 
-// --- IMPORTACIÓN DEL LOGO ---
-import logoLyk from '../../assets/images/logo-lk-full.png';
-
-// --- IMPORTACIÓN DEL MODAL EXCEL (NUEVO) ---
+// Importamos el Modal de Excel
 import PayrollModal from './components/PayrollModal';
 
+// Importamos Logo
+import logoLyk from '../../assets/images/logo-lk-full.png';
+
 const PayrollPage = () => {
-  const [activeTab, setActiveTab] = useState('workers'); // 'workers' | 'staff'
+  const [activeTab, setActiveTab] = useState('workers'); 
   const [loading, setLoading] = useState(false);
-  const [people, setPeople] = useState([]);
+  const [people, setPeople] = useState([]); 
+  
+  // Datos Globales
+  const [constants, setConstants] = useState({});
+  const [afpRates, setAfpRates] = useState([]);
+
+  // Rango de Fechas
   const [weekRange, setWeekRange] = useState({
     start: new Date().toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
-  const [calculatedPayroll, setCalculatedPayroll] = useState([]);
 
-  // Estado para el Modal de Excel
+  // Resultados
+  const [calculatedPayroll, setCalculatedPayroll] = useState([]);
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
 
-  // --- 1. Cargar Personal ---
+  // --- ESTADOS DE PAGINACIÓN ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // 1. Cargar Datos Maestros
   useEffect(() => {
-    fetchData();
+    fetchGlobals();
+  }, []);
+
+  // 2. Cargar Personas
+  useEffect(() => {
+    fetchPeople();
     setCalculatedPayroll([]);
+    setCurrentPage(1); // Resetear página al cambiar tab
   }, [activeTab]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const table = activeTab === 'workers' ? 'workers' : 'employees';
-      const { data, error } = await supabase
-        .from(table)
-        .select('*')
-        .eq('status', 'Activo');
-      
-      if (error) throw error;
-      setPeople(data || []);
-    } catch (error) {
-      console.error("Error cargando personal:", error);
-    } finally {
-      setLoading(false);
+  // --- LÓGICA DE PAGINACIÓN ---
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = calculatedPayroll.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(calculatedPayroll.length / itemsPerPage);
+
+  const goToPage = (pageNumber) => {
+    if (pageNumber >= 1 && pageNumber <= totalPages) {
+      setCurrentPage(pageNumber);
     }
   };
 
-  // --- 2. Lógica de Cálculo ---
+  // --- FUNCIONES DE CARGA ---
+  const fetchGlobals = async () => {
+    try {
+        const { data: constData } = await supabase.from('payroll_constants').select('*');
+        const { data: afpData } = await supabase.from('afp_rates').select('*');
+        const constMap = (constData || []).reduce((acc, item) => ({...acc, [item.key_name]: Number(item.value)}), {});
+        setConstants(constMap);
+        setAfpRates(afpData || []);
+    } catch (e) { console.error("Error config:", e); }
+  };
+
+  const fetchPeople = async () => {
+    setLoading(true);
+    try {
+        const table = activeTab === 'workers' ? 'workers' : 'employees';
+        const { data } = await supabase.from(table).select('*').eq('status', 'Activo');
+        setPeople(data || []);
+    } catch (error) { console.error("Error personal:", error); } 
+    finally { setLoading(false); }
+  };
+
+  // --- CÁLCULO DE PLANILLA ---
   const calculatePayroll = async () => {
     setLoading(true);
-    const results = [];
-
-    const WORKER_RATES = {
-      Operario: 86.80, Oficial: 68.10, Peon: 61.30,
-      BUC_Operario: 0.32, BUC_Oficial: 0.30, BUC_Peon: 0.30,
-      Movilidad: 8.00, CONAFOVICER: 0.02, ONP: 0.13
-    };
-
+    setCurrentPage(1); // Resetear a página 1 al calcular nuevo
+    
     try {
-      // 2.1 Asistencia
-      let attendanceQuery = supabase.from('attendance')
-        .select('status, date, worker_id, employee_id')
-        .gte('date', weekRange.start)
-        .lte('date', weekRange.end);
-      
-      if (activeTab === 'workers') attendanceQuery = attendanceQuery.not('worker_id', 'is', null);
-      else attendanceQuery = attendanceQuery.not('employee_id', 'is', null);
+        let currentConstants = constants;
+        let currentAfps = afpRates;
 
-      const { data: attData } = await attendanceQuery;
-
-      // 2.2 Adelantos
-      let advancesQuery = supabase.from('advances')
-        .select('amount, worker_id, employee_id')
-        .gte('date', weekRange.start)
-        .lte('date', weekRange.end);
-
-      const { data: advData } = await advancesQuery;
-
-      // 2.3 Procesar
-      for (const person of people) {
-        const personId = person.id;
-        
-        const myAttendance = (attData || []).filter(a => 
-          activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId
-        );
-        const myAdvances = (advData || []).filter(a => 
-          activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId
-        );
-
-        const daysWorked = myAttendance.filter(a => a.status === 'Presente').length;
-        const totalAdvances = myAdvances.reduce((sum, adv) => sum + (adv.amount || 0), 0);
-
-        let payrollItem = {};
-
-        if (activeTab === 'workers') {
-          // --- OBREROS ---
-          const cat = Object.keys(WORKER_RATES).find(k => k.toUpperCase() === person.category?.toUpperCase()) || 'Peon';
-          const dailyRate = WORKER_RATES[cat];
-          const bucRate = WORKER_RATES[`BUC_${cat}`] || 0.30;
-
-          const basicSalary = daysWorked * dailyRate;
-          const dominical = (daysWorked === 6) ? dailyRate : 0; 
-          const buc = basicSalary * bucRate;
-          const mobility = daysWorked * WORKER_RATES.Movilidad;
-          
-          const totalIncome = basicSalary + dominical + buc + mobility;
-          const conafovicer = basicSalary * WORKER_RATES.CONAFOVICER;
-          const onp = totalIncome * WORKER_RATES.ONP;
-          
-          const totalDiscounts = conafovicer + onp + totalAdvances;
-
-          payrollItem = {
-            person,
-            type: 'worker',
-            daysWorked,
-            details: { basicSalary, dominical, buc, mobility, conafovicer, onp, essalud: totalIncome * 0.09 },
-            totalIncome,
-            totalDiscounts,
-            totalAdvances,
-            netPay: totalIncome - totalDiscounts
-          };
-
-        } else {
-          // --- STAFF (Cálculo Mensual) ---
-          const monthlySalary = parseFloat(person.salary) || 0;
-          const dailyValue = monthlySalary / 30;
-          const salaryEarned = dailyValue * (daysWorked > 0 ? 30 : 0); 
-          
-          const familyAllowance = person.children > 0 ? 102.50 : 0;
-          const totalIncome = salaryEarned + familyAllowance;
-          
-          const pensionRate = person.pension_system === 'AFP' ? 0.128 : 0.13;
-          const pensionSystem = totalIncome * pensionRate; 
-          const essalud = totalIncome * 0.09; 
-          
-          const totalDiscounts = pensionSystem + totalAdvances;
-
-          payrollItem = {
-            person,
-            type: 'staff',
-            daysWorked: daysWorked > 0 ? 30 : 0, 
-            details: { monthlySalary, salaryEarned, familyAllowance, pensionSystem, essalud },
-            totalIncome,
-            totalDiscounts,
-            totalAdvances,
-            netPay: totalIncome - totalDiscounts
-          };
+        // Recargar si faltan datos
+        if (!currentConstants.JORNAL_OPERARIO || currentAfps.length === 0) {
+            const { data: cData } = await supabase.from('payroll_constants').select('*');
+            const { data: aData } = await supabase.from('afp_rates').select('*');
+            currentConstants = (cData || []).reduce((acc, item) => ({...acc, [item.key_name]: Number(item.value)}), {});
+            currentAfps = aData || [];
+            setConstants(currentConstants);
+            setAfpRates(currentAfps);
         }
 
-        results.push(payrollItem);
-      }
+        const table = activeTab === 'workers' ? 'workers' : 'employees';
+        const { data: freshPeople } = await supabase.from(table).select('*').eq('status', 'Activo');
+        setPeople(freshPeople || []);
 
-      setCalculatedPayroll(results);
+        const { data: attData } = await supabase.from('attendance').select('*').gte('date', weekRange.start).lte('date', weekRange.end);
+        const { data: advData } = await supabase.from('advances').select('*').gte('date', weekRange.start).lte('date', weekRange.end);
 
-    } catch (error) {
-      console.error("Error:", error);
-      alert("Error en el cálculo.");
-    } finally {
-      setLoading(false);
-    }
-  };
+        const results = (freshPeople || []).map(person => {
+            try {
+                const personId = person.id;
+                const myAtt = (attData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
+                const myAdv = (advData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
+                
+                const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
+                const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
-  // =========================================================================
-  // GENERACIÓN DE BOLETA (CELESTE CLARO Y BLANCO + FIRMAS)
-  // =========================================================================
-  const printPayslip = (item) => {
-    try {
-      const doc = new jsPDF();
-      const p = item.person;
-      const isStaff = item.type === 'staff';
+                let calc = {};
 
-      // --- PALETA DE COLORES ---
-      // Celeste Claro (RGB) para las cabeceras
-      const headerColor = [220, 235, 255]; 
-      const borderColor = [0, 0, 0];
-      const lineWidth = 0.1;
+                if (activeTab === 'workers') {
+                    const catUpper = (person.category || 'PEON').toUpperCase(); 
+                    let dailyRate = Number(currentConstants[`JORNAL_${catUpper}`]) || 0;
+                    if (person.custom_daily_rate && Number(person.custom_daily_rate) > 0) dailyRate = Number(person.custom_daily_rate);
 
-      // --- LOGO ---
-      try {
-        doc.addImage(logoLyk, 'PNG', 14, 5, 40, 15); 
-      } catch (imgErr) {
-        console.warn("No se pudo cargar el logo");
-      }
+                    const basicSalary = daysWorked * dailyRate;
+                    const dominical = (daysWorked === 6) ? dailyRate : 0; 
+                    const buc = basicSalary * (Number(currentConstants[`BUC_${catUpper}`]) || 0);
+                    const mobility = daysWorked * (Number(currentConstants['MOVILIDAD']) || 0);
+                    const schoolAssign = person.has_children ? (daysWorked * (Number(currentConstants['ASIG_ESCOLAR_DIARIO']) || 0)) : 0;
+                    const totalIncome = basicSalary + dominical + buc + mobility + schoolAssign;
 
-      // --- ENCABEZADO ---
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      
-      doc.text(`RUC: 20482531301`, 14, 24);
-      doc.text(`Empleador: CONSTRUCTORA E INVERSIONES L & K S.A.C.`, 14, 28);
-      doc.text(`Periodo: ${weekRange.start.substring(0,7)}`, 14, 32);
+                    let pensionAmount = 0;
+                    let pensionName = person.pension_system || 'ONP';
 
-      // Recuadro Trabajador (Derecha)
-      doc.text("TRABAJADOR", 140, 24);
-      doc.setFont("helvetica", "normal");
-      doc.text(p.full_name.toUpperCase(), 140, 28);
-      doc.text(`DNI: ${p.document_number}`, 140, 32);
+                    if (pensionName === 'ONP') {
+                        pensionAmount = totalIncome * (Number(currentConstants['ONP_TASA']) || 0.13);
+                    } else {
+                        const myAfp = currentAfps.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
+                        if (myAfp) {
+                            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
+                            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
+                            pensionAmount = totalIncome * totalRate;
+                            pensionName = `AFP ${myAfp.name} (${person.commission_type || 'Flujo'})`;
+                        } else {
+                            pensionAmount = totalIncome * 0.13; 
+                            pensionName += ' (Ref. 13%)';
+                        }
+                    }
 
-      const startY = 38;
-      
-      // --- TABLA 1: DATOS GENERALES ---
-      autoTable(doc, {
-        startY: startY,
-        head: [['Documento de Identidad', 'Nombre y Apellidos', 'Situación']],
-        body: [[
-          `Tipo: DNI\nNúmero: ${p.document_number}`,
-          p.full_name.toUpperCase(),
-          'ACTIVO O SUBSIDIADO'
-        ]],
-        theme: 'grid', 
-        styles: { 
-            fontSize: 7, 
-            cellPadding: 2, 
-            lineColor: borderColor, 
-            lineWidth: lineWidth,
-            textColor: [0, 0, 0]
-        },
-        headStyles: { 
-            fillColor: headerColor, // Celeste
-            textColor: [0, 0, 0], 
-            fontStyle: 'bold', 
-            halign: 'center',
-            valign: 'middle'
-        },
-        columnStyles: { 
-            0: { cellWidth: 40 }, 
-            1: { cellWidth: 100 }, 
-            2: { cellWidth: 40 } 
-        },
-        margin: { left: 14 }
-      });
+                    const conafovicer = basicSalary * (Number(currentConstants['CONAFOVICER']) || 0.02);
+                    const totalDiscounts = pensionAmount + conafovicer + totalAdvances;
+                    const essalud = totalIncome * (Number(currentConstants['ESSALUD']) || 0.09);
 
-      // --- TABLA 2: DATOS LABORALES ---
-      autoTable(doc, {
-        startY: doc.lastAutoTable.finalY - 0.1, 
-        head: [['Fecha de Ingreso', 'Tipo de Trabajador', 'Régimen Pensionario', 'CUSPP']],
-        body: [[
-          p.entry_date || p.start_date || '-',
-          isStaff ? 'EMPLEADO' : 'OBRERO',
-          p.pension_system || 'S.N.P. (ONP)',
-          p.cuspp || '-'
-        ]],
-        theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], halign: 'center' },
-        headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold' },
-        margin: { left: 14 }
-      });
+                    calc = {
+                        person, type: 'worker', daysWorked,
+                        details: { basicSalary, dominical, buc, mobility, schoolAssign, pensionAmount, conafovicer, essalud, pensionName },
+                        totalIncome, totalDiscounts, totalAdvances, netPay: totalIncome - totalDiscounts
+                    };
+                } else {
+                    const monthlySalary = Number(person.salary) || 0;
+                    const earned = (monthlySalary / 30) * (daysWorked > 0 ? 30 : 0);
+                    const pensionDesc = earned * 0.13;
+                    calc = {
+                        person, type: 'staff', daysWorked,
+                        details: { basicSalary: earned, pensionAmount: pensionDesc, pensionName: 'ONP', essalud: earned * 0.09 },
+                        totalIncome: earned, totalDiscounts: pensionDesc + totalAdvances, totalAdvances,
+                        netPay: earned - pensionDesc - totalAdvances
+                    };
+                }
+                return calc;
+            } catch (e) { return null; }
+        });
 
-      // --- TABLA 3: ASISTENCIA ---
-      autoTable(doc, {
-        startY: doc.lastAutoTable.finalY - 0.1,
-        head: [['Días Laborados', 'Días No Lab.', 'Días Sub.', 'Condición', 'Jornada Ordinaria', 'Sobretiempo']],
-        body: [[
-          `${item.daysWorked}`, '0', '0', 'Domiciliado', 'Total Horas: 240\nMinutos: 0', 'Total Horas: 0\nMinutos: 0'
-        ]],
-        theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], halign: 'center' },
-        headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold' },
-        margin: { left: 14 }
-      });
-
-      // --- TABLA 4: SUSPENSIÓN ---
-      autoTable(doc, {
-        startY: doc.lastAutoTable.finalY - 0.1,
-        head: [['Motivo de Suspensión de Labores', 'Otros empleadores por Rentas de 5ta']],
-        body: [[ 'Tipo: -   Motivo: -   Nº Días: -', 'No tiene' ]],
-        theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], halign: 'center' },
-        headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold' },
-        margin: { left: 14 }
-      });
-
-      // --- CUERPO DE CONCEPTOS ---
-      let rows = [];
-      
-      // Función para título de sección con fondo celeste
-      const sectionTitle = (text) => ({ 
-          content: text, 
-          colSpan: 4, 
-          styles: { fontStyle: 'bold', halign: 'left', fillColor: headerColor } 
-      });
-
-      if (isStaff) {
-          rows = [
-              [sectionTitle('Ingresos')],
-              ['0121', 'REMUNERACIÓN O JORNAL BÁSICO', item.details.salaryEarned.toFixed(2), ''],
-              ['0201', 'ASIGNACIÓN FAMILIAR', item.details.familyAllowance > 0 ? item.details.familyAllowance.toFixed(2) : '0.00', ''],
-              [sectionTitle('Descuentos')],
-              [{ content: 'Aportes del Trabajador', colSpan: 4, styles: { fontStyle: 'italic', halign: 'left', fillColor: [255,255,255] } }],
-              [
-                p.pension_system === 'ONP' ? '0608' : '0601', 
-                p.pension_system === 'ONP' ? 'SISTEMA NACIONAL DE PENSIONES (ONP)' : 'COMISIÓN / APORTE AFP', 
-                '', item.details.pensionSystem.toFixed(2)
-              ],
-              ['0605', 'RENTA QUINTA CATEGORÍA', '', '0.00'],
-              ['0701', 'ADELANTOS DE SUELDO', '', item.totalAdvances.toFixed(2)],
-          ];
-      } else {
-          rows = [
-              [sectionTitle('Ingresos')],
-              ['0121', 'JORNAL BÁSICO', item.details.basicSalary.toFixed(2), ''],
-              ['0106', 'DOMINICAL', item.details.dominical.toFixed(2), ''],
-              ['0304', 'BONIF. UNIFICADA CONSTRUCCION (BUC)', item.details.buc.toFixed(2), ''],
-              ['0902', 'MOVILIDAD ACUMULADA', item.details.mobility.toFixed(2), ''],
-              [sectionTitle('Descuentos')],
-              ['0608', 'ONP / AFP', '', item.details.onp.toFixed(2)],
-              ['0706', 'CONAFOVICER', '', item.details.conafovicer.toFixed(2)],
-              ['0701', 'ADELANTOS', '', item.totalAdvances.toFixed(2)],
-          ];
-      }
-
-      autoTable(doc, {
-        startY: doc.lastAutoTable.finalY + 5,
-        head: [['Código', 'Conceptos', 'Ingresos S/.', 'Descuentos S/.']],
-        body: rows,
-        theme: 'grid',
-        styles: { fontSize: 8, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-        headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold', halign: 'center' },
-        columnStyles: { 0: {halign: 'center'}, 2: {halign: 'right'}, 3: {halign: 'right'} },
-        margin: { left: 14 }
-      });
-
-      const finalY = doc.lastAutoTable.finalY;
-
-      // --- TOTALES ---
-      autoTable(doc, {
-        startY: finalY - 0.1,
-        body: [[
-          { content: 'Neto a Pagar:', styles: { fontStyle: 'bold', halign: 'right', fillColor: headerColor } },
-          { content: item.netPay.toFixed(2), styles: { fontStyle: 'bold', halign: 'right' } }
-        ]],
-        theme: 'grid',
-        styles: { fontSize: 9, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-        columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: 40 } },
-        margin: { left: 14 }
-      });
-
-      // --- APORTES EMPLEADOR ---
-      autoTable(doc, {
-        startY: doc.lastAutoTable.finalY + 2,
-        head: [['Aportes de Empleador', 'Monto S/.']],
-        body: [
-          ['0804 ESSALUD (REGULAR CBSSP AGRAR/AC) TRAB', item.details.essalud.toFixed(2)]
-        ],
-        theme: 'grid',
-        styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-        headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold', halign: 'left' },
-        columnStyles: { 1: {halign: 'right'} },
-        margin: { left: 14, right: 120 } 
-      });
-
-      // --- SECCIÓN DE FIRMAS ---
-      const pageHeight = doc.internal.pageSize.height;
-      const signatureY = pageHeight - 40; 
-
-      // Línea y Texto Empleador
-      doc.line(30, signatureY, 90, signatureY); 
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text("EMPLEADOR", 60, signatureY + 5, null, null, "center");
-
-      // Línea y Texto Trabajador
-      doc.line(120, signatureY, 180, signatureY); 
-      doc.text("TRABAJADOR", 150, signatureY + 5, null, null, "center");
-      doc.setFont("helvetica", "normal");
-      doc.text(`DNI: ${p.document_number}`, 150, signatureY + 9, null, null, "center");
-
-      // Guardar PDF
-      doc.save(`Boleta_${p.document_number}_${weekRange.start}.pdf`);
-
+        setCalculatedPayroll(results.filter(r => r !== null));
     } catch (err) {
-      console.error("Error generando PDF:", err);
-      alert("Error al generar el PDF. Revisa la consola.");
+        console.error(err);
+        alert("Error al calcular: " + err.message);
+    } finally {
+        setLoading(false);
     }
   };
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="space-y-6 pb-24"> 
       
-      {/* Header */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <DollarSign className="text-green-600" /> Planillas y Pagos
           </h1>
-          <p className="text-slate-500 text-sm">Emisión de boletas y cálculo de remuneraciones.</p>
+          <p className="text-slate-500 text-sm">Cálculo dinámico con paginación optimizada.</p>
         </div>
         
-        <div className="flex gap-2 items-center flex-wrap justify-end">
-          <div className="flex gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-            <input 
-              type="date" 
-              value={weekRange.start}
-              onChange={(e) => setWeekRange({...weekRange, start: e.target.value})}
-              className="text-sm outline-none font-bold text-slate-600 px-2"
-            />
-            <span className="text-slate-400 self-center">-</span>
-            <input 
-              type="date" 
-              value={weekRange.end}
-              onChange={(e) => setWeekRange({...weekRange, end: e.target.value})}
-              className="text-sm outline-none font-bold text-slate-600 px-2"
-            />
-            <button 
-              onClick={calculatePayroll}
-              className="bg-[#003366] text-white p-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 shadow-sm"
-            >
-              <Calculator size={18} /> <span className="text-xs font-bold hidden md:inline">Calcular</span>
+        <div className="flex gap-2 items-center flex-wrap justify-end bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 px-2">
+                <Calendar size={16} className="text-slate-400"/>
+                <input type="date" value={weekRange.start} onChange={(e) => setWeekRange({...weekRange, start: e.target.value})} className="font-bold text-slate-600 outline-none text-sm bg-transparent"/>
+                <span className="text-slate-300">-</span>
+                <input type="date" value={weekRange.end} onChange={(e) => setWeekRange({...weekRange, end: e.target.value})} className="font-bold text-slate-600 outline-none text-sm bg-transparent"/>
+            </div>
+            <button onClick={calculatePayroll} disabled={loading} className="bg-[#003366] text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 disabled:opacity-70 shadow-md">
+              {loading ? <RefreshCw className="animate-spin" size={18}/> : <Calculator size={18} />} 
+              <span className="font-bold text-sm hidden md:inline">{loading ? 'Calculando...' : 'Calcular'}</span>
             </button>
-          </div>
-
-          {/* --- BOTÓN NUEVO: EXPORTAR EXCEL --- */}
-          <button 
-            onClick={() => setIsPayrollModalOpen(true)}
-            className="bg-green-600 text-white p-2.5 rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-sm border border-green-700/20"
-          >
-            <FileSpreadsheet size={20} /> 
-            <span className="text-sm font-bold hidden md:inline">Exportar Excel</span>
-          </button>
         </div>
       </div>
 
       {/* TABS */}
       <div className="flex p-1 bg-white rounded-2xl border border-slate-200 w-fit shadow-sm">
-        <button
-          onClick={() => setActiveTab('workers')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${
-            activeTab === 'workers' ? 'bg-orange-50 text-orange-700 shadow-sm ring-1 ring-orange-100' : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <HardHat size={18} /> Obreros
+        <button onClick={() => setActiveTab('workers')} className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${activeTab==='workers' ? 'bg-orange-50 text-orange-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <HardHat size={18}/> Obreros
         </button>
-        <button
-          onClick={() => setActiveTab('staff')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${
-            activeTab === 'staff' ? 'bg-blue-50 text-[#003366] shadow-sm ring-1 ring-blue-100' : 'text-slate-500 hover:bg-slate-50'
-          }`}
-        >
-          <UserCog size={18} /> Staff
+        <button onClick={() => setActiveTab('staff')} className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${activeTab==='staff' ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <UserCog size={18}/> Staff
         </button>
       </div>
 
-      {/* Resultados */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {calculatedPayroll.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 flex flex-col items-center">
-            <div className={`p-4 rounded-full mb-4 ${activeTab === 'workers' ? 'bg-orange-50 text-orange-200' : 'bg-blue-50 text-blue-200'}`}>
-              <Calculator size={48} />
-            </div>
-            <p className="font-medium text-lg text-slate-600">Listo para procesar planilla de {activeTab === 'workers' ? 'Obreros' : 'Staff'}</p>
-            <p className="text-sm mt-2">Selecciona las fechas y presiona "Calcular".</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-100">
-                <tr>
-                  <th className="px-6 py-4">Colaborador</th>
-                  <th className="px-6 py-4">Cargo</th>
-                  <th className="px-6 py-4 text-center">Días Trab.</th>
-                  <th className="px-6 py-4 text-right">Ingresos</th>
-                  <th className="px-6 py-4 text-right text-red-500">Descuentos</th>
-                  <th className="px-6 py-4 text-right font-black text-green-700">Neto</th>
-                  <th className="px-6 py-4 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {calculatedPayroll.map((item, idx) => (
-                  <motion.tr 
-                    key={idx} 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-6 py-4">
-                      <p className="font-bold text-slate-700">{item.person.full_name}</p>
-                      <p className="text-[10px] text-slate-400 font-mono">{item.person.document_number}</p>
-                    </td>
-                    <td className="px-6 py-4 text-slate-600">
-                      {activeTab === 'workers' ? item.person.category : item.person.position}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="bg-slate-100 px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 border border-slate-200">
-                        {item.daysWorked}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-mono font-medium text-slate-700">
-                      S/. {item.totalIncome.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-right font-mono text-red-500 font-medium">
-                      - S/. {item.totalDiscounts.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-right font-mono font-bold text-lg text-green-600">
-                      S/. {item.netPay.toFixed(2)}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <button 
-                        onClick={() => printPayslip(item)}
-                        className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 hover:text-blue-700 rounded-lg transition-colors shadow-sm border border-blue-100"
-                        title="Imprimir Boleta PDF"
-                      >
-                        <Printer size={18} />
-                      </button>
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      {/* TABLA DE RESULTADOS */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
+         {calculatedPayroll.length === 0 ? (
+             <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-4">
+                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center"><Calculator size={32} className="text-slate-300"/></div>
+                <div className="text-center">
+                    <p className="font-medium text-slate-600">Sin datos calculados</p>
+                    <p className="text-sm">Selecciona las fechas y presiona <b>Calcular</b>.</p>
+                </div>
+             </div>
+         ) : (
+            <>
+                <div className="overflow-x-auto flex-1">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-100">
+                            <tr>
+                                <th className="px-6 py-4">Colaborador</th>
+                                <th className="px-6 py-4 text-center">Días</th>
+                                <th className="px-6 py-4 text-right">Ingresos</th>
+                                <th className="px-6 py-4 text-right text-red-500">Descuentos</th>
+                                <th className="px-6 py-4 text-right font-black text-green-700">Neto</th>
+                                <th className="px-6 py-4 text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            <AnimatePresence mode='wait'>
+                                {currentItems.map((item, idx) => (
+                                    <motion.tr 
+                                        key={item.person.id} 
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        transition={{ duration: 0.2, delay: idx * 0.05 }}
+                                        className="hover:bg-blue-50/30 transition-colors"
+                                    >
+                                        <td className="px-6 py-4">
+                                            <p className="font-bold text-slate-700">{item.person.full_name}</p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
+                                                <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="bg-white px-3 py-1 rounded-lg text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">{item.daysWorked}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right font-mono font-medium text-slate-700">S/. {item.totalIncome.toFixed(2)}</td>
+                                        <td className="px-6 py-4 text-right font-mono font-medium text-red-500">- S/. {item.totalDiscounts.toFixed(2)}</td>
+                                        <td className="px-6 py-4 text-right">
+                                            <span className="font-mono font-bold text-lg text-green-600 bg-green-50 px-2 py-1 rounded">S/. {item.netPay.toFixed(2)}</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <button onClick={() => generatePayslip(item, weekRange, logoLyk)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
+                                                <Printer size={20}/>
+                                            </button>
+                                        </td>
+                                    </motion.tr>
+                                ))}
+                            </AnimatePresence>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* --- COMPONENTE DE PAGINACIÓN CENTRADO --- */}
+                {totalPages > 1 && (
+                    <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
+                        
+                        {/* Texto Informativo (Posicionado Absoluto a la izquierda para no empujar el centro) */}
+                        <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
+                            Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, calculatedPayroll.length)} de {calculatedPayroll.length}
+                        </div>
+                        
+                        {/* Botones de Paginación (En el centro del contenedor) */}
+                        <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
+                            <button 
+                                onClick={() => goToPage(1)} disabled={currentPage === 1}
+                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                            >
+                                <ChevronsLeft size={18}/>
+                            </button>
+                            <button 
+                                onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}
+                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                            >
+                                <ChevronLeft size={18}/>
+                            </button>
+                            
+                            {/* Números de Página */}
+                            <div className="flex items-center gap-1 mx-2">
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter(p => p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1))
+                                    .map((page, i, arr) => (
+                                        <React.Fragment key={page}>
+                                            {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
+                                            <button
+                                                onClick={() => goToPage(page)}
+                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
+                                                    currentPage === page 
+                                                    ? 'bg-[#003366] text-white shadow-md scale-110' 
+                                                    : 'text-slate-500 hover:bg-white hover:text-slate-800'
+                                                }`}
+                                            >
+                                                {page}
+                                            </button>
+                                        </React.Fragment>
+                                    ))
+                                }
+                            </div>
+
+                            <button 
+                                onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}
+                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                            >
+                                <ChevronRight size={18}/>
+                            </button>
+                            <button 
+                                onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages}
+                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                            >
+                                <ChevronsRight size={18}/>
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </>
+         )}
       </div>
 
-      {/* --- RENDERIZAR EL MODAL NUEVO --- */}
+      {/* --- BOTONES FLOTANTES DE ACCIÓN --- */}
+      <div className="fixed bottom-8 right-8 flex flex-col gap-3 items-end z-40">
+          <motion.div initial={{ scale: 0 }} animate={{ scale: calculatedPayroll.length > 0 ? 1 : 0 }}>
+              <button 
+                onClick={() => generateBulkPayslips(calculatedPayroll, weekRange, logoLyk)}
+                className="bg-[#003366] text-white p-4 rounded-full shadow-xl hover:bg-blue-900 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20"
+                title="Descargar todas las boletas en PDF"
+              >
+                  <FileDown size={24} /> 
+                  <span className="font-bold hidden md:inline pr-2">Descargar Boletas (PDF)</span>
+              </button>
+          </motion.div>
+
+          <button 
+            onClick={() => setIsPayrollModalOpen(true)} 
+            className="bg-green-600 text-white p-4 rounded-full shadow-xl hover:bg-green-700 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20"
+            title="Exportar Reporte Excel"
+          >
+              <FileSpreadsheet size={24} /> 
+              <span className="font-bold hidden md:inline pr-2">Exportar Excel</span>
+          </button>
+      </div>
+
       <PayrollModal 
-        isOpen={isPayrollModalOpen}
-        onClose={() => setIsPayrollModalOpen(false)}
-        workers={people} // Pasamos la lista actual de personas (Obreros o Staff según el tab)
+        isOpen={isPayrollModalOpen} 
+        onClose={() => setIsPayrollModalOpen(false)} 
+        payrollData={calculatedPayroll} 
+        dateRange={weekRange} 
       />
-
     </div>
   );
 };

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { 
   Users, Search, Plus, UserCog, HardHat, 
   Briefcase, Filter, Trash2, Pencil, Baby, BookOpen, 
-  Activity, DollarSign // Agregamos icono de dinero
+  Activity, DollarSign 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
@@ -33,6 +33,7 @@ const HumanResourcesPage = () => {
     setLoading(true);
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
+      // Seleccionamos todo para asegurarnos de traer pension_system y custom_daily_rate
       const { data, error } = await supabase
         .from(table)
         .select('*')
@@ -173,9 +174,9 @@ const HumanResourcesPage = () => {
                   <th className="px-6 py-4">DNI / Doc</th>
                   <th className="px-6 py-4">{activeTab === 'staff' ? 'Cargo' : 'Categoría'}</th>
                   
-                  {/* NUEVA COLUMNA: REMUNERACIÓN */}
+                  {/* CORRECCIÓN DE ENCABEZADO */}
                   <th className="px-6 py-4 font-bold text-slate-600">
-                    {activeTab === 'staff' ? 'Sueldo Mensual' : 'Jornal Semanal'}
+                    {activeTab === 'staff' ? 'Sueldo Mensual' : 'Jornal Diario'}
                   </th>
                   
                   <th className="px-6 py-4 text-center">AFP / Régimen</th>
@@ -185,86 +186,105 @@ const HumanResourcesPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filteredData.map((user) => (
-                  <motion.tr 
-                    key={user.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="hover:bg-blue-50/30 transition-colors"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-full ${activeTab === 'staff' ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'}`}>
-                          {activeTab === 'staff' ? <Briefcase size={18} /> : <HardHat size={18} />}
-                        </div>
-                        <span className="font-bold text-slate-700">{user.full_name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-mono text-slate-600 text-sm">{user.document_number}</td>
-                    <td className="px-6 py-4">
-                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold border border-slate-200">
-                        {activeTab === 'staff' ? user.position : user.category}
-                      </span>
-                    </td>
-                    
-                    {/* CELDA DE SUELDO */}
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                         <DollarSign size={16} className="text-emerald-500"/>
-                         {activeTab === 'staff' 
-                            ? (user.salary ? `S/ ${parseFloat(user.salary).toFixed(2)}` : '-') 
-                            : (user.weekly_rate ? `S/ ${parseFloat(user.weekly_rate).toFixed(2)}` : '-')
-                         }
-                      </div>
-                    </td>
+                {filteredData.map((user) => {
+                  
+                  // --- Lógica para mostrar AFP/Régimen correctamente ---
+                  // Priorizamos 'pension_system' (nuevo), fallamos a 'afp' (viejo)
+                  const displayAFP = user.pension_system || user.afp;
 
-                    <td className="px-6 py-4 text-center">
-                      {user.afp ? (
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[#003366] text-xs font-bold border border-blue-100">
-                           <BookOpen size={12}/> {user.afp}
-                        </div>
-                      ) : <span className="text-slate-400 text-xs">-</span>}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      {user.has_children ? (
-                        <div className="inline-flex items-center gap-1 text-slate-600 font-bold text-sm" title={`${user.children_count} Hijos`}>
-                           <Baby size={16} className="text-pink-400"/> {user.children_count}
-                        </div>
-                      ) : <span className="text-slate-300 text-xs font-medium">No</span>}
-                    </td>
-                    
-                    <td className="px-6 py-4 text-center">
-                       {renderStatusBadge(user.status)}
-                    </td>
+                  // --- Lógica para mostrar Sueldo ---
+                  // Workers: custom_daily_rate (Pactado) o "Según Tabla"
+                  // Staff: salary
+                  let displaySalary = '-';
+                  if (activeTab === 'staff') {
+                      displaySalary = user.salary ? `S/ ${parseFloat(user.salary).toFixed(2)}` : '-';
+                  } else {
+                      // Para obreros, si tiene sueldo pactado lo mostramos, si no, indicamos que usa tabla
+                      displaySalary = user.custom_daily_rate 
+                          ? `S/ ${parseFloat(user.custom_daily_rate).toFixed(2)}` 
+                          : <span className="text-[10px] uppercase text-slate-400 bg-slate-100 px-2 py-1 rounded">Según Tabla</span>;
+                  }
 
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button 
-                          onClick={() => handleStatusChange(user)}
-                          className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                          title="Cambiar Estado"
-                        >
-                          <Activity size={18}/>
-                        </button>
+                  return (
+                    <motion.tr 
+                      key={user.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="hover:bg-blue-50/30 transition-colors"
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-full ${activeTab === 'staff' ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {activeTab === 'staff' ? <Briefcase size={18} /> : <HardHat size={18} />}
+                          </div>
+                          <span className="font-bold text-slate-700">{user.full_name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-slate-600 text-sm">{user.document_number}</td>
+                      <td className="px-6 py-4">
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold border border-slate-200">
+                          {activeTab === 'staff' ? user.position : user.category}
+                        </span>
+                      </td>
+                      
+                      {/* CELDA DE SUELDO CORREGIDA */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                           <DollarSign size={16} className="text-emerald-500"/>
+                           {displaySalary}
+                        </div>
+                      </td>
 
-                        <button 
-                          onClick={() => handleEdit(user)}
-                          className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Editar"
-                        >
-                          <Pencil size={18}/>
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(user.id)}
-                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Eliminar"
-                        >
-                          <Trash2 size={18}/>
-                        </button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))}
+                      {/* CELDA DE AFP CORREGIDA */}
+                      <td className="px-6 py-4 text-center">
+                        {displayAFP ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[#003366] text-xs font-bold border border-blue-100">
+                             <BookOpen size={12}/> {displayAFP}
+                          </div>
+                        ) : <span className="text-slate-400 text-xs">-</span>}
+                      </td>
+
+                      <td className="px-6 py-4 text-center">
+                        {user.has_children ? (
+                          <div className="inline-flex items-center gap-1 text-slate-600 font-bold text-sm" title={`${user.children_count} Hijos`}>
+                             <Baby size={16} className="text-pink-400"/> {user.children_count}
+                          </div>
+                        ) : <span className="text-slate-300 text-xs font-medium">No</span>}
+                      </td>
+                      
+                      <td className="px-6 py-4 text-center">
+                         {renderStatusBadge(user.status)}
+                      </td>
+
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button 
+                            onClick={() => handleStatusChange(user)}
+                            className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Cambiar Estado"
+                          >
+                            <Activity size={18}/>
+                          </button>
+
+                          <button 
+                            onClick={() => handleEdit(user)}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Editar"
+                          >
+                            <Pencil size={18}/>
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(user.id)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar"
+                          >
+                            <Trash2 size={18}/>
+                          </button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

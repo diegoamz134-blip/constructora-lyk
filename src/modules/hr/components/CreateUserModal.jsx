@@ -28,8 +28,9 @@ const dropdownVariants = {
   exit: { opacity: 0, y: -10, scale: 0.95, transition: { duration: 0.1 } }
 };
 
-// --- Listas de Opciones Estáticas ---
+// --- Listas de Opciones ---
 const CATEGORIES = ['Peón', 'Oficial', 'Operario', 'Capataz'];
+// NOTA: Estas opciones deben coincidir con los nombres en tu tabla 'afp_rates' para que el cálculo automático funcione
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const ROLES = ['Usuario', 'Admin', 'Supervisor', 'Residente'];
 
@@ -89,11 +90,13 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         document_number: userToEdit.document_number || '',
         position: userToEdit.position || '',
         category: userToEdit.category || 'Peón',
-        amount: userToEdit.salary || userToEdit.weekly_rate || '',
+        // Mapeo inteligente: para workers usa custom_daily_rate, para staff usa salary
+        amount: userToEdit.salary || userToEdit.custom_daily_rate || userToEdit.weekly_rate || '',
         start_date: userToEdit.start_date || userToEdit.entry_date || '',
         contract_end_date: userToEdit.contract_end_date || '',
         password: '',
-        afp: userToEdit.afp || '',
+        // Mapeo inteligente: usa pension_system si existe, sino afp
+        afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
         has_children: userToEdit.has_children || false,
         children_count: userToEdit.children_count || 0,
         email: userToEdit.email || '',
@@ -110,7 +113,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         start_date: new Date().toISOString().split('T')[0],
         contract_end_date: '',
         password: '',
-        afp: '',
+        afp: 'ONP',
         has_children: false,
         children_count: 0,
         email: '',
@@ -124,7 +127,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     setFormData({ ...formData, [e.target.name]: value });
   };
 
-  // --- Función auxiliar para seleccionar opciones en los menús personalizados ---
+  // --- Función auxiliar para seleccionar opciones ---
   const handleSelectOption = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (field === 'document_type') setShowDocTypeMenu(false);
@@ -135,7 +138,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
 
   const handleDocumentChange = (e) => {
     const value = e.target.value.replace(/\D/g, ''); 
-    const maxLength = formData.document_type === 'DNI' ? 8 : 9;
+    const maxLength = formData.document_type === 'DNI' ? 8 : 12; // DNI 8, CE puede ser más
 
     if (value.length <= maxLength) {
       setFormData({ ...formData, document_number: value });
@@ -146,13 +149,11 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     e.preventDefault();
     setLoading(true);
 
-    const requiredLength = formData.document_type === 'DNI' ? 8 : 9;
-    if (formData.document_number.length !== requiredLength) {
+    // Validación básica
+    if (formData.document_type === 'DNI' && formData.document_number.length !== 8) {
         setNotification({
-            isOpen: true,
-            type: 'error',
-            title: 'Documento Incompleto',
-            message: `El ${formData.document_type} debe tener ${requiredLength} dígitos.`
+            isOpen: true, type: 'error', title: 'Documento Inválido',
+            message: `El DNI debe tener exactamente 8 dígitos.`
         });
         setLoading(false);
         return;
@@ -161,29 +162,26 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
       
+      // Construir objeto base
       const payload = {
         full_name: formData.full_name,
         document_type: formData.document_type,
         document_number: formData.document_number,
-        afp: formData.afp || null,
         has_children: formData.has_children,
-        children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0
+        children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
+        status: userToEdit ? userToEdit.status : 'Activo' // Mantener estado o default Activo
       };
 
-      // Encriptar contraseña
-      let passwordHash = null;
-      if (formData.password) {
+      // Manejo de Contraseña (Encriptación)
+      // Si el usuario escribió una nueva contraseña O es un usuario nuevo (generamos default)
+      if (formData.password || !userToEdit) {
+        const plainPassword = formData.password || formData.document_number; // Si es nuevo y no puso pass, usa DNI
         const salt = await bcrypt.genSalt(10);
-        passwordHash = await bcrypt.hash(formData.password, salt);
-        payload.password = passwordHash;
-      } else if (!userToEdit) {
-        // Contraseña por defecto: el mismo número de documento
-        const plainPassword = formData.document_number;
-        const salt = await bcrypt.genSalt(10);
-        passwordHash = await bcrypt.hash(plainPassword, salt);
+        const passwordHash = await bcrypt.hash(plainPassword, salt);
         payload.password = passwordHash;
       }
 
+      // Datos Específicos por Tipo
       if (activeTab === 'staff') {
         payload.entry_date = formData.start_date;
         payload.position = formData.position;
@@ -191,26 +189,30 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
         payload.contract_end_date = formData.contract_end_date || null;
         payload.email = formData.email;
         payload.role = formData.role;
-        
-        if (!userToEdit) {
-            payload.status = 'Activo';
-        }
+        payload.pension_system = formData.afp; // Guardar AFP también para staff
 
-        if (!formData.email && activeTab === 'staff') {
-            throw new Error("El correo electrónico es obligatorio para el personal administrativo.");
+        if (!formData.email && !userToEdit) {
+            throw new Error("El correo es obligatorio para administrativos.");
         }
 
       } else {
+        // --- OBREROS (WORKERS) ---
         payload.start_date = formData.start_date;
         payload.category = formData.category;
-        payload.weekly_rate = parseFloat(formData.amount || 0);
+        
+        // IMPORTANTE: Guardamos en 'custom_daily_rate' para que la planilla lo use como "Sueldo Pactado"
+        // Si se deja vacío, se guarda NULL y la planilla usará el valor de la tabla maestra.
+        payload.custom_daily_rate = formData.amount ? parseFloat(formData.amount) : null;
+        
+        // Guardamos el régimen en 'pension_system' para compatibilidad con la planilla automática
+        payload.pension_system = formData.afp; 
         
         if (!userToEdit) {
             payload.project_assigned = 'Sin asignar';
-            payload.status = 'Activo';
         }
       }
 
+      // Ejecutar Query
       let error;
       if (userToEdit) {
         const { error: updateError } = await supabase.from(table).update(payload).eq('id', userToEdit.id);
@@ -222,43 +224,30 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
 
       if (error) throw error;
 
-      // Sincronizar con Profiles (Solo Staff)
-      if (activeTab === 'staff') {
-          const { data: existingProfile } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('email', formData.email)
-              .maybeSingle();
-
-          const profileData = {
-              full_name: formData.full_name,
-              email: formData.email,
-              role: formData.role,
-              status: 'Activo',
-          };
-
+      // Sincronizar Perfil (Solo Staff - Opcional)
+      if (activeTab === 'staff' && formData.email) {
+          const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
+          const profileData = { full_name: formData.full_name, email: formData.email, role: formData.role, status: 'Activo' };
+          
           if (existingProfile) {
               await supabase.from('profiles').update(profileData).eq('id', existingProfile.id);
           } else {
-              const newProfileId = crypto.randomUUID(); 
-              await supabase.from('profiles').insert([{ id: newProfileId, ...profileData }]);
+              // Crear perfil si no existe
+              await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]);
           }
       }
 
       setNotification({
-        isOpen: true,
-        type: 'success',
-        title: userToEdit ? '¡Actualización Exitosa!' : '¡Registro Exitoso!',
-        message: userToEdit ? `Datos actualizados correctamente.` : `Personal registrado correctamente.`
+        isOpen: true, type: 'success',
+        title: userToEdit ? '¡Actualizado!' : '¡Registrado!',
+        message: userToEdit ? `Datos de ${formData.full_name} actualizados.` : `${formData.full_name} ha sido registrado.`
       });
 
     } catch (error) {
-      console.error(error);
+      console.error("Error al guardar:", error);
       setNotification({
-        isOpen: true,
-        type: 'error',
-        title: 'Error',
-        message: error.message || 'No se pudo guardar los cambios.'
+        isOpen: true, type: 'error', title: 'Error',
+        message: error.message || 'No se pudo guardar en la base de datos.'
       });
     } finally {
       setLoading(false);
@@ -275,16 +264,11 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
 
   const DropdownOption = ({ label, isSelected, onClick }) => (
     <button
-        type="button"
-        onClick={onClick}
-        className={`w-full text-left px-4 py-2.5 text-sm font-medium flex items-center justify-between group transition-all rounded-lg mx-1 my-0.5 ${
-            isSelected 
-                ? 'bg-blue-50 text-[#003366]' 
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-        }`}
+        type="button" onClick={onClick}
+        className={`w-full text-left px-4 py-2.5 text-sm font-medium flex items-center justify-between group transition-all rounded-lg mx-1 my-0.5 ${isSelected ? 'bg-blue-50 text-[#003366]' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
     >
         {label}
-        {isSelected && <motion.div initial={{scale:0}} animate={{scale:1}}><Check size={16} className="text-[#003366]"/></motion.div>}
+        {isSelected && <Check size={16} className="text-[#003366]"/>}
     </button>
   );
 
@@ -293,27 +277,19 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
       <AnimatePresence>
         {isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              variants={overlayVariants}
-              initial="hidden" animate="visible" exit="exit"
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
-              onClick={onClose} 
-            />
+            <motion.div variants={overlayVariants} initial="hidden" animate="visible" exit="exit" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
             
-            <motion.div 
-              variants={modalVariants}
-              initial="hidden" animate="visible" exit="exit"
-              className="bg-white rounded-2xl shadow-xl w-full max-w-lg relative z-10 overflow-hidden flex flex-col max-h-[90vh]"
-            >
+            <motion.div variants={modalVariants} initial="hidden" animate="visible" exit="exit" className="bg-white rounded-2xl shadow-xl w-full max-w-lg relative z-10 overflow-hidden flex flex-col max-h-[90vh]">
               {/* Header */}
               <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 flex-shrink-0">
-                <h3 className="font-bold text-lg text-slate-800">
+                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                  <User className="text-[#003366]" size={20}/>
                   {userToEdit ? 'Editar' : 'Nuevo'} {activeTab === 'staff' ? 'Colaborador' : 'Obrero'}
                 </h3>
                 <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200 transition"><X size={20}/></button>
               </div>
 
-              {/* Formulario */}
+              {/* Formulario Scrollable */}
               <div className="overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200">
                 <form onSubmit={handleSubmit} className="space-y-5">
                   
@@ -322,11 +298,7 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     <label className="text-xs font-bold text-slate-500 uppercase ml-1">Nombre Completo</label>
                     <div className="relative group">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
-                      <input 
-                        name="full_name" required value={formData.full_name} onChange={handleChange}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
-                        placeholder="Apellidos y Nombres"
-                      />
+                      <input name="full_name" required value={formData.full_name} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all" placeholder="Apellidos y Nombres" />
                     </div>
                   </div>
 
@@ -334,63 +306,30 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5 z-30">
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">Documento</label>
-                        <div 
-                            ref={docTypeRef}
-                            className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl focus-within:border-[#003366] focus-within:ring-1 focus-within:ring-blue-900/20 transition-all h-[48px]"
-                        >
+                        <div ref={docTypeRef} className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl h-[48px]">
                             <div className="relative h-full">
-                                <button 
-                                    type="button"
-                                    onClick={() => setShowDocTypeMenu(!showDocTypeMenu)}
-                                    className="h-full flex items-center gap-1.5 px-3 text-slate-700 font-bold text-sm hover:bg-slate-100 rounded-l-xl transition-colors border-r border-slate-200 min-w-[85px] justify-between focus:outline-none"
-                                >
-                                    {formData.document_type}
-                                    <ChevronDown size={16} className={`text-slate-400 transition-transform duration-300 ${showDocTypeMenu ? 'rotate-180' : ''}`} />
+                                <button type="button" onClick={() => setShowDocTypeMenu(!showDocTypeMenu)} className="h-full flex items-center gap-1.5 px-3 text-slate-700 font-bold text-sm hover:bg-slate-100 rounded-l-xl transition-colors border-r border-slate-200 min-w-[85px] justify-between">
+                                    {formData.document_type} <ChevronDown size={16} className={`text-slate-400 transition-transform ${showDocTypeMenu ? 'rotate-180' : ''}`} />
                                 </button>
                                 <AnimatePresence>
                                     {showDocTypeMenu && (
-                                        <motion.div 
-                                            variants={dropdownVariants}
-                                            initial="hidden" animate="visible" exit="exit"
-                                            className="absolute top-[115%] left-0 w-[140px] bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden"
-                                        >
-                                            {['DNI', 'CE'].map((type) => (
-                                                <DropdownOption 
-                                                    key={type} label={type} 
-                                                    isSelected={formData.document_type === type}
-                                                    onClick={() => {
-                                                        handleSelectOption('document_type', type);
-                                                        setFormData(prev => ({...prev, document_number: ''}));
-                                                    }}
-                                                />
-                                            ))}
+                                        <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-[115%] left-0 w-[140px] bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden">
+                                            {['DNI', 'CE'].map(t => <DropdownOption key={t} label={t} isSelected={formData.document_type === t} onClick={() => { handleSelectOption('document_type', t); setFormData(prev => ({...prev, document_number: ''})); }} />)}
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
                             </div>
-                            <div className="flex-1 relative h-full">
-                                <FileBadge className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
-                                <input 
-                                    name="document_number" required value={formData.document_number} onChange={handleDocumentChange}
-                                    className="w-full h-full pl-10 pr-4 bg-transparent border-none outline-none text-sm font-mono font-medium tracking-wide text-slate-800 placeholder:text-slate-400 rounded-r-xl"
-                                    placeholder={formData.document_type === 'DNI' ? '8 dígitos' : '9 dígitos'}
-                                    autoComplete="off"
-                                />
-                            </div>
+                            <input name="document_number" required value={formData.document_number} onChange={handleDocumentChange} className="w-full h-full pl-3 pr-4 bg-transparent outline-none text-sm font-mono font-medium tracking-wide text-slate-800 rounded-r-xl" placeholder="Número" autoComplete="off" />
                         </div>
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">
-                          {activeTab === 'staff' ? 'Salario Mensual' : 'Jornal Semanal'}
+                          {activeTab === 'staff' ? 'Salario Mensual' : 'Jornal Diario (Opcional)'}
                         </label>
                         <div className="relative group h-[48px]">
                           <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
-                          <input 
-                            type="number" name="amount" required value={formData.amount} onChange={handleChange}
-                            className="w-full h-full pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
-                            placeholder="0.00"
-                          />
+                          <input type="number" name="amount" value={formData.amount} onChange={handleChange} className="w-full h-full pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all" placeholder={activeTab === 'staff' ? "0.00" : "Usar Tabla"} />
                         </div>
                     </div>
                   </div>
@@ -399,60 +338,35 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                   <div className="grid grid-cols-2 gap-4">
                     <div className={`space-y-1.5 ${activeTab !== 'staff' ? 'col-span-2' : ''}`}>
                       <label className="text-xs font-bold text-slate-500 uppercase ml-1">Fecha Ingreso</label>
-                      <input 
-                        type="date" name="start_date" required value={formData.start_date} onChange={handleChange}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all text-slate-600 h-[48px]"
-                      />
+                      <input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] h-[48px] text-slate-600" />
                     </div>
                     {activeTab === 'staff' && (
                       <div className="space-y-1.5">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">Fin Contrato</label>
-                          <input 
-                          type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all text-slate-600 h-[48px]"
-                          />
+                          <input type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] h-[48px] text-slate-600" />
                       </div>
                     )}
                   </div>
 
+                  {/* Categoría / Cargo */}
                   <div className="space-y-1.5 z-20">
-                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">
-                      {activeTab === 'staff' ? 'Cargo' : 'Categoría'}
-                    </label>
+                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">{activeTab === 'staff' ? 'Cargo' : 'Categoría'}</label>
                     {activeTab === 'staff' ? (
                       <div className="relative group h-[48px]">
                         <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
-                        <input 
-                          name="position" required value={formData.position} onChange={handleChange}
-                          className="w-full h-full pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all"
-                          placeholder="Ej. Arquitecto"
-                        />
+                        <input name="position" required value={formData.position} onChange={handleChange} className="w-full h-full pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all" placeholder="Ej. Arquitecto" />
                       </div>
                     ) : (
                       <div ref={categoryRef} className="relative h-[48px]">
                         <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={18} />
-                        <button
-                            type="button"
-                            onClick={() => setShowCategoryMenu(!showCategoryMenu)}
-                            className={`w-full h-full pl-10 pr-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showCategoryMenu ? 'border-[#003366] ring-1 ring-blue-900/20' : 'border-slate-200 hover:border-slate-300'}`}
-                        >
+                        <button type="button" onClick={() => setShowCategoryMenu(!showCategoryMenu)} className={`w-full h-full pl-10 pr-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showCategoryMenu ? 'border-[#003366]' : 'border-slate-200'}`}>
                             <span className="text-slate-700">{formData.category}</span>
-                            <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showCategoryMenu ? 'rotate-180' : ''}`} />
+                            <ChevronDown size={18} className={`text-slate-400 transition-transform ${showCategoryMenu ? 'rotate-180' : ''}`} />
                         </button>
                         <AnimatePresence>
                             {showCategoryMenu && (
-                                <motion.div 
-                                    variants={dropdownVariants}
-                                    initial="hidden" animate="visible" exit="exit"
-                                    className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden"
-                                >
-                                    {CATEGORIES.map(cat => (
-                                        <DropdownOption 
-                                            key={cat} label={cat} 
-                                            isSelected={formData.category === cat}
-                                            onClick={() => handleSelectOption('category', cat)}
-                                        />
-                                    ))}
+                                <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden">
+                                    {CATEGORIES.map(cat => <DropdownOption key={cat} label={cat} isSelected={formData.category === cat} onClick={() => handleSelectOption('category', cat)} />)}
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -462,38 +376,21 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
 
                   <div className="pt-5 mt-2 border-t border-slate-100 z-10">
                     <h4 className="text-sm font-bold text-[#003366] mb-4 flex items-center gap-2">
-                      <div className="p-1.5 bg-blue-50 rounded-lg"><BookOpen size={16}/></div> 
-                      Información Adicional
+                      <div className="p-1.5 bg-blue-50 rounded-lg"><BookOpen size={16}/></div> Información Adicional
                     </h4>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5 relative" ref={afpRef}>
                         <label className="text-xs font-bold text-slate-500 uppercase ml-1">Régimen Pensionario</label>
                         <div className="relative h-[48px]">
-                            <button
-                                type="button"
-                                onClick={() => setShowAfpMenu(!showAfpMenu)}
-                                className={`w-full h-full px-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showAfpMenu ? 'border-[#003366] ring-1 ring-blue-900/20' : 'border-slate-200 hover:border-slate-300'}`}
-                            >
-                                <span className={`${formData.afp ? 'text-slate-700' : 'text-slate-400'}`}>
-                                    {formData.afp || 'Seleccione...'}
-                                </span>
-                                <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showAfpMenu ? 'rotate-180' : ''}`} />
+                            <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className={`w-full h-full px-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showAfpMenu ? 'border-[#003366]' : 'border-slate-200'}`}>
+                                <span className={`${formData.afp ? 'text-slate-700' : 'text-slate-400'}`}>{formData.afp || 'Seleccione...'}</span>
+                                <ChevronDown size={18} className={`text-slate-400 transition-transform ${showAfpMenu ? 'rotate-180' : ''}`} />
                             </button>
                             <AnimatePresence>
                                 {showAfpMenu && (
-                                    <motion.div 
-                                        variants={dropdownVariants}
-                                        initial="hidden" animate="visible" exit="exit"
-                                        className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden max-h-[200px] overflow-y-auto scrollbar-thin"
-                                    >
-                                        {AFPS.map(afpOption => (
-                                            <DropdownOption 
-                                                key={afpOption} label={afpOption} 
-                                                isSelected={formData.afp === afpOption}
-                                                onClick={() => handleSelectOption('afp', afpOption)}
-                                            />
-                                        ))}
+                                    <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden max-h-[200px] overflow-y-auto scrollbar-thin">
+                                        {AFPS.map(afpOption => <DropdownOption key={afpOption} label={afpOption} isSelected={formData.afp === afpOption} onClick={() => handleSelectOption('afp', afpOption)} />)}
                                     </motion.div>
                                 )}
                             </AnimatePresence>
@@ -501,13 +398,9 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                       </div>
 
                       <div className="flex flex-col justify-end">
-                         <div 
-                           onClick={() => setFormData(prev => ({ ...prev, has_children: !prev.has_children }))}
-                           className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer h-[48px] ${formData.has_children ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}
-                         >
+                         <div onClick={() => setFormData(prev => ({ ...prev, has_children: !prev.has_children }))} className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer h-[48px] ${formData.has_children ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
                             <label className="text-sm font-bold text-slate-700 flex items-center gap-2 cursor-pointer pointer-events-none">
-                              <Baby size={18} className={formData.has_children ? 'text-[#003366]' : 'text-slate-400'}/>
-                              ¿Tiene Hijos?
+                              <Baby size={18} className={formData.has_children ? 'text-[#003366]' : 'text-slate-400'}/> ¿Tiene Hijos?
                             </label>
                             <div className={`w-11 h-6 rounded-full relative transition-colors ${formData.has_children ? 'bg-[#003366]' : 'bg-slate-300'}`}>
                                 <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full shadow-sm transition-transform ${formData.has_children ? 'translate-x-5' : 'translate-x-0'}`}></div>
@@ -518,23 +411,10 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                     
                     <AnimatePresence>
                       {formData.has_children && (
-                        <motion.div 
-                          initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                          animate={{ height: 'auto', opacity: 1, marginTop: 12 }}
-                          exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                          className="overflow-hidden"
-                        >
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1, marginTop: 12 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                           <div className="space-y-1.5">
                             <label className="text-xs font-bold text-slate-500 uppercase ml-1">Número de Hijos</label>
-                            <input 
-                              type="number" 
-                              name="children_count" 
-                              min="1"
-                              value={formData.children_count} 
-                              onChange={handleChange}
-                              className="w-full px-4 py-3 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold text-[#003366] focus:outline-none focus:border-[#003366] h-[48px]"
-                              placeholder="0"
-                            />
+                            <input type="number" name="children_count" min="1" value={formData.children_count} onChange={handleChange} className="w-full px-4 py-3 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold text-[#003366] focus:outline-none focus:border-[#003366] h-[48px]" placeholder="0" />
                           </div>
                         </motion.div>
                       )}
@@ -543,63 +423,34 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
 
                   {activeTab === 'staff' && (
                     <div className="pt-5 mt-2 border-t border-slate-100 z-0">
-                        <h4 className="text-sm font-bold text-[#003366] mb-4 flex items-center gap-2">
-                            <div className="p-1.5 bg-blue-50 rounded-lg"><KeyRound size={16}/></div> 
-                            Credenciales de Acceso
-                        </h4>
-                        
+                        <h4 className="text-sm font-bold text-[#003366] mb-4 flex items-center gap-2"><div className="p-1.5 bg-blue-50 rounded-lg"><KeyRound size={16}/></div> Credenciales</h4>
                         <div className="space-y-1.5 mb-4">
-                            <label className="text-xs font-bold text-slate-500 uppercase ml-1">Correo Electrónico (Usuario)</label>
+                            <label className="text-xs font-bold text-slate-500 uppercase ml-1">Correo Electrónico</label>
                             <div className="relative group">
-                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
-                                <input 
-                                    type="email" name="email" required value={formData.email} onChange={handleChange}
-                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
-                                    placeholder="usuario@empresa.com"
-                                />
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                <input type="email" name="email" required value={formData.email} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366]" placeholder="usuario@empresa.com" />
                             </div>
                         </div>
-
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
                                 <label className="text-xs font-bold text-slate-500 uppercase ml-1">Contraseña</label>
                                 <div className="relative group">
-                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={18} />
-                                    <input 
-                                        type="password" name="password" value={formData.password} onChange={handleChange}
-                                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] focus:ring-1 focus:ring-blue-900/20 transition-all placeholder:text-slate-400"
-                                        placeholder={userToEdit ? "(Sin cambios)" : "••••••••"}
-                                    />
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366]" placeholder={userToEdit ? "(Sin cambios)" : "••••••••"} />
                                 </div>
                             </div>
-
-                            {/* --- SELECT ANIMADO PARA ROL --- */}
                             <div className="space-y-1.5" ref={roleRef}>
-                                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Rol / Permisos</label>
+                                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Rol</label>
                                 <div className="relative h-[48px]">
                                     <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={18} />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowRoleMenu(!showRoleMenu)}
-                                        className={`w-full h-full pl-10 pr-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showRoleMenu ? 'border-[#003366] ring-1 ring-blue-900/20' : 'border-slate-200 hover:border-slate-300'}`}
-                                    >
+                                    <button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className={`w-full h-full pl-10 pr-4 bg-slate-50 border rounded-xl text-sm font-medium flex items-center justify-between transition-all ${showRoleMenu ? 'border-[#003366]' : 'border-slate-200'}`}>
                                         <span className="text-slate-700">{formData.role}</span>
-                                        <ChevronDown size={18} className={`text-slate-400 transition-transform duration-300 ${showRoleMenu ? 'rotate-180' : ''}`} />
+                                        <ChevronDown size={18} className={`text-slate-400 transition-transform ${showRoleMenu ? 'rotate-180' : ''}`} />
                                     </button>
                                     <AnimatePresence>
                                         {showRoleMenu && (
-                                            <motion.div 
-                                                variants={dropdownVariants}
-                                                initial="hidden" animate="visible" exit="exit"
-                                                className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden"
-                                            >
-                                                {ROLES.map(role => (
-                                                    <DropdownOption 
-                                                        key={role} label={role} 
-                                                        isSelected={formData.role === role}
-                                                        onClick={() => handleSelectOption('role', role)}
-                                                    />
-                                                ))}
+                                            <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-[115%] left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 overflow-hidden">
+                                                {ROLES.map(role => <DropdownOption key={role} label={role} isSelected={formData.role === role} onClick={() => handleSelectOption('role', role)} />)}
                                             </motion.div>
                                         )}
                                     </AnimatePresence>
@@ -607,17 +458,6 @@ const CreateUserModal = ({ isOpen, onClose, activeTab, onSuccess, userToEdit }) 
                             </div>
                         </div>
                     </div>
-                  )}
-
-                  {activeTab !== 'staff' && userToEdit && (
-                      <div className="pt-5 mt-2 border-t border-slate-100 space-y-1.5">
-                          <label className="text-xs font-bold text-slate-500 uppercase ml-1">Cambiar Contraseña (Opcional)</label>
-                          <input 
-                              type="password" name="password" value={formData.password} onChange={handleChange}
-                              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-[#003366] transition-all"
-                              placeholder="Dejar vacío para mantener actual"
-                          />
-                      </div>
                   )}
 
                   <div className="pt-6 flex gap-3 z-0 relative">

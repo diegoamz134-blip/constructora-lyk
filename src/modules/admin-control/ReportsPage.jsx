@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { MapPin, Calendar, Clock, FileSpreadsheet, FileText, Filter, Camera, User, HardHat, UserCog, Loader2, Search } from 'lucide-react';
+import { 
+  MapPin, Calendar, Clock, FileSpreadsheet, FileText, Filter, 
+  Camera, User, HardHat, UserCog, Loader2, Search, 
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight 
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../services/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -14,6 +19,10 @@ const ReportsPage = () => {
   const [selectedProject, setSelectedProject] = useState('Todos');
   const [activeTab, setActiveTab] = useState('workers'); 
   const [loading, setLoading] = useState(true);
+
+  // --- PAGINACIÓN ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // --- Filtros de Fecha (Semana Actual por defecto) ---
   const getStartOfWeek = () => {
@@ -55,6 +64,7 @@ const ReportsPage = () => {
   // 2. Cargar Asistencia
   const fetchAttendance = async () => {
     setLoading(true);
+    setCurrentPage(1); // Resetear página al filtrar
     try {
       let query = supabase
         .from('attendance')
@@ -105,12 +115,24 @@ const ReportsPage = () => {
     return false;
   });
 
+  // --- LÓGICA DE PAGINACIÓN ---
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+  const goToPage = (pageNumber) => {
+    if (pageNumber >= 1 && pageNumber <= totalPages) {
+      setCurrentPage(pageNumber);
+    }
+  };
+
   const getMapLink = (locationString) => {
     if (!locationString || locationString.includes('Panel')) return '#';
     return `https://www.google.com/maps/search/?api=1&query=${locationString}`;
   };
 
-  // --- CALCULADORA DE HORAS ---
+  // --- CALCULADORA DE HORAS (TU LÓGICA ORIGINAL) ---
   const calculateTareoValues = (checkOutTime) => {
     if (!checkOutTime) return { n: 1, he60: 0, he100: 0 }; 
     const exitDate = new Date(checkOutTime);
@@ -136,7 +158,7 @@ const ReportsPage = () => {
   };
 
   // =========================================================
-  //  EXPORTACIÓN EXCEL (PLANTILLA SENATI PISCO)
+  //  EXPORTACIÓN EXCEL (TU LÓGICA ORIGINAL)
   // =========================================================
   const generateWeeklyTareo = async () => {
     try {
@@ -381,7 +403,7 @@ const ReportsPage = () => {
   };
 
   // =========================================================
-  //  EXPORTACIÓN PDF: UNA PÁGINA POR DÍA
+  //  EXPORTACIÓN PDF (TU LÓGICA ORIGINAL)
   // =========================================================
   const exportToPDF = () => {
     try {
@@ -390,10 +412,9 @@ const ReportsPage = () => {
         img.src = logoFull;
         
         img.onload = () => {
-            // Generar lista de días en el rango seleccionado
             const daysInRange = [];
             let currDate = new Date(dateRange.start);
-            currDate.setMinutes(currDate.getMinutes() + currDate.getTimezoneOffset()); // Ajuste zona horaria
+            currDate.setMinutes(currDate.getMinutes() + currDate.getTimezoneOffset());
             const lastDate = new Date(dateRange.end);
             lastDate.setMinutes(lastDate.getMinutes() + lastDate.getTimezoneOffset());
 
@@ -402,17 +423,13 @@ const ReportsPage = () => {
                 currDate.setDate(currDate.getDate() + 1);
             }
 
-            // Iterar sobre cada día y crear una página
             daysInRange.forEach((day, index) => {
-                // Si no es el primer día, agregar nueva página
                 if (index > 0) doc.addPage();
 
-                // Encabezado de Página
                 doc.addImage(img, 'PNG', 14, 10, 35, 12);
                 doc.setFontSize(14);
                 doc.setTextColor(0, 51, 102);
                 
-                // Formato de fecha bonito: "Lunes, 12 de Octubre de 2025"
                 const dateStr = day.toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
                 
                 doc.text(`ASISTENCIA DIARIA - ${activeTab === 'workers' ? 'OBREROS' : 'STAFF'}`, 280, 18, { align: 'right' });
@@ -421,13 +438,10 @@ const ReportsPage = () => {
                 doc.text(`Fecha: ${dateStr.toUpperCase()}`, 280, 24, { align: 'right' });
                 doc.text(`Proyecto: ${selectedProject}`, 280, 28, { align: 'right' });
 
-                // Filtrar asistencia SOLO para este día
                 const dayIso = day.toISOString().split('T')[0];
                 const dayRecords = filteredData.filter(item => item.date === dayIso);
 
-                // Cuerpo de Tabla
                 if (dayRecords.length === 0) {
-                    // Mensaje si no hay datos
                     doc.setFontSize(12);
                     doc.setTextColor(150);
                     doc.text("No se registraron asistencias en este día.", 148, 50, { align: 'center' });
@@ -463,50 +477,32 @@ const ReportsPage = () => {
   };
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="space-y-6 pb-24">
       {/* HEADER + CONTROLES */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
              <FileText className="text-[#003366]"/> Reportes de Asistencia
           </h2>
-          <p className="text-slate-500 text-sm">Control detallado de personal.</p>
+          <p className="text-slate-500 text-sm">Control detallado de personal y tareos.</p>
         </div>
         
         <div className="flex flex-wrap gap-3 items-center w-full lg:w-auto">
             {/* TABS DE FILTRADO */}
             <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
-                <button 
-                    onClick={() => setActiveTab('workers')} 
-                    className={`flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${
-                        activeTab === 'workers' 
-                        ? 'bg-[#003366] text-white shadow-md' 
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                >
+                <button onClick={() => { setActiveTab('workers'); setCurrentPage(1); }} className={`flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'workers' ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
                     <HardHat size={18}/> Obreros
                 </button>
-                <button 
-                    onClick={() => setActiveTab('staff')} 
-                    className={`flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${
-                        activeTab === 'staff' 
-                        ? 'bg-[#003366] text-white shadow-md' 
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                >
+                <button onClick={() => { setActiveTab('staff'); setCurrentPage(1); }} className={`flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === 'staff' ? 'bg-[#003366] text-white shadow-md' : 'text-slate-500 hover:text-slate-700'}`}>
                     <UserCog size={18}/> Staff
                 </button>
             </div>
 
             {/* FILTROS: FECHAS */}
             <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-                <div className="relative">
-                    <input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="pl-2 pr-1 py-2 bg-transparent text-sm font-medium text-slate-700 focus:outline-none w-28" />
-                </div>
+                <div className="relative"><input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="pl-2 pr-1 py-2 bg-transparent text-sm font-medium text-slate-700 focus:outline-none w-28" /></div>
                 <span className="text-slate-300">|</span>
-                <div className="relative">
-                    <input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="pl-1 pr-2 py-2 bg-transparent text-sm font-medium text-slate-700 focus:outline-none w-28" />
-                </div>
+                <div className="relative"><input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="pl-1 pr-2 py-2 bg-transparent text-sm font-medium text-slate-700 focus:outline-none w-28" /></div>
                 <button onClick={fetchAttendance} className="p-2 bg-white rounded-lg border border-slate-200 hover:bg-slate-50 text-[#003366]"><Search size={16}/></button>
             </div>
 
@@ -525,68 +521,116 @@ const ReportsPage = () => {
         </div>
       </div>
 
-      {/* TABLA PRINCIPAL */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      {/* TABLA PRINCIPAL CON PAGINACIÓN */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
         {loading ? (
-          <div className="p-16 text-center text-slate-400 flex flex-col items-center"><Loader2 className="animate-spin mb-3 text-[#003366]" size={36}/> <p className="font-bold">Cargando registros...</p></div>
-        ) : filteredData.length === 0 ? (
-            <div className="p-16 text-center text-slate-400 flex flex-col items-center"><div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4"><Calendar size={32} className="opacity-40" /></div><h3 className="font-bold text-slate-700">Sin registros</h3><p className="text-sm">No hay asistencia registrada en este rango.</p></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase">Personal</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación / Obra</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase">Fecha</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Entrada</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Salida</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredData.map((item) => {
-                  const user = getUserData(item);
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-50/50 transition text-sm">
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-full ${user.type === 'staff' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}><User size={16}/></div>
-                            <div>
-                                <div className="font-bold text-slate-700">{user.name}</div>
-                                <div className="flex items-center gap-2"><span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${user.type === 'staff' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{user.type === 'staff' ? 'STAFF' : 'OBRERO'}</span><span className="text-xs text-slate-400">{user.role}</span></div>
-                            </div>
-                        </div>
-                      </td>
-                      <td className="p-4 text-xs font-bold text-[#003366]">{item.project_name || <span className="text-slate-300 italic">No registrado</span>}</td>
-                      <td className="p-4 text-slate-600 font-medium"><div className="flex items-center gap-2"><Calendar size={14} className="text-slate-400"/>{new Date(item.date).toLocaleDateString()}</div></td>
-                      <td className="p-4 text-center">
-                        {item.check_in_time ? (
-                          <div className="flex flex-col items-center gap-2">
-                            <span className="bg-green-50 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-green-100"><Clock size={12}/> {new Date(item.check_in_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                            <div className="flex gap-2">
-                              {item.check_in_photo && <a href={item.check_in_photo} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><Camera size={14} /></a>}
-                              {item.check_in_location && !item.check_in_location.includes('Panel') && <a href={getMapLink(item.check_in_location)} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><MapPin size={14} /></a>}
-                            </div>
-                          </div>
-                        ) : '-'}
-                      </td>
-                      <td className="p-4 text-center">
-                        {item.check_out_time ? (
-                          <div className="flex flex-col items-center gap-2">
-                            <span className="bg-orange-50 text-orange-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-orange-100"><Clock size={12}/> {new Date(item.check_out_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                            <div className="flex gap-2">
-                              {item.check_out_photo && <a href={item.check_out_photo} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><Camera size={14} /></a>}
-                              {item.check_out_location && !item.check_out_location.includes('Panel') && <a href={getMapLink(item.check_out_location)} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><MapPin size={14} /></a>}
-                            </div>
-                          </div>
-                        ) : <span className="text-slate-300 italic text-xs">En turno</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-3">
+             <Loader2 className="animate-spin text-[#003366]" size={36}/> <p className="font-bold">Cargando registros...</p>
           </div>
+        ) : filteredData.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-4">
+               <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center"><Calendar size={32} className="opacity-40" /></div>
+               <div className="text-center"><h3 className="font-bold text-slate-700">Sin registros</h3><p className="text-sm">No hay asistencia registrada en este rango.</p></div>
+            </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase">Personal</th>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase">Ubicación / Obra</th>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase">Fecha</th>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Entrada</th>
+                      <th className="p-4 text-xs font-bold text-slate-500 uppercase text-center">Salida</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    <AnimatePresence mode='wait'>
+                        {currentItems.map((item, idx) => {
+                          const user = getUserData(item);
+                          return (
+                            <motion.tr 
+                                key={item.id} 
+                                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} 
+                                transition={{ duration: 0.2, delay: idx * 0.05 }}
+                                className="hover:bg-slate-50/50 transition text-sm"
+                            >
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-full ${user.type === 'staff' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}><User size={16}/></div>
+                                    <div>
+                                        <div className="font-bold text-slate-700">{user.name}</div>
+                                        <div className="flex items-center gap-2"><span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${user.type === 'staff' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{user.type === 'staff' ? 'STAFF' : 'OBRERO'}</span><span className="text-xs text-slate-400">{user.role}</span></div>
+                                    </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-xs font-bold text-[#003366]">{item.project_name || <span className="text-slate-300 italic">No registrado</span>}</td>
+                              <td className="p-4 text-slate-600 font-medium"><div className="flex items-center gap-2"><Calendar size={14} className="text-slate-400"/>{new Date(item.date).toLocaleDateString()}</div></td>
+                              <td className="p-4 text-center">
+                                {item.check_in_time ? (
+                                  <div className="flex flex-col items-center gap-2">
+                                    <span className="bg-green-50 text-green-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-green-100"><Clock size={12}/> {new Date(item.check_in_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <div className="flex gap-2">
+                                      {item.check_in_photo && <a href={item.check_in_photo} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><Camera size={14} /></a>}
+                                      {item.check_in_location && !item.check_in_location.includes('Panel') && <a href={getMapLink(item.check_in_location)} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><MapPin size={14} /></a>}
+                                    </div>
+                                  </div>
+                                ) : '-'}
+                              </td>
+                              <td className="p-4 text-center">
+                                {item.check_out_time ? (
+                                  <div className="flex flex-col items-center gap-2">
+                                    <span className="bg-orange-50 text-orange-700 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border border-orange-100"><Clock size={12}/> {new Date(item.check_out_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <div className="flex gap-2">
+                                      {item.check_out_photo && <a href={item.check_out_photo} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><Camera size={14} /></a>}
+                                      {item.check_out_location && !item.check_out_location.includes('Panel') && <a href={getMapLink(item.check_out_location)} target="_blank" rel="noreferrer" className="p-1.5 bg-slate-100 rounded hover:text-blue-600"><MapPin size={14} /></a>}
+                                    </div>
+                                  </div>
+                                ) : <span className="text-slate-300 italic text-xs">En turno</span>}
+                              </td>
+                            </motion.tr>
+                          );
+                        })}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
+            </div>
+
+            {/* --- COMPONENTE DE PAGINACIÓN CENTRADA --- */}
+            {totalPages > 1 && (
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
+                    
+                    {/* Texto Izquierda */}
+                    <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
+                        Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, filteredData.length)} de {filteredData.length}
+                    </div>
+                    
+                    {/* Botones Centrales */}
+                    <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
+                        <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
+                        <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
+                        
+                        <div className="flex items-center gap-1 mx-2">
+                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                .filter(p => p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1))
+                                .map((page, i, arr) => (
+                                    <React.Fragment key={page}>
+                                        {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
+                                        <button onClick={() => goToPage(page)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === page ? 'bg-[#003366] text-white shadow-md scale-110' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}>
+                                            {page}
+                                        </button>
+                                    </React.Fragment>
+                                ))
+                            }
+                        </div>
+
+                        <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronRight size={18}/></button>
+                        <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsRight size={18}/></button>
+                    </div>
+                </div>
+            )}
+          </>
         )}
       </div>
 

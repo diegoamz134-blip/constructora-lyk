@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, KeyRound, Eye, EyeOff
 } from 'lucide-react';
-import bcrypt from 'bcryptjs';
+// ELIMINADO: import bcrypt from 'bcryptjs'; <-- YA NO ES NECESARIO NI SEGURO
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -49,14 +49,14 @@ const LoginPage = () => {
     setErrorMsg(null);
 
     try {
-      // 1) Intentar autenticación estándar de Supabase
-      const { error, data } = await supabase.auth.signInWithPassword({
+      // 1) Intentar autenticación estándar de Supabase Auth (Por si migras en el futuro)
+      const { error: authError, data: authData } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
       });
 
-      if (!error && data.session) {
-        // [CORRECCIÓN CRÍTICA] Buscar datos del empleado y guardarlos en localStorage
+      if (!authError && authData.session) {
+        // Lógica de sesión híbrida (Auth + Datos de tabla employees)
         const { data: employeeData } = await supabase
             .from('employees')
             .select('*')
@@ -68,42 +68,36 @@ const LoginPage = () => {
                 id: employeeData.id,
                 full_name: employeeData.full_name,
                 email: employeeData.email,
-                role: employeeData.role || 'admin'
+                role: employeeData.role || 'admin',
+                avatar_url: employeeData.avatar_url
             };
             localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(sessionPayload));
         }
-
-        setShowWelcome(true);
-        setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
+        showSuccessAndRedirect('/dashboard');
         return;
       }
 
-      // 2) Fallback: validar contra tabla "employees"
-      const { data: employee, error: employeeError } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('email', email)
-        .maybeSingle();
+      // 2) MÉTODO SEGURO RPC (Reemplaza la validación insegura anterior)
+      // Llamamos a la función segura en la base de datos
+      const { data: userData, error: rpcError } = await supabase
+        .rpc('login_admin_secure', { 
+          email_input: email, 
+          password_input: password 
+        });
 
-      if (employeeError || !employee) throw new Error('Usuario no encontrado.');
+      if (rpcError) throw rpcError;
 
-      const isMatch = await bcrypt.compare(password, employee.password || '');
-      if (!isMatch) throw new Error('Contraseña incorrecta.');
+      if (!userData) {
+        throw new Error('Credenciales incorrectas.');
+      }
 
-      const sessionPayload = {
-        id: employee.id,
-        full_name: employee.full_name,
-        email: employee.email,
-        role: employee.role || 'admin'
-      };
-
-      localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(sessionPayload));
-
-      setShowWelcome(true);
-      setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
+      // Si llegamos aquí, la contraseña es correcta y tenemos los datos SIN el hash
+      localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userData));
+      showSuccessAndRedirect('/dashboard');
 
     } catch (error) {
-      setErrorMsg(error.message || 'Credenciales incorrectas.');
+      console.error("Login error:", error);
+      setErrorMsg(error.message || 'Error al iniciar sesión.');
       setLoading(false);
     }
   };
@@ -114,30 +108,37 @@ const LoginPage = () => {
     setErrorMsg(null);
 
     try {
-      const { data, error } = await supabase
-        .from('workers')
-        .select('*')
-        .eq('document_number', dni)
-        .maybeSingle();
+      // Llamada a la función segura de base de datos para obreros
+      const { data: workerData, error } = await supabase
+        .rpc('login_worker_secure', { 
+          dni_input: dni, 
+          password_input: workerPassword 
+        });
 
-      if (error || !data) throw new Error('Documento no encontrado.');
+      if (error) throw error;
 
-      const isMatch = await bcrypt.compare(workerPassword, data.password);
-      if (!isMatch) throw new Error('Contraseña incorrecta.');
+      // Validaciones de respuesta
+      if (!workerData) {
+         throw new Error('Documento o contraseña incorrectos.');
+      }
+      if (workerData.error) {
+         throw new Error(workerData.error); // Ej: "Usuario inactivo"
+      }
 
-      if (data.status !== 'Activo') throw new Error('Usuario inactivo.');
-
-      loginWorker(data);
-      setShowWelcome(true);
-      setTimeout(() => {
-        navigate('/worker/dashboard', { replace: true });
-      }, 2000);
+      // Login exitoso
+      loginWorker(workerData);
+      showSuccessAndRedirect('/worker/dashboard');
 
     } catch (error) {
       console.error(error);
       setErrorMsg(error.message || 'Error de autenticación.');
       setLoading(false);
     }
+  };
+
+  const showSuccessAndRedirect = (path) => {
+    setShowWelcome(true);
+    setTimeout(() => navigate(path, { replace: true }), 2000);
   };
 
   return (

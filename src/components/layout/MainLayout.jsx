@@ -5,8 +5,6 @@ import {
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
-  ClipboardCheck, // Icono Tareo
-  HeartPulse,     // Icono Vacaciones/Salud (Si falla usa Activity)
   DollarSign      // Icono Planillas
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
@@ -24,8 +22,6 @@ const navItems = [
     icon: Users,
     children: [
       { path: '/users', label: 'Personal y Contratos' },
-      { path: '/asistencia-admin', label: 'Control de Tareo', icon: ClipboardCheck },
-      { path: '/ausencias', label: 'Vacaciones y Médicos', icon: HeartPulse },
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
@@ -47,8 +43,6 @@ const MainLayout = () => {
     'Recursos Humanos': location.pathname.includes('/users') || 
                         location.pathname.includes('/documentacion') || 
                         location.pathname.includes('/reportes') ||
-                        location.pathname.includes('/asistencia-admin') ||
-                        location.pathname.includes('/ausencias') ||
                         location.pathname.includes('/planillas')
   });
 
@@ -109,7 +103,7 @@ const MainLayout = () => {
                 <button 
                   onClick={() => toggleMenu(item.label)}
                   className={`w-full relative group flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-300 ${
-                      isOpen ? 'bg-white/5' : 'hover:bg-white/5'
+                    isOpen ? 'bg-white/5' : 'hover:bg-white/5'
                   }`}
                 >
                   {isActiveParent && !isOpen && (
@@ -181,8 +175,6 @@ const MainLayout = () => {
   const getPageTitle = () => {
     if (location.pathname === '/documentacion') return 'Gestión Documental';
     if (location.pathname.includes('/licitaciones')) return 'Gestión de Licitaciones';
-    if (location.pathname.includes('/asistencia-admin')) return 'Control de Tareo y Asistencia';
-    if (location.pathname.includes('/ausencias')) return 'Gestión de Vacaciones y Médicos';
     if (location.pathname.includes('/planillas')) return 'Planillas y Boletas de Pago';
     
     return navItems.find(item => item.path === location.pathname)?.label || 

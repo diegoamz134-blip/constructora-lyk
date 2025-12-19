@@ -1,259 +1,247 @@
-import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, FileSpreadsheet, Download, Calendar, Loader2, AlertCircle } from 'lucide-react';
+import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
-// Constantes de Construcción Civil (Valores aproximados según tus archivos)
-const CONSTANTS = {
-  OPERARIO: { jornal: 86.80, buc: 0.32 },
-  OFICIAL: { jornal: 68.10, buc: 0.30 },
-  PEON: { jornal: 61.30, buc: 0.30 },
-  MOVILIDAD_DIARIA: 8.60, // Según archivo parametros
-  DESCUENTO_ONP: 0.13,
-  DESCUENTO_CONAFOVICER: 0.02,
-};
+const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
+  const [loading, setLoading] = useState(false);
 
-const PayrollModal = ({ isOpen, onClose, workers = [] }) => {
-  const [weekInfo, setWeekInfo] = useState({
-    weekNumber: '',
-    startDate: '',
-    endDate: '',
-    projectName: 'UTP AREQUIPA' // Valor por defecto
-  });
-
-  const [payrollData, setPayrollData] = useState([]);
-
-  // Inicializar datos cuando se abre el modal o cambian los workers
-  useEffect(() => {
-    if (isOpen && workers.length > 0) {
-      const initialData = workers.map(worker => ({
-        id: worker.id,
-        item: '', // Se llenará al exportar
-        name: `${worker.lastname || ''} ${worker.name || ''}`.trim(),
-        category: worker.position || 'Peón', // Default
-        dni: worker.dni || '',
-        startDate: worker.startDate || '', // Fecha ingreso
-        children: worker.children || 0,
-        pensionSystem: worker.pensionSystem || 'SNP',
-        cuspp: worker.cuspp || '',
-        
-        // Variables editables por semana
-        daysWorked: 6, // Default 6 días
-        sundayVal: 1, // 1 si corresponde dominical
-        hours60: 0,
-        hours100: 0,
-        restDayHours: 0, // Trabajo en día de descanso
-        holidayHours: 0, // Trabajo en feriado
-        loans: 0, // Préstamos
-      }));
-      setPayrollData(initialData);
+  // --- LÓGICA DE EXPORTACIÓN CON ESTILOS ---
+  const handleExport = async () => {
+    if (!payrollData || payrollData.length === 0) {
+      alert("No hay datos calculados para exportar. Por favor realiza el cálculo primero en la pantalla principal.");
+      return;
     }
-  }, [isOpen, workers]);
 
-  const handleInputChange = (id, field, value) => {
-    setPayrollData(prev => prev.map(row => 
-      row.id === id ? { ...row, [field]: value } : row
-    ));
-  };
+    setLoading(true);
 
-  const calculateRow = (row) => {
-    // Determinar categoría y constantes
-    let cat = row.category.toUpperCase();
-    if (!CONSTANTS[cat]) cat = 'PEON'; // Fallback
-    const { jornal, buc: bucRate } = CONSTANTS[cat];
+    try {
+      // 1. Crear Libro y Hoja
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Planilla Consolidada', {
+        views: [{ showGridLines: false }] // Ocultar líneas de cuadrícula por defecto para un look más limpio
+      });
 
-    // Cálculos Ingresos
-    const basico = row.daysWorked * jornal;
-    const dominical = row.sundayVal * jornal;
-    const buc = basico * bucRate;
-    const movilidad = row.daysWorked * CONSTANTS.MOVILIDAD_DIARIA; // Movilidad acumulada
-    
-    // Horas Extras (Cálculo simplificado estándar CC)
-    const valorHora = jornal / 8;
-    const montoH60 = row.hours60 * (valorHora * 1.60);
-    const montoH100 = row.hours100 * (valorHora * 2.00);
-    
-    const totalSemanal = basico + dominical + buc + movilidad + montoH60 + montoH100;
-
-    // Descuentos
-    // ONP vs AFP (Lógica simplificada, asumiendo ONP por defecto o AFP si se especifica)
-    let descuentoPension = 0;
-    if (row.pensionSystem.includes('SNP') || row.pensionSystem.includes('ONP')) {
-      descuentoPension = (basico + dominical + montoH60 + montoH100) * CONSTANTS.DESCUENTO_ONP;
-    } else {
-      // Si es AFP, aprox 13% para el ejemplo (ajustar según tabla real AFP)
-      descuentoPension = (basico + dominical + montoH60 + montoH100) * 0.13; 
-    }
-    
-    const conafovicer = (basico + dominical) * CONSTANTS.DESCUENTO_CONAFOVICER;
-    const totalDescuentos = descuentoPension + conafovicer + Number(row.loans);
-
-    const neto = totalSemanal - totalDescuentos;
-
-    return {
-      ...row,
-      jornal,
-      basico,
-      dominical,
-      buc,
-      movilidad,
-      montoH60,
-      montoH100,
-      totalSemanal,
-      descuentoPension,
-      conafovicer,
-      totalDescuentos,
-      neto
-    };
-  };
-
-  const exportToExcel = () => {
-    // Preparar datos calculados
-    const calculatedData = payrollData.map((row, index) => {
-      const calc = calculateRow(row);
-      return [
-        index + 1, // Item
-        calc.name,
-        calc.category,
-        calc.dni,
-        calc.startDate,
-        calc.children,
-        calc.pensionSystem,
-        calc.cuspp,
-        calc.daysWorked,
-        calc.sundayVal > 0 ? 'SI' : 'NO',
-        calc.hours60,
-        calc.hours100,
-        calc.restDayHours,
-        calc.holidayHours,
-        calc.jornal.toFixed(2),
-        calc.basico.toFixed(2),
-        calc.buc.toFixed(2),
-        calc.movilidad.toFixed(2),
-        calc.dominical.toFixed(2),
-        calc.totalSemanal.toFixed(2),
-        calc.descuentoPension.toFixed(2),
-        calc.conafovicer.toFixed(2),
-        calc.loans,
-        calc.neto.toFixed(2)
+      // 2. Definir Columnas y Anchos
+      sheet.columns = [
+        { header: 'ITEM', key: 'index', width: 6 },
+        { header: 'DNI / CE', key: 'doc_number', width: 12 },
+        { header: 'APELLIDOS Y NOMBRES', key: 'full_name', width: 35 },
+        { header: 'CARGO', key: 'category', width: 15 },
+        { header: 'DIAS', key: 'days', width: 8 },
+        { header: 'BASICO', key: 'basic', width: 12 },
+        { header: 'DOMINICAL', key: 'dominical', width: 12 },
+        { header: 'B.U.C.', key: 'buc', width: 12 },
+        { header: 'MOVILIDAD', key: 'mobility', width: 12 },
+        { header: 'ASIG. ESC.', key: 'school', width: 12 },
+        { header: 'TOTAL ING.', key: 'total_income', width: 14 },
+        { header: 'AFP/ONP', key: 'pension_name', width: 15 },
+        { header: 'DESC. PENS.', key: 'pension_amount', width: 12 },
+        { header: 'CONAF.', key: 'conafovicer', width: 10 },
+        { header: 'ADELANTOS', key: 'advances', width: 12 },
+        { header: 'TOTAL DESC.', key: 'total_discounts', width: 14 },
+        { header: 'NETO A PAGAR', key: 'net_pay', width: 16 },
+        { header: 'ESSALUD (9%)', key: 'essalud', width: 14 },
       ];
-    });
 
-    // Encabezados
-    const header = [
-      ["CONSTRUCTORA E INVERSIONES L&K SAC."],
-      ["RUC: 20482531301"],
-      [`OBRA: ${weekInfo.projectName}`],
-      ["PLANILLA DE JORNALES DE CONSTRUCCION CIVIL - AÑO 2025"],
-      [],
-      ["SEMANA:", weekInfo.weekNumber || "___", "DEL:", weekInfo.startDate, "AL:", weekInfo.endDate],
-      []
-    ];
+      // 3. Título Corporativo (Filas 1 y 2)
+      sheet.mergeCells('A1:R1');
+      const titleCell = sheet.getCell('A1');
+      titleCell.value = 'CONSTRUCTORA E INVERSIONES L & K S.A.C.';
+      titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: '003366' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    const tableHeader = [
-      "Item", "Apellidos y Nombres", "Categoría", "DNI", "F. Ingreso", "N° Hijos",
-      "Sis. Pensión", "CUSPP", "Días Trab", "Dom", "Hrs 60%", "Hrs 100%", 
-      "H. Descanso", "H. Feriado", "Jornal Diario", "Jornal Básico", 
-      "B.U.C", "Movilidad", "Dominical", "Total Semanal", 
-      "Desc. Pensión", "Conafovicer", "Préstamos", "NETO A PAGAR"
-    ];
+      sheet.mergeCells('A2:R2');
+      const subtitleCell = sheet.getCell('A2');
+      subtitleCell.value = `PLANILLA DE PAGOS SEMANAL - DEL ${dateRange.start} AL ${dateRange.end}`;
+      subtitleCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: '555555' } };
+      subtitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    const finalData = [...header, tableHeader, ...calculatedData];
+      // Espacio antes de la tabla
+      sheet.addRow([]);
 
-    // Crear Workbook
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(finalData);
+      // 4. Estilizar Encabezados de Tabla (Fila 4)
+      const headerRow = sheet.getRow(4);
+      headerRow.values = sheet.columns.map(col => col.header);
+      headerRow.height = 25;
+      
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '003366' } // Azul L&K
+        };
+        cell.font = {
+          name: 'Arial',
+          color: { argb: 'FFFFFF' }, // Texto Blanco
+          bold: true,
+          size: 10
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'medium' },
+          right: { style: 'thin' }
+        };
+      });
 
-    // Estilos de ancho de columna (visualización)
-    ws['!cols'] = [
-      { wch: 5 }, { wch: 35 }, { wch: 10 }, { wch: 12 }, { wch: 12 },
-      { wch: 5 }, { wch: 10 }, { wch: 15 }, { wch: 8 }, { wch: 5 },
-      { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 },
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }
-    ];
+      // 5. Agregar Datos
+      let totalIncome = 0;
+      let totalNet = 0;
+      let totalEssalud = 0;
 
-    XLSX.utils.book_append_sheet(wb, ws, "Planilla");
-    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([buffer], { type: 'application/octet-stream' });
-    saveAs(blob, `Planilla_Semana_${weekInfo.weekNumber || 'Nueva'}.xlsx`);
+      payrollData.forEach((item, index) => {
+        const d = item.details || {};
+        
+        // Sumar para totales
+        totalIncome += (item.totalIncome || 0);
+        totalNet += (item.netPay || 0);
+        totalEssalud += (d.essalud || 0);
+
+        const row = sheet.addRow({
+          index: index + 1,
+          doc_number: item.person.document_number,
+          full_name: item.person.full_name.toUpperCase(),
+          category: item.person.category || 'Staff',
+          days: item.daysWorked,
+          basic: d.basicSalary,
+          dominical: d.dominical,
+          buc: d.buc,
+          mobility: d.mobility,
+          school: d.schoolAssign,
+          total_income: item.totalIncome,
+          pension_name: d.pensionName,
+          pension_amount: d.pensionAmount,
+          conafovicer: d.conafovicer,
+          advances: item.totalAdvances,
+          total_discounts: item.totalDiscounts,
+          net_pay: item.netPay,
+          essalud: d.essalud
+        });
+
+        // Estilos por Fila (Zebra Striping)
+        const isEven = (index + 1) % 2 === 0;
+        const rowFill = isEven ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F4F8FB' } } : null; // Celeste muy pálido
+
+        row.eachCell((cell, colNumber) => {
+          if (rowFill) cell.fill = rowFill;
+          
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'E0E0E0' } },
+            left: { style: 'thin', color: { argb: 'E0E0E0' } },
+            bottom: { style: 'thin', color: { argb: 'E0E0E0' } },
+            right: { style: 'thin', color: { argb: 'E0E0E0' } }
+          };
+          
+          cell.font = { name: 'Arial', size: 9 };
+
+          // Formato Moneda (Columnas 6 en adelante, excepto la 12 que es texto AFP)
+          if (colNumber >= 6 && colNumber !== 12) {
+             cell.numFmt = '"S/." #,##0.00;[Red]-"S/." #,##0.00';
+             cell.alignment = { horizontal: 'right' };
+          } else if (colNumber === 5) { // Días
+             cell.alignment = { horizontal: 'center' };
+          }
+          
+          // Resaltar Neto (Columna 17)
+          if (colNumber === 17) {
+             cell.font = { bold: true, color: { argb: '006600' } }; // Verde
+          }
+        });
+      });
+
+      // 6. Fila de Totales
+      const totalRow = sheet.addRow([
+        '', '', 'TOTAL GENERAL', '', '', 
+        '', '', '', '', '', 
+        totalIncome, 
+        '', '', '', '', '', 
+        totalNet, 
+        totalEssalud
+      ]);
+
+      totalRow.height = 20;
+      totalRow.eachCell((cell, colNumber) => {
+        cell.font = { bold: true, name: 'Arial', size: 10 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD700' } }; // Amarillo Totales
+        cell.border = { top: { style: 'double' } };
+        
+        if (colNumber >= 11) {
+            cell.numFmt = '"S/." #,##0.00';
+            cell.alignment = { horizontal: 'right' };
+        }
+      });
+
+      // 7. Descargar
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Planilla_LK_${dateRange.start}_${dateRange.end}.xlsx`);
+
+      onClose();
+
+    } catch (error) {
+      console.error("Error exportando Excel:", error);
+      alert("Hubo un error al generar el archivo Excel.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-7xl h-[90vh] flex flex-col shadow-xl">
-        
-        {/* Header Modal */}
-        <div className="flex justify-between items-center p-4 border-b">
-          <h2 className="text-xl font-bold text-gray-800">Generar Planilla Semanal (Excel)</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-red-500 text-2xl">&times;</button>
-        </div>
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+        >
+          <div className="bg-[#003366] p-6 text-white text-center relative">
+            <button onClick={onClose} className="absolute top-4 right-4 text-white/70 hover:text-white transition">
+                <X size={24}/>
+            </button>
+            <div className="bg-white/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-md">
+                <FileSpreadsheet size={32} />
+            </div>
+            <h2 className="text-xl font-bold">Exportar Planilla</h2>
+            <p className="text-blue-100 text-sm mt-1">Generar reporte Excel detallado</p>
+          </div>
 
-        {/* Formulario de Semana */}
-        <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-4 gap-4 border-b">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase">Semana N°</label>
-            <input type="number" className="w-full border rounded p-1" value={weekInfo.weekNumber} onChange={e => setWeekInfo({...weekInfo, weekNumber: e.target.value})} />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase">Desde</label>
-            <input type="date" className="w-full border rounded p-1" value={weekInfo.startDate} onChange={e => setWeekInfo({...weekInfo, startDate: e.target.value})} />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase">Hasta</label>
-            <input type="date" className="w-full border rounded p-1" value={weekInfo.endDate} onChange={e => setWeekInfo({...weekInfo, endDate: e.target.value})} />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase">Proyecto</label>
-            <input type="text" className="w-full border rounded p-1" value={weekInfo.projectName} onChange={e => setWeekInfo({...weekInfo, projectName: e.target.value})} />
-          </div>
-        </div>
+          <div className="p-6 space-y-6">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-3">
+                <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500 font-medium flex items-center gap-2"><Calendar size={16}/> Periodo:</span>
+                    <span className="font-bold text-slate-700">{dateRange?.start} al {dateRange?.end}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500 font-medium flex items-center gap-2"><FileSpreadsheet size={16}/> Registros:</span>
+                    <span className="font-bold text-slate-700">{payrollData?.length || 0} Trabajadores</span>
+                </div>
+            </div>
 
-        {/* Tabla Editable */}
-        <div className="flex-1 overflow-auto p-4">
-          <table className="min-w-full text-xs border-collapse">
-            <thead className="bg-gray-800 text-white sticky top-0 z-10">
-              <tr>
-                <th className="p-2 text-left">Trabajador</th>
-                <th className="p-2 text-left">Categoría</th>
-                <th className="p-2 text-center bg-blue-700">Días Trab.</th>
-                <th className="p-2 text-center bg-blue-700">Dom (1/0)</th>
-                <th className="p-2 text-center bg-green-700">Hrs 60%</th>
-                <th className="p-2 text-center bg-green-700">Hrs 100%</th>
-                <th className="p-2 text-center bg-orange-700">H. Desc</th>
-                <th className="p-2 text-center bg-orange-700">H. Fer</th>
-                <th className="p-2 text-center bg-red-700">Préstamos</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {payrollData.map((row) => (
-                <tr key={row.id} className="hover:bg-blue-50">
-                  <td className="p-2 font-medium">{row.name}</td>
-                  <td className="p-2 text-gray-500">{row.category}</td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.daysWorked} onChange={(e) => handleInputChange(row.id, 'daysWorked', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.sundayVal} onChange={(e) => handleInputChange(row.id, 'sundayVal', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.hours60} onChange={(e) => handleInputChange(row.id, 'hours60', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.hours100} onChange={(e) => handleInputChange(row.id, 'hours100', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.restDayHours} onChange={(e) => handleInputChange(row.id, 'restDayHours', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded" value={row.holidayHours} onChange={(e) => handleInputChange(row.id, 'holidayHours', Number(e.target.value))} /></td>
-                  <td className="p-1"><input type="number" className="w-full text-center border p-1 rounded text-red-600" value={row.loans} onChange={(e) => handleInputChange(row.id, 'loans', Number(e.target.value))} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            {(!payrollData || payrollData.length === 0) && (
+                <div className="flex items-start gap-3 p-4 bg-orange-50 text-orange-700 rounded-xl text-sm border border-orange-100">
+                    <AlertCircle className="shrink-0 mt-0.5" size={18}/>
+                    <p>No se han encontrado datos calculados. Por favor, cierra esta ventana y presiona <b>"Calcular"</b> en la pantalla principal antes de exportar.</p>
+                </div>
+            )}
 
-        {/* Footer Actions */}
-        <div className="p-4 border-t bg-gray-100 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400">Cancelar</button>
-          <button onClick={exportToExcel} className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2">
-            <span>Descargar Excel</span>
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-          </button>
-        </div>
+            <button 
+                onClick={handleExport}
+                disabled={loading || !payrollData || payrollData.length === 0}
+                className="w-full py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-green-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                {loading ? <Loader2 className="animate-spin"/> : <Download size={20}/>}
+                {loading ? 'Generando Excel...' : 'Descargar Archivo .xlsx'}
+            </button>
+          </div>
+        </motion.div>
       </div>
-    </div>
+    </AnimatePresence>
   );
 };
 
