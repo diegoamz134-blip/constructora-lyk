@@ -3,27 +3,38 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   DollarSign, Calculator, Printer, HardHat, UserCog, 
   FileSpreadsheet, FileDown, Calendar, RefreshCw,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight 
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Loader2 // Icono de carga para la exportación
 } from 'lucide-react';
-import { supabase } from '../../services/supabase';
 
-// Importamos las funciones de PDF
+// Servicios
+import { 
+  getActivePersonnelCount,
+  getPaginatedActivePersonnel,
+  getActivePersonnel, // <--- NECESARIO: Para descargar TODOS sin paginar
+  getAttendanceByRange, 
+  getAdvancesByRange 
+} from '../../services/payrollService';
+
+// Contexto Global
+import { useCompany } from '../../context/CompanyContext';
+
+// Cálculos matemáticos
+import { calculateWorkerPay, calculateStaffPay } from '../../utils/payrollCalculations';
+
 import { generatePayslip, generateBulkPayslips } from '../../utils/pdfGenerator';
-
-// Importamos el Modal de Excel
 import PayrollModal from './components/PayrollModal';
-
-// Importamos Logo
 import logoLyk from '../../assets/images/logo-lk-full.png';
 
 const PayrollPage = () => {
   const [activeTab, setActiveTab] = useState('workers'); 
   const [loading, setLoading] = useState(false);
-  const [people, setPeople] = useState([]); 
   
-  // Datos Globales
-  const [constants, setConstants] = useState({});
-  const [afpRates, setAfpRates] = useState([]);
+  // Estado para controlar la exportación masiva
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Contexto
+  const { constants, afpRates, refreshConfig } = useCompany();
 
   // Rango de Fechas
   const [weekRange, setWeekRange] = useState({
@@ -31,213 +42,119 @@ const PayrollPage = () => {
     end: new Date().toISOString().split('T')[0]
   });
 
-  // Resultados
+  // Resultados (PAGINADOS - Lo que se ve en pantalla)
   const [calculatedPayroll, setCalculatedPayroll] = useState([]);
+  
+  // Resultados (TOTALES - Para el Modal de Excel)
+  const [fullPayrollData, setFullPayrollData] = useState([]);
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
 
-  // --- ESTADOS DE PAGINACIÓN ---
+  // Paginación
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0); 
   const itemsPerPage = 10;
 
   useEffect(() => {
-    fetchGlobals();
-  }, []);
-
-  useEffect(() => {
-    fetchPeople();
     setCalculatedPayroll([]);
     setCurrentPage(1); 
+    setTotalRecords(0);
   }, [activeTab]);
 
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = calculatedPayroll.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(calculatedPayroll.length / itemsPerPage);
+  const totalPages = Math.ceil(totalRecords / itemsPerPage);
 
   const goToPage = (pageNumber) => {
     if (pageNumber >= 1 && pageNumber <= totalPages) {
-      setCurrentPage(pageNumber);
+      calculatePayroll(pageNumber); 
     }
   };
 
-  const fetchGlobals = async () => {
-    try {
-        const { data: constData } = await supabase.from('payroll_constants').select('*');
-        const { data: afpData } = await supabase.from('afp_rates').select('*');
-        const constMap = (constData || []).reduce((acc, item) => ({...acc, [item.key_name]: Number(item.value)}), {});
-        setConstants(constMap);
-        setAfpRates(afpData || []);
-    } catch (e) { console.error("Error config:", e); }
-  };
-
-  const fetchPeople = async () => {
+  // --- 1. CÁLCULO DE PANTALLA (Paginado) ---
+  const calculatePayroll = async (pageToLoad = 1) => {
     setLoading(true);
     try {
+        await refreshConfig(); 
         const table = activeTab === 'workers' ? 'workers' : 'employees';
-        const { data } = await supabase.from(table).select('*').eq('status', 'Activo');
-        setPeople(data || []);
-    } catch (error) { console.error("Error personal:", error); } 
-    finally { setLoading(false); }
-  };
-
-  // --- CÁLCULO DE PLANILLA ---
-  const calculatePayroll = async () => {
-    setLoading(true);
-    setCurrentPage(1); 
-    
-    try {
-        let currentConstants = constants;
-        let currentAfps = afpRates;
-
-        // Recargar datos para asegurar que usamos los últimos guardados en ConfigurationPage
-        const { data: cData } = await supabase.from('payroll_constants').select('*');
-        const { data: aData } = await supabase.from('afp_rates').select('*');
-        if (cData) {
-            currentConstants = (cData || []).reduce((acc, item) => ({...acc, [item.key_name]: Number(item.value)}), {});
-            setConstants(currentConstants);
-        }
-        if (aData) {
-            currentAfps = aData || [];
-            setAfpRates(currentAfps);
-        }
-
-        const table = activeTab === 'workers' ? 'workers' : 'employees';
-        const { data: freshPeople } = await supabase.from(table).select('*').eq('status', 'Activo');
-        setPeople(freshPeople || []);
-
-        const { data: attData } = await supabase.from('attendance').select('*').gte('date', weekRange.start).lte('date', weekRange.end);
-        const { data: advData } = await supabase.from('advances').select('*').gte('date', weekRange.start).lte('date', weekRange.end);
+        const count = await getActivePersonnelCount(table);
+        setTotalRecords(count);
+        const freshPeople = await getPaginatedActivePersonnel(table, pageToLoad, itemsPerPage);
+        
+        // Asistencias y Adelantos (Traemos del rango)
+        const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
+        const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
         const results = (freshPeople || []).map(person => {
-            try {
-                const personId = person.id;
-                const myAtt = (attData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
-                const myAdv = (advData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
-                
-                const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
-                const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
-
-                let calc = {};
-
-                // =================================================================================
-                // 1. LÓGICA OBREROS (SEMANAL / CONSTRUCCIÓN CIVIL)
-                // =================================================================================
-                if (activeTab === 'workers') {
-                    const catUpper = (person.category || 'PEON').toUpperCase(); 
-                    let dailyRate = Number(currentConstants[`JORNAL_${catUpper}`]) || 0;
-                    if (person.custom_daily_rate && Number(person.custom_daily_rate) > 0) dailyRate = Number(person.custom_daily_rate);
-
-                    // Ingresos (Lógica Semanal)
-                    const basicSalary = daysWorked * dailyRate;
-                    const dominical = (daysWorked === 6) ? dailyRate : 0; // Se paga si cumple la semana (6 días)
-                    const bucFactor = Number(currentConstants[`BUC_${catUpper}`]) || 0; // Factor BUC específico por categoría
-                    const buc = basicSalary * bucFactor;
-                    const mobility = daysWorked * (Number(currentConstants['MOVILIDAD']) || 0);
-                    // Asignación Escolar: Monto fijo diario si tiene hijos
-                    const schoolAssign = person.has_children ? (daysWorked * (Number(currentConstants['ASIG_ESCOLAR_DIARIO']) || 0)) : 0;
-                    
-                    const totalIncome = basicSalary + dominical + buc + mobility + schoolAssign;
-
-                    // Descuentos
-                    let pensionAmount = 0;
-                    let pensionName = person.pension_system || 'ONP';
-
-                    if (pensionName === 'ONP') {
-                        pensionAmount = totalIncome * (Number(currentConstants['ONP_TASA']) || 0.13);
-                    } else {
-                        const myAfp = currentAfps.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
-                        if (myAfp) {
-                            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
-                            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
-                            pensionAmount = totalIncome * totalRate;
-                            pensionName = `AFP ${myAfp.name} (${person.commission_type || 'Flujo'})`;
-                        } else {
-                            pensionAmount = totalIncome * 0.13; 
-                            pensionName += ' (Ref. 13%)';
-                        }
-                    }
-
-                    const conafovicer = basicSalary * (Number(currentConstants['CONAFOVICER']) || 0.02);
-                    const totalDiscounts = pensionAmount + conafovicer + totalAdvances;
-                    const essalud = totalIncome * (Number(currentConstants['ESSALUD']) || 0.09);
-
-                    calc = {
-                        person, type: 'worker', daysWorked,
-                        details: { basicSalary, dominical, buc, mobility, schoolAssign, pensionAmount, conafovicer, essalud, pensionName },
-                        totalIncome, totalDiscounts, totalAdvances, netPay: totalIncome - totalDiscounts
-                    };
-
-                // =================================================================================
-                // 2. LÓGICA STAFF / EMPLEADOS (MENSUAL / RÉGIMEN COMÚN)
-                // =================================================================================
-                } else {
-                    const monthlySalary = Number(person.salary) || 0;
-                    
-                    // Sueldo: Proporcional al mes (30 días). Si trabaja días en el rango, se calcula la fracción.
-                    // Nota: Si el rango es semanal (7 días), pagará 7/30 del sueldo, respetando la base mensual.
-                    const earned = (monthlySalary / 30) * (daysWorked > 0 ? (daysWorked + (daysWorked/6)) : 0); // Aproximación simple: días trabajados.
-                    // Corrección lógica: Si 'daysWorked' incluye solo días laborables, el cálculo mensual usualmente asume 30 días si el mes es completo.
-                    // Para este sistema basado en rangos, usaremos la proporción de días asistidos.
-                    // (Simplificado: Pagamos los días que vino. En un mes completo serían 30).
-                    const payBasico = (monthlySalary / 30) * daysWorked;
-
-                    // Asignación Familiar: 10% (o config) de la RMV si tiene hijos.
-                    // Se paga proporcional si no laboró el mes completo? Usualmente es fija si laboró, pero aquí la prorrateamos para no inflar pagos semanales.
-                    const rmv = Number(currentConstants['STAFF_RMV']) || 1025;
-                    const asigFamPct = Number(currentConstants['STAFF_ASIG_FAMILIAR_PCT']) || 0.10;
-                    const monthlyAsigFam = person.has_children ? (rmv * asigFamPct) : 0;
-                    const payAsigFam = (monthlyAsigFam / 30) * daysWorked; // Prorrateo por días trabajados en el periodo
-
-                    const totalIncome = payBasico + payAsigFam;
-
-                    // Pensiones
-                    let pensionAmount = 0;
-                    let pensionName = person.pension_system || 'ONP';
-
-                    if (pensionName === 'ONP') {
-                        const onpRate = Number(currentConstants['STAFF_TASA_ONP']) || 0.13;
-                        pensionAmount = totalIncome * onpRate;
-                    } else {
-                        const myAfp = currentAfps.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
-                        if (myAfp) {
-                            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
-                            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
-                            pensionAmount = totalIncome * totalRate;
-                            pensionName = `AFP ${myAfp.name} (${person.commission_type || 'Flujo'})`;
-                        } else {
-                            pensionAmount = totalIncome * 0.13;
-                            pensionName += ' (Ref. 13%)';
-                        }
-                    }
-
-                    const essaludRate = Number(currentConstants['STAFF_TASA_ESSALUD']) || 0.09;
-                    const essalud = totalIncome * essaludRate;
-                    const totalDiscounts = pensionAmount + totalAdvances;
-
-                    calc = {
-                        person, type: 'staff', daysWorked,
-                        details: { 
-                            basicSalary: payBasico, 
-                            familyAllowance: payAsigFam, 
-                            pensionAmount, 
-                            pensionName, 
-                            essalud 
-                        },
-                        totalIncome, totalDiscounts, totalAdvances,
-                        netPay: totalIncome - totalDiscounts
-                    };
-                }
-                return calc;
-            } catch (e) { return null; }
+           return performCalculation(person, attData, advData);
         });
 
         setCalculatedPayroll(results.filter(r => r !== null));
+        setCurrentPage(pageToLoad);
+
     } catch (err) {
         console.error(err);
         alert("Error al calcular: " + err.message);
     } finally {
         setLoading(false);
     }
+  };
+
+  // --- 2. CÁLCULO MASIVO (Para Exportar PDF o Excel de TODOS) ---
+  const handleGlobalExport = async (type) => {
+    setIsExporting(true);
+    try {
+        // A. Aseguramos config
+        await refreshConfig();
+
+        // B. Traemos TODO el personal (Sin paginación)
+        const table = activeTab === 'workers' ? 'workers' : 'employees';
+        const allPeople = await getActivePersonnel(table); // <--- Aquí está la clave
+
+        // C. Traemos datos de asistencia
+        const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
+        const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
+
+        // D. Calculamos para los 2000 obreros (por ejemplo)
+        const allResults = (allPeople || []).map(person => {
+            return performCalculation(person, attData, advData);
+        }).filter(r => r !== null);
+
+        if (allResults.length === 0) {
+            alert("No hay datos para exportar en este periodo.");
+            setIsExporting(false);
+            return;
+        }
+
+        // E. Ejecutamos la acción según el botón
+        if (type === 'pdf') {
+            generateBulkPayslips(allResults, weekRange, logoLyk);
+        } else if (type === 'excel') {
+            setFullPayrollData(allResults); // Guardamos la data completa para el modal
+            setIsPayrollModalOpen(true);
+        }
+
+    } catch (error) {
+        console.error("Error en exportación masiva:", error);
+        alert("Hubo un error al generar la exportación.");
+    } finally {
+        setIsExporting(false);
+    }
+  };
+
+  // --- Helper para no repetir lógica de cálculo ---
+  const performCalculation = (person, attData, advData) => {
+    try {
+        const personId = person.id;
+        const myAtt = (attData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
+        const myAdv = (advData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
+        
+        const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
+        const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
+
+        if (activeTab === 'workers') {
+            return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates);
+        } else {
+            return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
+        }
+    } catch (e) { return null; }
   };
 
   return (
@@ -258,7 +175,7 @@ const PayrollPage = () => {
                 <span className="text-slate-300">-</span>
                 <input type="date" value={weekRange.end} onChange={(e) => setWeekRange({...weekRange, end: e.target.value})} className="font-bold text-slate-600 outline-none text-sm bg-transparent"/>
             </div>
-            <button onClick={calculatePayroll} disabled={loading} className="bg-[#003366] text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 disabled:opacity-70 shadow-md">
+            <button onClick={() => calculatePayroll(1)} disabled={loading || isExporting} className="bg-[#003366] text-white px-4 py-2 rounded-lg hover:bg-blue-900 transition flex items-center gap-2 disabled:opacity-70 shadow-md">
               {loading ? <RefreshCw className="animate-spin" size={18}/> : <Calculator size={18} />} 
               <span className="font-bold text-sm hidden md:inline">{loading ? 'Calculando...' : 'Calcular'}</span>
             </button>
@@ -277,16 +194,17 @@ const PayrollPage = () => {
 
       {/* TABLA DE RESULTADOS */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
-         {calculatedPayroll.length === 0 ? (
+         {calculatedPayroll.length === 0 && !loading ? (
              <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-4">
                 <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center"><Calculator size={32} className="text-slate-300"/></div>
                 <div className="text-center">
                     <p className="font-medium text-slate-600">Sin datos calculados</p>
-                    <p className="text-sm">Selecciona las fechas y presiona <b>Calcular</b>.</p>
+                    <p className="text-sm">Selecciona las fechas y presiona <b>Calcular</b> para ver la vista previa.</p>
                 </div>
              </div>
          ) : (
             <>
+                {/* TABLA VISUAL (Muestra solo los 10 de la paginación actual) */}
                 <div className="overflow-x-auto flex-1">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-100">
@@ -301,7 +219,7 @@ const PayrollPage = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                             <AnimatePresence mode='wait'>
-                                {currentItems.map((item, idx) => (
+                                {calculatedPayroll.map((item, idx) => (
                                     <motion.tr 
                                         key={item.person.id} 
                                         initial={{ opacity: 0, y: 10 }}
@@ -316,7 +234,6 @@ const PayrollPage = () => {
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
                                             </div>
-                                            {/* Etiqueta para Asig. Familiar/Escolar si aplica */}
                                             {item.type === 'staff' && item.details.familyAllowance > 0 && (
                                                 <span className="text-[9px] text-green-600 font-bold block mt-1">+ Asig. Fam</span>
                                             )}
@@ -333,6 +250,7 @@ const PayrollPage = () => {
                                             <span className="font-mono font-bold text-lg text-green-600 bg-green-50 px-2 py-1 rounded">S/. {item.netPay.toFixed(2)}</span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
+                                            {/* La impresora individual sigue funcionando para este item específico */}
                                             <button onClick={() => generatePayslip(item, weekRange, logoLyk)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
                                                 <Printer size={20}/>
                                             </button>
@@ -344,27 +262,36 @@ const PayrollPage = () => {
                     </table>
                 </div>
 
+                {/* CONTROLES DE PAGINACIÓN */}
                 {totalPages > 1 && (
                     <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
                         <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
-                            Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, calculatedPayroll.length)} de {calculatedPayroll.length}
+                            Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalRecords)} de {totalRecords}
                         </div>
                         <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
-                            <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
-                            <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
+                            <button onClick={() => goToPage(1)} disabled={currentPage === 1 || loading} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
+                            <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1 || loading} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
+                            
                             <div className="flex items-center gap-1 mx-2">
                                 {Array.from({ length: totalPages }, (_, i) => i + 1)
                                     .filter(p => p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1))
                                     .map((page, i, arr) => (
                                         <React.Fragment key={page}>
                                             {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
-                                            <button onClick={() => goToPage(page)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === page ? 'bg-[#003366] text-white shadow-md scale-110' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}>{page}</button>
+                                            <button 
+                                                onClick={() => goToPage(page)} 
+                                                disabled={loading}
+                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === page ? 'bg-[#003366] text-white shadow-md scale-110' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}
+                                            >
+                                                {page}
+                                            </button>
                                         </React.Fragment>
                                     ))
                                 }
                             </div>
-                            <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronRight size={18}/></button>
-                            <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsRight size={18}/></button>
+
+                            <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages || loading} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronRight size={18}/></button>
+                            <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages || loading} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsRight size={18}/></button>
                         </div>
                     </div>
                 )}
@@ -372,32 +299,40 @@ const PayrollPage = () => {
          )}
       </div>
 
+      {/* BOTONES FLOTANTES DE EXPORTACIÓN */}
       <div className="fixed bottom-8 right-8 flex flex-col gap-3 items-end z-40">
           <motion.div initial={{ scale: 0 }} animate={{ scale: calculatedPayroll.length > 0 ? 1 : 0 }}>
               <button 
-                onClick={() => generateBulkPayslips(calculatedPayroll, weekRange, logoLyk)}
-                className="bg-[#003366] text-white p-4 rounded-full shadow-xl hover:bg-blue-900 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20"
-                title="Descargar todas las boletas en PDF"
+                onClick={() => handleGlobalExport('pdf')} // Cambiado para descargar TODO
+                disabled={isExporting}
+                className="bg-[#003366] text-white p-4 rounded-full shadow-xl hover:bg-blue-900 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20 disabled:opacity-70 disabled:scale-100"
+                title="Descargar boletas de TODOS (Completo)"
               >
-                  <FileDown size={24} /> 
-                  <span className="font-bold hidden md:inline pr-2">Descargar Boletas (PDF)</span>
+                  {isExporting ? <Loader2 className="animate-spin" size={24} /> : <FileDown size={24} />}
+                  <span className="font-bold hidden md:inline pr-2">
+                    {isExporting ? 'Generando...' : 'Boletas (Todos)'}
+                  </span>
               </button>
           </motion.div>
 
           <button 
-            onClick={() => setIsPayrollModalOpen(true)} 
-            className="bg-green-600 text-white p-4 rounded-full shadow-xl hover:bg-green-700 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20"
-            title="Exportar Reporte Excel"
+            onClick={() => handleGlobalExport('excel')} // Cambiado para descargar TODO
+            disabled={isExporting}
+            className="bg-green-600 text-white p-4 rounded-full shadow-xl hover:bg-green-700 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20 disabled:opacity-70 disabled:scale-100"
+            title="Exportar Reporte Excel Completo"
           >
-              <FileSpreadsheet size={24} /> 
-              <span className="font-bold hidden md:inline pr-2">Exportar Excel</span>
+              {isExporting ? <Loader2 className="animate-spin" size={24} /> : <FileSpreadsheet size={24} />}
+              <span className="font-bold hidden md:inline pr-2">
+                {isExporting ? 'Procesando...' : 'Excel (Todos)'}
+              </span>
           </button>
       </div>
 
+      {/* Modal recibe ahora fullPayrollData en lugar de la data parcial */}
       <PayrollModal 
         isOpen={isPayrollModalOpen} 
         onClose={() => setIsPayrollModalOpen(false)} 
-        payrollData={calculatedPayroll} 
+        payrollData={fullPayrollData} 
         dateRange={weekRange} 
       />
     </div>

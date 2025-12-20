@@ -33,6 +33,8 @@ import WorkerProjectLog from './modules/worker/WorkerProjectLog';
 import WorkerProjectView from './modules/worker/WorkerProjectView';
 
 import { WorkerAuthProvider } from './context/WorkerAuthContext';
+// IMPORTACIÓN NUEVA
+import { CompanyProvider } from './context/CompanyContext';
 
 function App() {
   return (
@@ -50,7 +52,13 @@ function App() {
 
         {/* Panel Admin */}
         <Route element={<AdminProtectedRoute />}>
-          <Route element={<MainLayout />}>
+          {/* Envolvemos TODAS las rutas de admin con el CompanyProvider */}
+          {/* Así ConfigurationPage, PayrollPage, ProjectsPage acceden a los datos globales */}
+          <Route element={
+            <CompanyProvider>
+              <MainLayout />
+            </CompanyProvider>
+          }>
             <Route path="/dashboard" element={<DashboardPage />} />
             
             {/* RRHH */}

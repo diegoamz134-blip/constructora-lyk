@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { supabase } from '../../services/supabase'; 
+// IMPORTACIÓN NUEVA: Usamos el servicio en lugar de supabase directo
+import { getProjects, deleteProjectCascade } from '../../services/projectsService'; 
 import { 
   Building2, Image as ImageIcon, MessageSquare, 
   CalendarDays, MapPin, Calendar, Plus, ArrowLeft, 
@@ -38,13 +39,9 @@ const ProjectsPage = () => {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setProjectsList(data || []);
+      // USO DEL SERVICIO
+      const data = await getProjects();
+      setProjectsList(data);
     } catch (error) {
       console.error('Error cargando proyectos:', error);
     } finally {
@@ -78,19 +75,10 @@ const ProjectsPage = () => {
     setIsDeleting(true);
 
     try {
-      const id = projectToDelete.id;
-      // 1. Borrar datos relacionados para evitar errores de FK
-      await supabase.from('project_tasks').delete().eq('project_id', id);
-      await supabase.from('daily_logs').delete().eq('project_id', id);
-      await supabase.from('project_gallery').delete().eq('project_id', id);
-      // Nota: Si quieres liberar a los obreros al borrar el proyecto:
-      await supabase.from('workers').update({ project_assigned: 'Sin asignar' }).eq('project_assigned', projectToDelete.name);
+      // USO DEL SERVICIO: Toda la lógica compleja está ahora en projectsService
+      await deleteProjectCascade(projectToDelete);
       
-      // 2. Borrar proyecto
-      const { error } = await supabase.from('projects').delete().eq('id', id);
-      if (error) throw error;
-      
-      // 3. Limpiar y recargar
+      // Limpiar y recargar
       setDeleteModalOpen(false);
       setProjectToDelete(null);
       fetchProjects();
