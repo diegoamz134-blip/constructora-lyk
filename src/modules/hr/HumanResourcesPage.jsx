@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion'; // Agregado AnimatePresence
 import { 
   Users, Search, Plus, UserCog, HardHat, 
   Briefcase, Filter, Trash2, Pencil, Baby, BookOpen, 
-  Activity, DollarSign 
+  Activity, DollarSign,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight // Agregados iconos de paginación
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
@@ -25,9 +26,18 @@ const HumanResourcesPage = () => {
   const [userToChangeStatus, setUserToChangeStatus] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
 
+  // --- ESTADOS DE PAGINACIÓN ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   useEffect(() => {
     fetchData();
   }, [activeTab]);
+
+  // Resetear página al cambiar pestaña o búsqueda
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -52,6 +62,18 @@ const HumanResourcesPage = () => {
     item.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.document_number.includes(searchTerm)
   );
+
+  // --- LÓGICA DE PAGINACIÓN ---
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredData.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+  const goToPage = (pageNumber) => {
+    if (pageNumber >= 1 && pageNumber <= totalPages) {
+      setCurrentPage(pageNumber);
+    }
+  };
 
   const handleCreate = () => {
     setUserToEdit(null);
@@ -159,135 +181,192 @@ const HumanResourcesPage = () => {
         {searchTerm && <button onClick={() => setSearchTerm('')} className="text-slate-400 hover:text-slate-600">Limpiar</button>}
       </div>
 
-      {/* Tabla */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      {/* Tabla con Animación y Paginación */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
         {loading ? (
-          <div className="p-12 flex justify-center text-slate-400"><span className="animate-pulse font-bold">Cargando datos...</span></div>
+          <div className="flex-1 p-12 flex justify-center items-center text-slate-400"><span className="animate-pulse font-bold">Cargando datos...</span></div>
         ) : filteredData.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 flex flex-col items-center"><Filter size={48} className="mb-4 opacity-20" /><p>No se encontraron registros.</p></div>
+          <div className="flex-1 p-12 text-center text-slate-400 flex flex-col items-center justify-center"><Filter size={48} className="mb-4 opacity-20" /><p>No se encontraron registros.</p></div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  <th className="px-6 py-4">Nombre Completo</th>
-                  <th className="px-6 py-4">DNI / Doc</th>
-                  <th className="px-6 py-4">{activeTab === 'staff' ? 'Cargo' : 'Categoría'}</th>
-                  
-                  {/* CORRECCIÓN DE ENCABEZADO */}
-                  <th className="px-6 py-4 font-bold text-slate-600">
-                    {activeTab === 'staff' ? 'Sueldo Mensual' : 'Jornal Diario'}
-                  </th>
-                  
-                  <th className="px-6 py-4 text-center">AFP / Régimen</th>
-                  <th className="px-6 py-4 text-center">Hijos</th>
-                  <th className="px-6 py-4 text-center">Estado</th>
-                  <th className="px-6 py-4 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredData.map((user) => {
-                  
-                  // --- Lógica para mostrar AFP/Régimen correctamente ---
-                  // Priorizamos 'pension_system' (nuevo), fallamos a 'afp' (viejo)
-                  const displayAFP = user.pension_system || user.afp;
-
-                  // --- Lógica para mostrar Sueldo ---
-                  // Workers: custom_daily_rate (Pactado) o "Según Tabla"
-                  // Staff: salary
-                  let displaySalary = '-';
-                  if (activeTab === 'staff') {
-                      displaySalary = user.salary ? `S/ ${parseFloat(user.salary).toFixed(2)}` : '-';
-                  } else {
-                      // Para obreros, si tiene sueldo pactado lo mostramos, si no, indicamos que usa tabla
-                      displaySalary = user.custom_daily_rate 
-                          ? `S/ ${parseFloat(user.custom_daily_rate).toFixed(2)}` 
-                          : <span className="text-[10px] uppercase text-slate-400 bg-slate-100 px-2 py-1 rounded">Según Tabla</span>;
-                  }
-
-                  return (
-                    <motion.tr 
-                      key={user.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="hover:bg-blue-50/30 transition-colors"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-full ${activeTab === 'staff' ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'}`}>
-                            {activeTab === 'staff' ? <Briefcase size={18} /> : <HardHat size={18} />}
-                          </div>
-                          <span className="font-bold text-slate-700">{user.full_name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-slate-600 text-sm">{user.document_number}</td>
-                      <td className="px-6 py-4">
-                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold border border-slate-200">
-                          {activeTab === 'staff' ? user.position : user.category}
-                        </span>
-                      </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="px-6 py-4">Nombre Completo</th>
+                    <th className="px-6 py-4">DNI / Doc</th>
+                    <th className="px-6 py-4">{activeTab === 'staff' ? 'Cargo' : 'Categoría'}</th>
+                    <th className="px-6 py-4 font-bold text-slate-600">
+                      {activeTab === 'staff' ? 'Sueldo Mensual' : 'Jornal Diario'}
+                    </th>
+                    <th className="px-6 py-4 text-center">AFP / Régimen</th>
+                    <th className="px-6 py-4 text-center">Hijos</th>
+                    <th className="px-6 py-4 text-center">Estado</th>
+                    <th className="px-6 py-4 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  <AnimatePresence mode="wait">
+                    {currentItems.map((user, idx) => {
                       
-                      {/* CELDA DE SUELDO CORREGIDA */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                           <DollarSign size={16} className="text-emerald-500"/>
-                           {displaySalary}
-                        </div>
-                      </td>
+                      const displayAFP = user.pension_system || user.afp;
+                      let displaySalary = '-';
+                      if (activeTab === 'staff') {
+                          displaySalary = user.salary ? `S/ ${parseFloat(user.salary).toFixed(2)}` : '-';
+                      } else {
+                          displaySalary = user.custom_daily_rate 
+                              ? `S/ ${parseFloat(user.custom_daily_rate).toFixed(2)}` 
+                              : <span className="text-[10px] uppercase text-slate-400 bg-slate-100 px-2 py-1 rounded">Según Tabla</span>;
+                      }
 
-                      {/* CELDA DE AFP CORREGIDA */}
-                      <td className="px-6 py-4 text-center">
-                        {displayAFP ? (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[#003366] text-xs font-bold border border-blue-100">
-                             <BookOpen size={12}/> {displayAFP}
-                          </div>
-                        ) : <span className="text-slate-400 text-xs">-</span>}
-                      </td>
+                      return (
+                        <motion.tr 
+                          key={user.id}
+                          layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          transition={{ duration: 0.2, delay: idx * 0.05 }}
+                          className="hover:bg-blue-50/30 transition-colors"
+                        >
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-2 rounded-full ${activeTab === 'staff' ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'}`}>
+                                {activeTab === 'staff' ? <Briefcase size={18} /> : <HardHat size={18} />}
+                              </div>
+                              <span className="font-bold text-slate-700">{user.full_name}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 font-mono text-slate-600 text-sm">{user.document_number}</td>
+                          <td className="px-6 py-4">
+                            <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold border border-slate-200">
+                              {activeTab === 'staff' ? user.position : user.category}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                               <DollarSign size={16} className="text-emerald-500"/>
+                               {displaySalary}
+                            </div>
+                          </td>
 
-                      <td className="px-6 py-4 text-center">
-                        {user.has_children ? (
-                          <div className="inline-flex items-center gap-1 text-slate-600 font-bold text-sm" title={`${user.children_count} Hijos`}>
-                             <Baby size={16} className="text-pink-400"/> {user.children_count}
-                          </div>
-                        ) : <span className="text-slate-300 text-xs font-medium">No</span>}
-                      </td>
+                          <td className="px-6 py-4 text-center">
+                            {displayAFP ? (
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[#003366] text-xs font-bold border border-blue-100">
+                                 <BookOpen size={12}/> {displayAFP}
+                              </div>
+                            ) : <span className="text-slate-400 text-xs">-</span>}
+                          </td>
+
+                          <td className="px-6 py-4 text-center">
+                            {user.has_children ? (
+                              <div className="inline-flex items-center gap-1 text-slate-600 font-bold text-sm" title={`${user.children_count} Hijos`}>
+                                 <Baby size={16} className="text-pink-400"/> {user.children_count}
+                              </div>
+                            ) : <span className="text-slate-300 text-xs font-medium">No</span>}
+                          </td>
+                          
+                          <td className="px-6 py-4 text-center">
+                             {renderStatusBadge(user.status)}
+                          </td>
+
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-1">
+                              <button 
+                                onClick={() => handleStatusChange(user)}
+                                className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                                title="Cambiar Estado"
+                              >
+                                <Activity size={18}/>
+                              </button>
+
+                              <button 
+                                onClick={() => handleEdit(user)}
+                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Editar"
+                              >
+                                <Pencil size={18}/>
+                              </button>
+                              <button 
+                                onClick={() => handleDelete(user.id)}
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Eliminar"
+                              >
+                                <Trash2 size={18}/>
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </tbody>
+              </table>
+            </div>
+
+            {/* CONTROLES DE PAGINACIÓN */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium hidden md:block">
+                      Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, filteredData.length)} de {filteredData.length} registros
+                  </div>
+                  
+                  <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
+                      <button 
+                        onClick={() => goToPage(1)} 
+                        disabled={currentPage === 1} 
+                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                      >
+                        <ChevronsLeft size={18}/>
+                      </button>
+                      <button 
+                        onClick={() => goToPage(currentPage - 1)} 
+                        disabled={currentPage === 1} 
+                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                      >
+                        <ChevronLeft size={18}/>
+                      </button>
                       
-                      <td className="px-6 py-4 text-center">
-                         {renderStatusBadge(user.status)}
-                      </td>
+                      <div className="flex items-center gap-1 mx-2">
+                          {Array.from({ length: totalPages }, (_, i) => i + 1)
+                              .filter(p => p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1))
+                              .map((page, i, arr) => (
+                                  <React.Fragment key={page}>
+                                      {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
+                                      <button 
+                                        onClick={() => goToPage(page)} 
+                                        className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
+                                          currentPage === page 
+                                            ? 'bg-[#003366] text-white shadow-md scale-110' 
+                                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                                        }`}
+                                      >
+                                          {page}
+                                      </button>
+                                  </React.Fragment>
+                              ))
+                          }
+                      </div>
 
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button 
-                            onClick={() => handleStatusChange(user)}
-                            className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                            title="Cambiar Estado"
-                          >
-                            <Activity size={18}/>
-                          </button>
-
-                          <button 
-                            onClick={() => handleEdit(user)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Editar"
-                          >
-                            <Pencil size={18}/>
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(user.id)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Eliminar"
-                          >
-                            <Trash2 size={18}/>
-                          </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      <button 
+                        onClick={() => goToPage(currentPage + 1)} 
+                        disabled={currentPage === totalPages} 
+                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                      >
+                        <ChevronRight size={18}/>
+                      </button>
+                      <button 
+                        onClick={() => goToPage(totalPages)} 
+                        disabled={currentPage === totalPages} 
+                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
+                      >
+                        <ChevronsRight size={18}/>
+                      </button>
+                  </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

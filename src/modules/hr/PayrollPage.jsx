@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   DollarSign, Calculator, Printer, HardHat, UserCog, 
-  AlertCircle, FileSpreadsheet, FileDown, Calendar, RefreshCw,
+  FileSpreadsheet, FileDown, Calendar, RefreshCw,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
@@ -39,19 +39,16 @@ const PayrollPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // 1. Cargar Datos Maestros
   useEffect(() => {
     fetchGlobals();
   }, []);
 
-  // 2. Cargar Personas
   useEffect(() => {
     fetchPeople();
     setCalculatedPayroll([]);
-    setCurrentPage(1); // Resetear página al cambiar tab
+    setCurrentPage(1); 
   }, [activeTab]);
 
-  // --- LÓGICA DE PAGINACIÓN ---
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentItems = calculatedPayroll.slice(indexOfFirstItem, indexOfLastItem);
@@ -63,7 +60,6 @@ const PayrollPage = () => {
     }
   };
 
-  // --- FUNCIONES DE CARGA ---
   const fetchGlobals = async () => {
     try {
         const { data: constData } = await supabase.from('payroll_constants').select('*');
@@ -87,19 +83,21 @@ const PayrollPage = () => {
   // --- CÁLCULO DE PLANILLA ---
   const calculatePayroll = async () => {
     setLoading(true);
-    setCurrentPage(1); // Resetear a página 1 al calcular nuevo
+    setCurrentPage(1); 
     
     try {
         let currentConstants = constants;
         let currentAfps = afpRates;
 
-        // Recargar si faltan datos
-        if (!currentConstants.JORNAL_OPERARIO || currentAfps.length === 0) {
-            const { data: cData } = await supabase.from('payroll_constants').select('*');
-            const { data: aData } = await supabase.from('afp_rates').select('*');
+        // Recargar datos para asegurar que usamos los últimos guardados en ConfigurationPage
+        const { data: cData } = await supabase.from('payroll_constants').select('*');
+        const { data: aData } = await supabase.from('afp_rates').select('*');
+        if (cData) {
             currentConstants = (cData || []).reduce((acc, item) => ({...acc, [item.key_name]: Number(item.value)}), {});
-            currentAfps = aData || [];
             setConstants(currentConstants);
+        }
+        if (aData) {
+            currentAfps = aData || [];
             setAfpRates(currentAfps);
         }
 
@@ -121,18 +119,26 @@ const PayrollPage = () => {
 
                 let calc = {};
 
+                // =================================================================================
+                // 1. LÓGICA OBREROS (SEMANAL / CONSTRUCCIÓN CIVIL)
+                // =================================================================================
                 if (activeTab === 'workers') {
                     const catUpper = (person.category || 'PEON').toUpperCase(); 
                     let dailyRate = Number(currentConstants[`JORNAL_${catUpper}`]) || 0;
                     if (person.custom_daily_rate && Number(person.custom_daily_rate) > 0) dailyRate = Number(person.custom_daily_rate);
 
+                    // Ingresos (Lógica Semanal)
                     const basicSalary = daysWorked * dailyRate;
-                    const dominical = (daysWorked === 6) ? dailyRate : 0; 
-                    const buc = basicSalary * (Number(currentConstants[`BUC_${catUpper}`]) || 0);
+                    const dominical = (daysWorked === 6) ? dailyRate : 0; // Se paga si cumple la semana (6 días)
+                    const bucFactor = Number(currentConstants[`BUC_${catUpper}`]) || 0; // Factor BUC específico por categoría
+                    const buc = basicSalary * bucFactor;
                     const mobility = daysWorked * (Number(currentConstants['MOVILIDAD']) || 0);
+                    // Asignación Escolar: Monto fijo diario si tiene hijos
                     const schoolAssign = person.has_children ? (daysWorked * (Number(currentConstants['ASIG_ESCOLAR_DIARIO']) || 0)) : 0;
+                    
                     const totalIncome = basicSalary + dominical + buc + mobility + schoolAssign;
 
+                    // Descuentos
                     let pensionAmount = 0;
                     let pensionName = person.pension_system || 'ONP';
 
@@ -160,15 +166,65 @@ const PayrollPage = () => {
                         details: { basicSalary, dominical, buc, mobility, schoolAssign, pensionAmount, conafovicer, essalud, pensionName },
                         totalIncome, totalDiscounts, totalAdvances, netPay: totalIncome - totalDiscounts
                     };
+
+                // =================================================================================
+                // 2. LÓGICA STAFF / EMPLEADOS (MENSUAL / RÉGIMEN COMÚN)
+                // =================================================================================
                 } else {
                     const monthlySalary = Number(person.salary) || 0;
-                    const earned = (monthlySalary / 30) * (daysWorked > 0 ? 30 : 0);
-                    const pensionDesc = earned * 0.13;
+                    
+                    // Sueldo: Proporcional al mes (30 días). Si trabaja días en el rango, se calcula la fracción.
+                    // Nota: Si el rango es semanal (7 días), pagará 7/30 del sueldo, respetando la base mensual.
+                    const earned = (monthlySalary / 30) * (daysWorked > 0 ? (daysWorked + (daysWorked/6)) : 0); // Aproximación simple: días trabajados.
+                    // Corrección lógica: Si 'daysWorked' incluye solo días laborables, el cálculo mensual usualmente asume 30 días si el mes es completo.
+                    // Para este sistema basado en rangos, usaremos la proporción de días asistidos.
+                    // (Simplificado: Pagamos los días que vino. En un mes completo serían 30).
+                    const payBasico = (monthlySalary / 30) * daysWorked;
+
+                    // Asignación Familiar: 10% (o config) de la RMV si tiene hijos.
+                    // Se paga proporcional si no laboró el mes completo? Usualmente es fija si laboró, pero aquí la prorrateamos para no inflar pagos semanales.
+                    const rmv = Number(currentConstants['STAFF_RMV']) || 1025;
+                    const asigFamPct = Number(currentConstants['STAFF_ASIG_FAMILIAR_PCT']) || 0.10;
+                    const monthlyAsigFam = person.has_children ? (rmv * asigFamPct) : 0;
+                    const payAsigFam = (monthlyAsigFam / 30) * daysWorked; // Prorrateo por días trabajados en el periodo
+
+                    const totalIncome = payBasico + payAsigFam;
+
+                    // Pensiones
+                    let pensionAmount = 0;
+                    let pensionName = person.pension_system || 'ONP';
+
+                    if (pensionName === 'ONP') {
+                        const onpRate = Number(currentConstants['STAFF_TASA_ONP']) || 0.13;
+                        pensionAmount = totalIncome * onpRate;
+                    } else {
+                        const myAfp = currentAfps.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
+                        if (myAfp) {
+                            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
+                            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
+                            pensionAmount = totalIncome * totalRate;
+                            pensionName = `AFP ${myAfp.name} (${person.commission_type || 'Flujo'})`;
+                        } else {
+                            pensionAmount = totalIncome * 0.13;
+                            pensionName += ' (Ref. 13%)';
+                        }
+                    }
+
+                    const essaludRate = Number(currentConstants['STAFF_TASA_ESSALUD']) || 0.09;
+                    const essalud = totalIncome * essaludRate;
+                    const totalDiscounts = pensionAmount + totalAdvances;
+
                     calc = {
                         person, type: 'staff', daysWorked,
-                        details: { basicSalary: earned, pensionAmount: pensionDesc, pensionName: 'ONP', essalud: earned * 0.09 },
-                        totalIncome: earned, totalDiscounts: pensionDesc + totalAdvances, totalAdvances,
-                        netPay: earned - pensionDesc - totalAdvances
+                        details: { 
+                            basicSalary: payBasico, 
+                            familyAllowance: payAsigFam, 
+                            pensionAmount, 
+                            pensionName, 
+                            essalud 
+                        },
+                        totalIncome, totalDiscounts, totalAdvances,
+                        netPay: totalIncome - totalDiscounts
                     };
                 }
                 return calc;
@@ -186,14 +242,13 @@ const PayrollPage = () => {
 
   return (
     <div className="space-y-6 pb-24"> 
-      
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <DollarSign className="text-green-600" /> Planillas y Pagos
           </h1>
-          <p className="text-slate-500 text-sm">Cálculo dinámico con paginación optimizada.</p>
+          <p className="text-slate-500 text-sm">Gestión de nómina Semanal (Obreros) y Mensual (Staff).</p>
         </div>
         
         <div className="flex gap-2 items-center flex-wrap justify-end bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
@@ -261,6 +316,13 @@ const PayrollPage = () => {
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
                                             </div>
+                                            {/* Etiqueta para Asig. Familiar/Escolar si aplica */}
+                                            {item.type === 'staff' && item.details.familyAllowance > 0 && (
+                                                <span className="text-[9px] text-green-600 font-bold block mt-1">+ Asig. Fam</span>
+                                            )}
+                                            {item.type === 'worker' && item.details.schoolAssign > 0 && (
+                                                <span className="text-[9px] text-orange-600 font-bold block mt-1">+ Asig. Escolar</span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className="bg-white px-3 py-1 rounded-lg text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">{item.daysWorked}</span>
@@ -282,64 +344,27 @@ const PayrollPage = () => {
                     </table>
                 </div>
 
-                {/* --- COMPONENTE DE PAGINACIÓN CENTRADO --- */}
                 {totalPages > 1 && (
                     <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
-                        
-                        {/* Texto Informativo (Posicionado Absoluto a la izquierda para no empujar el centro) */}
                         <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
                             Mostrando {indexOfFirstItem + 1} - {Math.min(indexOfLastItem, calculatedPayroll.length)} de {calculatedPayroll.length}
                         </div>
-                        
-                        {/* Botones de Paginación (En el centro del contenedor) */}
                         <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
-                            <button 
-                                onClick={() => goToPage(1)} disabled={currentPage === 1}
-                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                            >
-                                <ChevronsLeft size={18}/>
-                            </button>
-                            <button 
-                                onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1}
-                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                            >
-                                <ChevronLeft size={18}/>
-                            </button>
-                            
-                            {/* Números de Página */}
+                            <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
+                            <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
                             <div className="flex items-center gap-1 mx-2">
                                 {Array.from({ length: totalPages }, (_, i) => i + 1)
                                     .filter(p => p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1))
                                     .map((page, i, arr) => (
                                         <React.Fragment key={page}>
                                             {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
-                                            <button
-                                                onClick={() => goToPage(page)}
-                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
-                                                    currentPage === page 
-                                                    ? 'bg-[#003366] text-white shadow-md scale-110' 
-                                                    : 'text-slate-500 hover:bg-white hover:text-slate-800'
-                                                }`}
-                                            >
-                                                {page}
-                                            </button>
+                                            <button onClick={() => goToPage(page)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === page ? 'bg-[#003366] text-white shadow-md scale-110' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}>{page}</button>
                                         </React.Fragment>
                                     ))
                                 }
                             </div>
-
-                            <button 
-                                onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages}
-                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                            >
-                                <ChevronRight size={18}/>
-                            </button>
-                            <button 
-                                onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages}
-                                className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                            >
-                                <ChevronsRight size={18}/>
-                            </button>
+                            <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronRight size={18}/></button>
+                            <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsRight size={18}/></button>
                         </div>
                     </div>
                 )}
@@ -347,7 +372,6 @@ const PayrollPage = () => {
          )}
       </div>
 
-      {/* --- BOTONES FLOTANTES DE ACCIÓN --- */}
       <div className="fixed bottom-8 right-8 flex flex-col gap-3 items-end z-40">
           <motion.div initial={{ scale: 0 }} animate={{ scale: calculatedPayroll.length > 0 ? 1 : 0 }}>
               <button 
