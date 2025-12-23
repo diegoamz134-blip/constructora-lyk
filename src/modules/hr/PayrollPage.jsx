@@ -112,7 +112,7 @@ const PayrollPage = () => {
         const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
-        // D. Calculamos para los 2000 obreros (por ejemplo)
+        // D. Calculamos para todo el personal
         const allResults = (allPeople || []).map(person => {
             return performCalculation(person, attData, advData);
         }).filter(r => r !== null);
@@ -140,21 +140,56 @@ const PayrollPage = () => {
   };
 
   // --- Helper para no repetir lógica de cálculo ---
+  // AQUI ESTA LA ACTUALIZACIÓN CLAVE PARA LAS HORAS EXTRAS
   const performCalculation = (person, attData, advData) => {
     try {
         const personId = person.id;
+        
+        // Filtrar datos para esta persona
         const myAtt = (attData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
         const myAdv = (advData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
         
+        // 1. Contar Días Trabajados
         const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
+        
+        // 2. Sumar Adelantos
         const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
+        // 3. NUEVO: Calcular Horas Extras (Día por día)
+        // Regla: Las 2 primeras horas del día van al 60%, el resto al 100%
+        let totalHe60 = 0;
+        let totalHe100 = 0;
+
         if (activeTab === 'workers') {
-            return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates);
+            myAtt.forEach(record => {
+                const dailyOvertime = Number(record.overtime_hours) || 0;
+                
+                if (dailyOvertime > 0) {
+                    if (dailyOvertime <= 2) {
+                        // Si hizo 2 horas o menos, todo va al 60%
+                        totalHe60 += dailyOvertime;
+                    } else {
+                        // Si hizo más de 2 horas:
+                        // Las primeras 2 van al 60%
+                        totalHe60 += 2;
+                        // El resto va al 100%
+                        totalHe100 += (dailyOvertime - 2);
+                    }
+                }
+            });
+            
+            // Empaquetamos las horas para enviarlas a la calculadora
+            const heHours = { he60: totalHe60, he100: totalHe100 };
+            
+            return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, heHours);
         } else {
+            // Staff por ahora no usa HE automáticas de asistencia, pero se podría agregar igual
             return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
         }
-    } catch (e) { return null; }
+    } catch (e) { 
+        console.error("Error en performCalculation:", e);
+        return null; 
+    }
   };
 
   return (

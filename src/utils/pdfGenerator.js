@@ -1,218 +1,190 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- FUNCIÓN INTERNA DE DIBUJO (NO EXPORTAR) ---
-// Esta función dibuja UNA boleta en el documento actual
-const drawPayslipContent = (doc, item, weekRange, logoImg) => {
+const fmt = (val) => (val && val > 0) ? val.toFixed(2) : '';
+
+const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg) => {
     const p = item.person;
     const isStaff = item.type === 'staff';
     const d = item.details || {}; 
 
-    // --- CONFIGURACIÓN DE ESTILOS ---
-    const headerColor = [220, 235, 255]; 
+    // --- ESTILOS VISUALES ---
+    const headerBgColor = [240, 240, 240];
     const borderColor = [0, 0, 0];
     const lineWidth = 0.1;
+    const bodyFontSize = 7;
 
     // --- LOGO ---
     if (logoImg) {
-      try {
-        doc.addImage(logoImg, 'PNG', 14, 5, 40, 15); 
-      } catch (imgErr) {
-        console.warn("No se pudo cargar el logo", imgErr);
-      }
+      try { doc.addImage(logoImg, 'PNG', 14, 8, 35, 12); } catch (e) {}
     }
 
     // --- ENCABEZADO ---
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    
-    doc.text(`RUC: 20482531301`, 14, 24);
-    doc.text(`Empleador: CONSTRUCTORA E INVERSIONES L & K S.A.C.`, 14, 28);
-    doc.text(`Periodo: ${weekRange.start} al ${weekRange.end}`, 14, 32);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+    let yPos = 28;
+    doc.text(`R.U.C. 20482531301`, 14, yPos); yPos += 4;
+    doc.text(`EMPLEADOR: CONSTRUCTORA E INVERSIONES L & K S.A.C.`, 14, yPos); yPos += 4;
+    doc.text(`DIRECCIÓN: AV. LOS CONSTRUCTORES 123 - LIMA`, 14, yPos); // Pon tu dirección fija aquí si no viene de DB
 
-    // Recuadro Trabajador (Derecha)
-    doc.text("TRABAJADOR", 140, 24);
+    doc.text("PERIODO DE PAGO:", 130, 28);
     doc.setFont("helvetica", "normal");
-    doc.text((p.full_name || 'SIN NOMBRE').toUpperCase(), 140, 28);
-    doc.text(`DNI: ${p.document_number || '-'}`, 140, 32);
+    doc.text(`${weekRange.start}  AL  ${weekRange.end}`, 160, 28);
 
-    const startY = 38;
-    
-    // --- TABLA 1: DATOS GENERALES ---
-    autoTable(doc, {
-      startY: startY,
-      head: [['Documento de Identidad', 'Nombre y Apellidos', 'Situación']],
-      body: [[
-        `Tipo: DNI\nNúmero: ${p.document_number}`,
-        (p.full_name || '').toUpperCase(),
-        'ACTIVO'
-      ]],
-      theme: 'grid', 
-      styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0, 0, 0] },
-      headStyles: { fillColor: headerColor, textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center', valign: 'middle' },
-      columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 100 }, 2: { cellWidth: 40 } },
-      margin: { left: 14 }
-    });
-
-    // --- TABLA 2: DATOS LABORALES ---
-    const pensionName = d.pensionName || p.pension_system || 'ONP';
+    // --- DATOS TRABAJADOR ---
+    const workerData = [
+        [{content:'CÓDIGO:', styles:{fontStyle:'bold'}}, p.worker_code || '-', {content:'CARGO:', styles:{fontStyle:'bold'}}, (p.position || p.category || '-').toUpperCase()],
+        [{content:'APELLIDOS Y NOMBRES:', styles:{fontStyle:'bold'}}, (p.full_name || '').toUpperCase(), {content:'FECHA ING.:', styles:{fontStyle:'bold'}}, p.entry_date || '-'],
+        [{content:'DOC. IDENTIDAD:', styles:{fontStyle:'bold'}}, `${p.document_type||'DNI'} ${p.document_number||'-'}`, {content:'CUSPP:', styles:{fontStyle:'bold'}}, p.cuspp || '-'],
+        [{content:'CATEGORÍA:', styles:{fontStyle:'bold'}}, (p.category || 'OBRERO').toUpperCase(), {content:'RÉG. PENSIONARIO:', styles:{fontStyle:'bold'}}, d.pensionName || 'ONP'],
+        [{content:'OBRA / C.COSTO:', styles:{fontStyle:'bold', colSpan: 3}}, (p.project_assigned || 'SIN ASIGNAR').toUpperCase()]
+    ];
 
     autoTable(doc, {
-      startY: doc.lastAutoTable.finalY - 0.1, 
-      head: [['Fecha de Ingreso', 'Tipo de Trabajador', 'Régimen Pensionario', 'CUSPP']],
-      body: [[
-        p.entry_date || p.start_date || '-',
-        isStaff ? 'EMPLEADO' : 'OBRERO',
-        pensionName,
-        p.cuspp || '-'
-      ]],
-      theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], halign: 'center' },
-      headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold' },
-      margin: { left: 14 }
+        startY: 45,
+        body: workerData,
+        theme: 'plain',
+        styles: { fontSize: bodyFontSize, cellPadding: 1, textColor: [0,0,0] },
+        columnStyles: { 0: { cellWidth: 35 }, 1: { cellWidth: 75 }, 2: { cellWidth: 25 }, 3: { cellWidth: 45 } },
+        margin: { left: 14 }
     });
 
-    // --- TABLA 3: ASISTENCIA ---
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY - 0.1,
-      head: [['Días Laborados', 'Días No Lab.', 'Días Sub.', 'Condición', 'Jornada Ordinaria', 'Sobretiempo']],
-      body: [[
-        `${item.daysWorked || 0}`, '0', '0', 'Domiciliado', 'Total Horas: --\nMinutos: 0', 'Total Horas: 0\nMinutos: 0'
-      ]],
-      theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], halign: 'center' },
-      headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold' },
-      margin: { left: 14 }
-    });
-
-    // --- CUERPO DE CONCEPTOS ---
-    let rows = [];
-    const fmt = (val) => (val || 0).toFixed(2);
-    const sectionTitle = (text) => ({ 
-        content: text, colSpan: 4, styles: { fontStyle: 'bold', halign: 'left', fillColor: headerColor } 
-    });
+    // --- CUERPO PRINCIPAL (INGRESOS vs DESCUENTOS) ---
+    // Preparamos dos listas: Ingresos y Descuentos
+    let incomes = [];
+    let discounts = [];
 
     if (isStaff) {
-        rows = [
-            [sectionTitle('Ingresos')],
-            ['0121', 'REMUNERACIÓN BÁSICA', fmt(d.basicSalary), ''],
-            ['0201', 'ASIGNACIÓN FAMILIAR', fmt(d.familyAllowance), ''],
-            [sectionTitle('Descuentos')],
-            [{ content: `Aportes (${pensionName})`, colSpan: 4, styles: { fontStyle: 'italic', halign: 'left' } }],
-            ['060x', 'FONDO DE PENSIONES', '', fmt(d.pensionSystem || d.pensionAmount)],
-            ['0701', 'ADELANTOS DE SUELDO', '', fmt(item.totalAdvances)],
-        ];
+        // Staff simple
+        incomes.push(['REMUNERACIÓN BÁSICA', fmt(d.basicSalary/30), 'X', '30', fmt(d.basicSalary)]);
+        if (d.familyAllowance > 0) incomes.push(['ASIGNACIÓN FAMILIAR', '', '', '', fmt(d.familyAllowance)]);
+        
+        discounts.push([`SISTEMA PENSIONES (${d.pensionName})`, '', fmt(d.pensionAmount)]);
+        if (item.totalAdvances > 0) discounts.push(['ADELANTOS', '', fmt(item.totalAdvances)]);
     } else {
-        rows = [
-            [sectionTitle('Ingresos')],
-            ['0121', 'JORNAL BÁSICO', fmt(d.basicSalary), ''],
-            ['0106', 'DOMINICAL', fmt(d.dominical), ''],
-            ['0304', 'BONIF. UNIFICADA (BUC)', fmt(d.buc), ''],
-            ['0902', 'MOVILIDAD', fmt(d.mobility), ''],
-        ];
-        if (d.schoolAssign > 0) {
-            rows.push(['0201', 'ASIGNACIÓN ESCOLAR', fmt(d.schoolAssign), '']);
-        }
-        rows.push([sectionTitle('Descuentos')]);
-        rows.push(['0608', `SISTEMA PENSIONES (${pensionName})`, '', fmt(d.pensionAmount)]);
-        rows.push(['0706', 'CONAFOVICER', '', fmt(d.conafovicer)]);
-        rows.push(['0701', 'ADELANTOS', '', fmt(item.totalAdvances)]);
+        // Obreros (Estructura de la Imagen)
+        incomes.push(['JORNAL BÁSICO', fmt(d.unitRates?.daily), 'X', item.daysWorked, fmt(d.basicSalary)]);
+        incomes.push(['DOMINICAL', fmt(d.unitRates?.daily), 'X', d.dominicalDays > 0 ? d.dominicalDays.toFixed(2) : '0', fmt(d.dominical)]);
+        incomes.push(['MOVILIDAD', fmt(d.unitRates?.mobility), 'X', item.daysWorked, fmt(d.mobility)]);
+        incomes.push(['BONIF. UNIF. CONSTR. (BUC)', '', '', '', fmt(d.buc)]);
+        
+        if (d.schoolAssign > 0) incomes.push(['ASIGNACIÓN ESCOLAR', fmt(d.unitRates?.school), 'X', item.daysWorked, fmt(d.schoolAssign)]);
+        if (d.he60.amount > 0) incomes.push(['HORAS EXTRAS 60%', fmt(d.unitRates?.he60), 'X', d.he60.hours + ' hrs', fmt(d.he60.amount)]);
+        if (d.he100.amount > 0) incomes.push(['HORAS EXTRAS 100%', fmt(d.unitRates?.he100), 'X', d.he100.hours + ' hrs', fmt(d.he100.amount)]);
+        
+        if (d.indemnity > 0) incomes.push(['INDEMNIZACIÓN (15%)', '', '', '', fmt(d.indemnity)]);
+        if (d.vacation > 0) incomes.push(['VACACIONES (10%)', '', '', '', fmt(d.vacation)]);
+
+        // Descuentos
+        discounts.push([`SISTEMA PENSIONES (${d.pensionName})`, d.pensionRateLabel || '', fmt(d.pensionAmount)]);
+        discounts.push(['CONAFOVICER', '2%', fmt(d.conafovicer)]);
+        if (item.totalAdvances > 0) discounts.push(['ADELANTOS', '', fmt(item.totalAdvances)]);
+    }
+
+    // Combinar en filas para la tabla (Zipping)
+    const maxRows = Math.max(incomes.length, discounts.length);
+    let tableRows = [];
+    for (let i = 0; i < maxRows; i++) {
+        const inc = incomes[i] || ['', '', '', '', ''];
+        const disc = discounts[i] || ['', '', ''];
+        // Estructura Fila: [Concepto Ing, Unit, X, Dias, Importe Ing] | [Concepto Desc, %/Info, Importe Desc]
+        tableRows.push([
+            inc[0], inc[1], inc[2], inc[3], inc[4], // Ingresos
+            disc[0], disc[2] // Descuentos (Solo Concepto y Monto para ahorrar espacio, o Concepto + Monto)
+        ]);
     }
 
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 5,
-      head: [['Código', 'Conceptos', 'Ingresos S/.', 'Descuentos S/.']],
-      body: rows,
+      head: [['CONCEPTO', 'UNIT.', ' ', 'CANT.', 'INGRESOS', 'DESCUENTOS', 'IMPORTE']], // Headers simplificados para que calcen
+      // Ajustamos para que se vea como en la imagen: Ingresos a la izquierda, Descuentos a la derecha
+      // Pero como la imagen tiene "Descuentos" en un bloque separado a veces, o columna dedicada.
+      // Haremos 2 tablas falsas unidas visualmente o una tabla ancha.
+      // Usaremos la estructura de columnas:
+      // Col 0: Concepto (Ing)
+      // Col 1: Unit
+      // Col 2: X
+      // Col 3: Dias
+      // Col 4: Monto Ing
+      // Col 5: Concepto Desc
+      // Col 6: Monto Desc
+      head: [[
+          { content: 'INGRESOS', colSpan: 5, styles: { halign: 'center', fillColor: headerBgColor } }, 
+          { content: 'DESCUENTOS', colSpan: 2, styles: { halign: 'center', fillColor: headerBgColor } }
+      ],
+      ['CONCEPTO', 'UNIT.', '', 'DÍAS', 'IMPORTE', 'CONCEPTO', 'IMPORTE']],
+      
+      body: tableRows,
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-      headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold', halign: 'center' },
-      columnStyles: { 0: {halign: 'center'}, 2: {halign: 'right'}, 3: {halign: 'right'} },
+      styles: { fontSize: bodyFontSize, cellPadding: 1.5, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], valign: 'middle' },
+      headStyles: { fillColor: headerBgColor, textColor: [0,0,0], fontStyle: 'bold', halign: 'center', lineWidth: lineWidth, lineColor: borderColor },
+      columnStyles: { 
+          0: { cellWidth: 55 }, // Concepto Ing
+          1: { cellWidth: 12, halign: 'center' }, // Unit
+          2: { cellWidth: 5, halign: 'center' },  // X
+          3: { cellWidth: 10, halign: 'center' }, // Dias
+          4: { cellWidth: 20, halign: 'right' },  // Importe Ing
+          5: { cellWidth: 55 }, // Concepto Desc
+          6: { cellWidth: 20, halign: 'right' }   // Importe Desc
+      },
       margin: { left: 14 }
     });
-
-    const finalY = doc.lastAutoTable.finalY;
 
     // --- TOTALES ---
+    const finalY = doc.lastAutoTable.finalY;
     autoTable(doc, {
-      startY: finalY - 0.1,
+      startY: finalY,
       body: [[
-        { content: 'Neto a Pagar:', styles: { fontStyle: 'bold', halign: 'right', fillColor: headerColor } },
-        { content: fmt(item.netPay), styles: { fontStyle: 'bold', halign: 'right', fontSize: 10 } }
+        { content: 'TOTAL INGRESOS:', styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: fmt(item.totalIncome), styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: 'TOTAL DESCUENTOS:', styles: { fontStyle: 'bold', halign: 'right' } },
+        { content: fmt(item.totalDiscounts), styles: { fontStyle: 'bold', halign: 'right' } }
       ]],
       theme: 'grid',
-      styles: { fontSize: 9, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-      columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: 40 } },
+      styles: { fontSize: bodyFontSize, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0], cellPadding: 2 },
+      columnStyles: { 0: { cellWidth: 82 }, 1: { cellWidth: 20 }, 2: { cellWidth: 55 }, 3: { cellWidth: 20 } },
       margin: { left: 14 }
     });
 
-    // --- APORTES EMPLEADOR ---
+    // NETO
     autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 2,
-      head: [['Aportes de Empleador', 'Monto S/.']],
-      body: [['0804 ESSALUD (9%)', fmt(d.essalud)]],
+      startY: doc.lastAutoTable.finalY,
+      body: [[
+        { content: 'NETO A PAGAR S/.', styles: { fontStyle: 'bold', halign: 'right', valign:'middle', fontSize: 9 } },
+        { content: fmt(item.netPay), styles: { fontStyle: 'bold', halign: 'center', fontSize: 11, valign:'middle', fillColor: [230, 230, 230] } }
+      ]],
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2, lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
-      headStyles: { fillColor: headerColor, textColor: [0,0,0], fontStyle: 'bold', halign: 'left' },
-      columnStyles: { 1: {halign: 'right'} },
-      margin: { left: 14, right: 120 } 
+      styles: { lineColor: borderColor, lineWidth: lineWidth, textColor: [0,0,0] },
+      columnStyles: { 0: { cellWidth: 157 }, 1: { cellWidth: 20 } },
+      margin: { left: 14 }
     });
 
-    // --- FIRMAS ---
+    // --- PIE DE PÁGINA ---
+    const footerY = doc.lastAutoTable.finalY + 5;
+    doc.setFontSize(6);
+    doc.text(`APORTES EMPLEADOR: ESSALUD (9%) S/. ${fmt(d.essalud)}`, 14, footerY);
+
     const pageHeight = doc.internal.pageSize.height;
-    let signatureY = Math.max(doc.lastAutoTable.finalY + 30, pageHeight - 40);
-    if (signatureY > pageHeight - 20) {
-        doc.addPage();
-        signatureY = 40;
-    }
+    let signatureY = Math.max(footerY + 30, pageHeight - 30);
+    if (signatureY > pageHeight - 20) { doc.addPage(); signatureY = 40; }
 
-    doc.setDrawColor(0);
-    doc.line(30, signatureY, 90, signatureY); 
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.text("EMPLEADOR", 60, signatureY + 5, null, null, "center");
-
-    doc.line(120, signatureY, 180, signatureY); 
-    doc.text("TRABAJADOR", 150, signatureY + 5, null, null, "center");
-    doc.setFont("helvetica", "normal");
-    doc.text(p.document_number || '', 150, signatureY + 9, null, null, "center");
+    doc.setDrawColor(0); doc.setLineWidth(0.1);
+    doc.line(30, signatureY, 85, signatureY); 
+    doc.text("EMPLEADOR", 57.5, signatureY + 3, null, null, "center");
+    
+    doc.line(125, signatureY, 180, signatureY); 
+    doc.text("TRABAJADOR", 152.5, signatureY + 3, null, null, "center");
+    doc.text(`${p.document_type||'DNI'} ${p.document_number||''}`, 152.5, signatureY + 7, null, null, "center");
 };
 
-// --- FUNCIÓN PÚBLICA 1: DESCARGAR UNA SOLA BOLETA ---
-export const generatePayslip = (item, weekRange, logoImg) => {
-  try {
+export const generatePayslip = (item, weekRange, companyAddress, logoImg) => {
+  const doc = new jsPDF(); 
+  drawPayslipContent(doc, item, weekRange, companyAddress, logoImg); 
+  doc.save(`Boleta_${item.person.document_number}.pdf`);
+};
+
+export const generateBulkPayslips = (items, weekRange, companyAddress, logoImg) => {
+    if (!items || items.length === 0) { alert("No hay datos."); return; }
     const doc = new jsPDF();
-    drawPayslipContent(doc, item, weekRange, logoImg);
-    doc.save(`Boleta_${item.person.document_number}_${weekRange.start}.pdf`);
-  } catch (err) {
-    console.error("Error PDF Individual:", err);
-    alert("Error al generar PDF individual.");
-  }
-};
-
-// --- FUNCIÓN PÚBLICA 2: DESCARGA MASIVA (TODO EN UN PDF) ---
-export const generateBulkPayslips = (items, weekRange, logoImg) => {
-    if (!items || items.length === 0) {
-        alert("No hay boletas para generar.");
-        return;
-    }
-
-    try {
-        const doc = new jsPDF();
-        
-        items.forEach((item, index) => {
-            // Si no es el primero, agregar nueva página
-            if (index > 0) {
-                doc.addPage();
-            }
-            // Dibujar en la página actual
-            drawPayslipContent(doc, item, weekRange, logoImg);
-        });
-
-        // Guardar un solo archivo grande
-        doc.save(`Planilla_Completa_${weekRange.start}_al_${weekRange.end}.pdf`);
-        
-    } catch (err) {
-        console.error("Error PDF Masivo:", err);
-        alert("Error al generar el PDF masivo. Revisa la consola.");
-    }
+    items.forEach((item, i) => { if(i>0) doc.addPage(); drawPayslipContent(doc, item, weekRange, companyAddress, logoImg); });
+    doc.save(`Planilla_Masiva.pdf`);
 };

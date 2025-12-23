@@ -1,6 +1,9 @@
 import React from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
-import { Search, HardHat, Clock, ChevronRight, MessageSquare } from 'lucide-react';
+import { 
+  Search, HardHat, Clock, ChevronRight, MessageSquare, 
+  User, CreditCard, BadgeCheck 
+} from 'lucide-react';
 import { Avatar } from "@heroui/react"; 
 
 const WorkerDashboard = () => {
@@ -13,18 +16,24 @@ const WorkerDashboard = () => {
 
   const canAccessLog = ['Capataz', 'Operario'].includes(worker.category);
 
+  // Formateador para moneda peruana
+  const formatCurrency = (amount) => {
+    if (!amount || amount === 0) return 'Según Tabla';
+    return `S/. ${Number(amount).toFixed(2)}`;
+  };
+
   return (
-    <div className="p-6 space-y-8 pb-24"> {/* Añadido padding bottom extra para el menú móvil */}
+    <div className="p-6 space-y-8 pb-24"> 
       
       {/* HEADER */}
       <div className="flex justify-between items-center pt-2">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-            Hola, {worker.full_name.split(' ')[0]}
+            Hola, {worker.full_name?.split(' ')[0]}
           </h1>
           <p className="text-slate-500 text-sm font-semibold mt-0.5 flex items-center gap-1">
             <span className="w-2 h-2 bg-green-500 rounded-full inline-block"></span>
-            {worker.category} activo
+            {worker.category || 'Trabajador'} activo
           </p>
         </div>
         <Avatar 
@@ -33,9 +42,8 @@ const WorkerDashboard = () => {
         />
       </div>
 
-      {/* TARJETA PRINCIPAL MEJORADA */}
+      {/* TARJETA PRINCIPAL (Sin cambios) */}
       <div className="bg-gradient-to-br from-[#003366] via-[#004080] to-[#0059b3] rounded-[2rem] p-6 text-white relative overflow-hidden shadow-xl shadow-blue-900/30 isolate">
-        {/* Efectos de fondo */}
         <div className="absolute -top-12 -right-12 w-40 h-40 bg-white/10 rounded-full blur-3xl -z-10"></div>
         <div className="absolute bottom-0 right-0 w-32 h-32 bg-blue-400/20 rounded-full blur-2xl -z-10"></div>
         
@@ -58,12 +66,11 @@ const WorkerDashboard = () => {
         </div>
       </div>
 
-      {/* GRID DE HERRAMIENTAS MEJORADO */}
+      {/* GRID DE HERRAMIENTAS (Sin cambios) */}
       <div>
         <h3 className="text-lg font-bold text-slate-800 mb-4 px-1">Accesos Rápidos</h3>
 
         <div className="grid grid-cols-2 gap-4">
-          
           {/* Card Asistencia */}
           <div 
             onClick={() => goTo('/worker/asistencia')}
@@ -118,9 +125,60 @@ const WorkerDashboard = () => {
             </p>
             <div className="absolute bottom-0 left-0 w-full h-1.5 bg-orange-500 scale-x-0 group-hover:scale-x-100 transition-transform origin-left duration-300"></div>
           </div>
-
         </div>
       </div>
+
+      {/* --- NUEVA SECCIÓN: PERSONAL Y CONTRATO (Corregida) --- */}
+      <div>
+        <h3 className="text-lg font-bold text-slate-800 mb-4 px-1 flex items-center gap-2">
+            <User size={18} className="text-[#003366]"/> Personal y Contrato
+        </h3>
+        
+        <div className="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            {/* Fila 1: Cargo y Categoría */}
+            <div className="p-5 border-b border-slate-50 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-slate-50 text-slate-500 rounded-xl">
+                        <BadgeCheck size={20}/>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Cargo / Categoría</p>
+                        <p className="font-bold text-slate-800">{worker.category || 'No definido'} / {worker.role || 'Operario'}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Fila 2: Jornada Diaria (CORREGIDA A SOLES S/.) */}
+            <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-green-50/30">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-100 text-green-600 rounded-xl">
+                        <CreditCard size={20}/>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Jornada Diaria</p>
+                        {/* AQUÍ ESTÁ EL CAMBIO SOLICITADO: S/. */}
+                        <p className="font-extrabold text-green-700 text-lg">
+                           {formatCurrency(worker.custom_daily_rate)}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Fila 3: Sistema de Pensiones */}
+            <div className="p-5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                        <User size={20}/>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Fondo de Pensiones</p>
+                        <p className="font-bold text-slate-800">{worker.pension_system || 'Sin registrar'}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+      </div>
+
     </div>
   );
 };

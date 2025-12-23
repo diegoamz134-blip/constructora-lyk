@@ -7,7 +7,7 @@ import { saveAs } from 'file-saver';
 const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
   const [loading, setLoading] = useState(false);
 
-  // --- LÓGICA DE EXPORTACIÓN CON ESTILOS ---
+  // --- LÓGICA DE EXPORTACIÓN CON ESTILOS Y HORAS EXTRAS ---
   const handleExport = async () => {
     if (!payrollData || payrollData.length === 0) {
       alert("No hay datos calculados para exportar. Por favor realiza el cálculo primero en la pantalla principal.");
@@ -20,10 +20,10 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
       // 1. Crear Libro y Hoja
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Planilla Consolidada', {
-        views: [{ showGridLines: false }] // Ocultar líneas de cuadrícula por defecto para un look más limpio
+        views: [{ showGridLines: false }] // Ocultar líneas para look más limpio
       });
 
-      // 2. Definir Columnas y Anchos
+      // 2. Definir Columnas y Anchos (AHORA INCLUYE HE)
       sheet.columns = [
         { header: 'ITEM', key: 'index', width: 6 },
         { header: 'DNI / CE', key: 'doc_number', width: 12 },
@@ -35,6 +35,14 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
         { header: 'B.U.C.', key: 'buc', width: 12 },
         { header: 'MOVILIDAD', key: 'mobility', width: 12 },
         { header: 'ASIG. ESC.', key: 'school', width: 12 },
+        
+        // --- NUEVAS COLUMNAS (HORAS EXTRAS) ---
+        { header: 'HE 60% (Hr)', key: 'he60_hours', width: 10 },
+        { header: 'HE 60% (S/.)', key: 'he60_amount', width: 12 },
+        { header: 'HE 100% (Hr)', key: 'he100_hours', width: 10 },
+        { header: 'HE 100% (S/.)', key: 'he100_amount', width: 12 },
+        // ---------------------------------------
+
         { header: 'TOTAL ING.', key: 'total_income', width: 14 },
         { header: 'AFP/ONP', key: 'pension_name', width: 15 },
         { header: 'DESC. PENS.', key: 'pension_amount', width: 12 },
@@ -45,14 +53,14 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
         { header: 'ESSALUD (9%)', key: 'essalud', width: 14 },
       ];
 
-      // 3. Título Corporativo (Filas 1 y 2)
-      sheet.mergeCells('A1:R1');
+      // 3. Título Corporativo (Fusionar celdas A1 hasta V1 porque ahora hay 22 columnas)
+      sheet.mergeCells('A1:V1');
       const titleCell = sheet.getCell('A1');
       titleCell.value = 'CONSTRUCTORA E INVERSIONES L & K S.A.C.';
       titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: '003366' } };
       titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      sheet.mergeCells('A2:R2');
+      sheet.mergeCells('A2:V2');
       const subtitleCell = sheet.getCell('A2');
       subtitleCell.value = `PLANILLA DE PAGOS SEMANAL - DEL ${dateRange.start} AL ${dateRange.end}`;
       subtitleCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: '555555' } };
@@ -64,21 +72,21 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
       // 4. Estilizar Encabezados de Tabla (Fila 4)
       const headerRow = sheet.getRow(4);
       headerRow.values = sheet.columns.map(col => col.header);
-      headerRow.height = 25;
+      headerRow.height = 30; // Más alto para que quepa el texto doble línea si es necesario
       
       headerRow.eachCell((cell) => {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: '003366' } // Azul L&K
+          fgColor: { argb: '003366' } // Azul corporativo
         };
         cell.font = {
           name: 'Arial',
-          color: { argb: 'FFFFFF' }, // Texto Blanco
+          color: { argb: 'FFFFFF' }, // Blanco
           bold: true,
-          size: 10
+          size: 9
         };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         cell.border = {
           top: { style: 'thin' },
           left: { style: 'thin' },
@@ -87,7 +95,7 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
         };
       });
 
-      // 5. Agregar Datos
+      // 5. Agregar Datos Fila por Fila
       let totalIncome = 0;
       let totalNet = 0;
       let totalEssalud = 0;
@@ -95,7 +103,7 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
       payrollData.forEach((item, index) => {
         const d = item.details || {};
         
-        // Sumar para totales
+        // Acumular Totales Generales
         totalIncome += (item.totalIncome || 0);
         totalNet += (item.netPay || 0);
         totalEssalud += (d.essalud || 0);
@@ -111,6 +119,14 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
           buc: d.buc,
           mobility: d.mobility,
           school: d.schoolAssign,
+          
+          // --- AQUÍ MAPERAMOS LAS HORAS EXTRAS ---
+          he60_hours: d.he60?.hours || 0,
+          he60_amount: d.he60?.amount || 0,
+          he100_hours: d.he100?.hours || 0,
+          he100_amount: d.he100?.amount || 0,
+          // ---------------------------------------
+
           total_income: item.totalIncome,
           pension_name: d.pensionName,
           pension_amount: d.pensionAmount,
@@ -121,9 +137,9 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
           essalud: d.essalud
         });
 
-        // Estilos por Fila (Zebra Striping)
+        // Estilos Zebra (Filas pares color diferente)
         const isEven = (index + 1) % 2 === 0;
-        const rowFill = isEven ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F4F8FB' } } : null; // Celeste muy pálido
+        const rowFill = isEven ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F4F8FB' } } : null;
 
         row.eachCell((cell, colNumber) => {
           if (rowFill) cell.fill = rowFill;
@@ -137,38 +153,44 @@ const PayrollModal = ({ isOpen, onClose, payrollData, dateRange }) => {
           
           cell.font = { name: 'Arial', size: 9 };
 
-          // Formato Moneda (Columnas 6 en adelante, excepto la 12 que es texto AFP)
-          if (colNumber >= 6 && colNumber !== 12) {
-             cell.numFmt = '"S/." #,##0.00;[Red]-"S/." #,##0.00';
-             cell.alignment = { horizontal: 'right' };
-          } else if (colNumber === 5) { // Días
-             cell.alignment = { horizontal: 'center' };
+          // --- LOGICA DE FORMATOS ---
+          // Col 5: Días (Centro)
+          // Col 11 (HE60 Hr), 13 (HE100 Hr): Horas (Centro)
+          // Col 16: AFP Nombre (Texto)
+          // El resto a partir de col 6 son Moneda (Derecha)
+          
+          if (colNumber === 5 || colNumber === 11 || colNumber === 13) {
+              cell.alignment = { horizontal: 'center' };
+          } else if (colNumber >= 6 && colNumber !== 16) {
+              cell.numFmt = '"S/." #,##0.00;[Red]-"S/." #,##0.00';
+              cell.alignment = { horizontal: 'right' };
           }
           
-          // Resaltar Neto (Columna 17)
-          if (colNumber === 17) {
-             cell.font = { bold: true, color: { argb: '006600' } }; // Verde
+          // Resaltar NETO A PAGAR (Ahora es Columna 21 debido a las 4 nuevas columnas)
+          if (colNumber === 21) {
+              cell.font = { bold: true, color: { argb: '006600' } }; // Verde
           }
         });
       });
 
-      // 6. Fila de Totales
-      const totalRow = sheet.addRow([
-        '', '', 'TOTAL GENERAL', '', '', 
-        '', '', '', '', '', 
-        totalIncome, 
-        '', '', '', '', '', 
-        totalNet, 
-        totalEssalud
-      ]);
+      // 6. Fila de Totales Finales
+      // Creamos un array vacío de 22 posiciones
+      const totalRowArray = new Array(22).fill('');
+      totalRowArray[2] = 'TOTAL GENERAL'; // En la columna de Nombres
+      totalRowArray[14] = totalIncome;    // Columna 15 es Total Ingresos
+      totalRowArray[20] = totalNet;       // Columna 21 es Neto
+      totalRowArray[21] = totalEssalud;   // Columna 22 es EsSalud
+
+      const totalRow = sheet.addRow(totalRowArray);
 
       totalRow.height = 20;
-      totalRow.eachCell((cell, colNumber) => {
+      totalRow.eachCell((cell) => {
         cell.font = { bold: true, name: 'Arial', size: 10 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD700' } }; // Amarillo Totales
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD700' } }; // Dorado
         cell.border = { top: { style: 'double' } };
         
-        if (colNumber >= 11) {
+        // Si la celda tiene un número, le damos formato moneda
+        if (typeof cell.value === 'number') {
             cell.numFmt = '"S/." #,##0.00';
             cell.alignment = { horizontal: 'right' };
         }
