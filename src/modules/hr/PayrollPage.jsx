@@ -4,14 +4,14 @@ import {
   DollarSign, Calculator, Printer, HardHat, UserCog, 
   FileSpreadsheet, FileDown, Calendar, RefreshCw,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Loader2 // Icono de carga para la exportación
+  Loader2 
 } from 'lucide-react';
 
 // Servicios
 import { 
   getActivePersonnelCount,
   getPaginatedActivePersonnel,
-  getActivePersonnel, // <--- NECESARIO: Para descargar TODOS sin paginar
+  getActivePersonnel, 
   getAttendanceByRange, 
   getAdvancesByRange 
 } from '../../services/payrollService';
@@ -24,32 +24,28 @@ import { calculateWorkerPay, calculateStaffPay } from '../../utils/payrollCalcul
 
 import { generatePayslip, generateBulkPayslips } from '../../utils/pdfGenerator';
 import PayrollModal from './components/PayrollModal';
+
+// IMÁGENES (Logo y Firma)
 import logoLyk from '../../assets/images/logo-lk-full.png';
+import firmaGerente from '../../assets/images/firma-gerente.png'; // <--- FIRMA IMPORTADA
 
 const PayrollPage = () => {
   const [activeTab, setActiveTab] = useState('workers'); 
   const [loading, setLoading] = useState(false);
   
-  // Estado para controlar la exportación masiva
   const [isExporting, setIsExporting] = useState(false);
 
-  // Contexto
   const { constants, afpRates, refreshConfig } = useCompany();
 
-  // Rango de Fechas
   const [weekRange, setWeekRange] = useState({
     start: new Date().toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
 
-  // Resultados (PAGINADOS - Lo que se ve en pantalla)
   const [calculatedPayroll, setCalculatedPayroll] = useState([]);
-  
-  // Resultados (TOTALES - Para el Modal de Excel)
   const [fullPayrollData, setFullPayrollData] = useState([]);
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
 
-  // Paginación
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0); 
   const itemsPerPage = 10;
@@ -68,7 +64,6 @@ const PayrollPage = () => {
     }
   };
 
-  // --- 1. CÁLCULO DE PANTALLA (Paginado) ---
   const calculatePayroll = async (pageToLoad = 1) => {
     setLoading(true);
     try {
@@ -78,7 +73,6 @@ const PayrollPage = () => {
         setTotalRecords(count);
         const freshPeople = await getPaginatedActivePersonnel(table, pageToLoad, itemsPerPage);
         
-        // Asistencias y Adelantos (Traemos del rango)
         const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
@@ -97,22 +91,17 @@ const PayrollPage = () => {
     }
   };
 
-  // --- 2. CÁLCULO MASIVO (Para Exportar PDF o Excel de TODOS) ---
   const handleGlobalExport = async (type) => {
     setIsExporting(true);
     try {
-        // A. Aseguramos config
         await refreshConfig();
 
-        // B. Traemos TODO el personal (Sin paginación)
         const table = activeTab === 'workers' ? 'workers' : 'employees';
-        const allPeople = await getActivePersonnel(table); // <--- Aquí está la clave
+        const allPeople = await getActivePersonnel(table); 
 
-        // C. Traemos datos de asistencia
         const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
-        // D. Calculamos para todo el personal
         const allResults = (allPeople || []).map(person => {
             return performCalculation(person, attData, advData);
         }).filter(r => r !== null);
@@ -123,11 +112,10 @@ const PayrollPage = () => {
             return;
         }
 
-        // E. Ejecutamos la acción según el botón
         if (type === 'pdf') {
-            generateBulkPayslips(allResults, weekRange, logoLyk);
+            generateBulkPayslips(allResults, weekRange, logoLyk, firmaGerente);
         } else if (type === 'excel') {
-            setFullPayrollData(allResults); // Guardamos la data completa para el modal
+            setFullPayrollData(allResults); 
             setIsPayrollModalOpen(true);
         }
 
@@ -139,51 +127,35 @@ const PayrollPage = () => {
     }
   };
 
-  // --- Helper para no repetir lógica de cálculo ---
-  // AQUI ESTA LA ACTUALIZACIÓN CLAVE PARA LAS HORAS EXTRAS
   const performCalculation = (person, attData, advData) => {
     try {
         const personId = person.id;
         
-        // Filtrar datos para esta persona
         const myAtt = (attData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
         const myAdv = (advData || []).filter(a => activeTab === 'workers' ? a.worker_id === personId : a.employee_id === personId);
         
-        // 1. Contar Días Trabajados
         const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
-        
-        // 2. Sumar Adelantos
         const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
-        // 3. NUEVO: Calcular Horas Extras (Día por día)
-        // Regla: Las 2 primeras horas del día van al 60%, el resto al 100%
         let totalHe60 = 0;
         let totalHe100 = 0;
 
         if (activeTab === 'workers') {
             myAtt.forEach(record => {
                 const dailyOvertime = Number(record.overtime_hours) || 0;
-                
                 if (dailyOvertime > 0) {
                     if (dailyOvertime <= 2) {
-                        // Si hizo 2 horas o menos, todo va al 60%
                         totalHe60 += dailyOvertime;
                     } else {
-                        // Si hizo más de 2 horas:
-                        // Las primeras 2 van al 60%
                         totalHe60 += 2;
-                        // El resto va al 100%
                         totalHe100 += (dailyOvertime - 2);
                     }
                 }
             });
             
-            // Empaquetamos las horas para enviarlas a la calculadora
             const heHours = { he60: totalHe60, he100: totalHe100 };
-            
             return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, heHours);
         } else {
-            // Staff por ahora no usa HE automáticas de asistencia, pero se podría agregar igual
             return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
         }
     } catch (e) { 
@@ -192,9 +164,12 @@ const PayrollPage = () => {
     }
   };
 
+  const handleDownloadSingle = (item) => {
+      generatePayslip(item, weekRange, logoLyk, firmaGerente);
+  };
+
   return (
     <div className="space-y-6 pb-24"> 
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -217,7 +192,6 @@ const PayrollPage = () => {
         </div>
       </div>
 
-      {/* TABS */}
       <div className="flex p-1 bg-white rounded-2xl border border-slate-200 w-fit shadow-sm">
         <button onClick={() => setActiveTab('workers')} className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${activeTab==='workers' ? 'bg-orange-50 text-orange-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>
             <HardHat size={18}/> Obreros
@@ -227,7 +201,6 @@ const PayrollPage = () => {
         </button>
       </div>
 
-      {/* TABLA DE RESULTADOS */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
          {calculatedPayroll.length === 0 && !loading ? (
              <div className="flex-1 flex flex-col items-center justify-center p-10 text-slate-400 gap-4">
@@ -239,7 +212,6 @@ const PayrollPage = () => {
              </div>
          ) : (
             <>
-                {/* TABLA VISUAL (Muestra solo los 10 de la paginación actual) */}
                 <div className="overflow-x-auto flex-1">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-100">
@@ -269,12 +241,6 @@ const PayrollPage = () => {
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
                                             </div>
-                                            {item.type === 'staff' && item.details.familyAllowance > 0 && (
-                                                <span className="text-[9px] text-green-600 font-bold block mt-1">+ Asig. Fam</span>
-                                            )}
-                                            {item.type === 'worker' && item.details.schoolAssign > 0 && (
-                                                <span className="text-[9px] text-orange-600 font-bold block mt-1">+ Asig. Escolar</span>
-                                            )}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className="bg-white px-3 py-1 rounded-lg text-xs font-bold text-slate-700 border border-slate-200 shadow-sm">{item.daysWorked}</span>
@@ -285,8 +251,7 @@ const PayrollPage = () => {
                                             <span className="font-mono font-bold text-lg text-green-600 bg-green-50 px-2 py-1 rounded">S/. {item.netPay.toFixed(2)}</span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            {/* La impresora individual sigue funcionando para este item específico */}
-                                            <button onClick={() => generatePayslip(item, weekRange, logoLyk)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
+                                            <button onClick={() => handleDownloadSingle(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
                                                 <Printer size={20}/>
                                             </button>
                                         </td>
@@ -297,7 +262,6 @@ const PayrollPage = () => {
                     </table>
                 </div>
 
-                {/* CONTROLES DE PAGINACIÓN */}
                 {totalPages > 1 && (
                     <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
                         <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
@@ -334,11 +298,10 @@ const PayrollPage = () => {
          )}
       </div>
 
-      {/* BOTONES FLOTANTES DE EXPORTACIÓN */}
       <div className="fixed bottom-8 right-8 flex flex-col gap-3 items-end z-40">
           <motion.div initial={{ scale: 0 }} animate={{ scale: calculatedPayroll.length > 0 ? 1 : 0 }}>
               <button 
-                onClick={() => handleGlobalExport('pdf')} // Cambiado para descargar TODO
+                onClick={() => handleGlobalExport('pdf')}
                 disabled={isExporting}
                 className="bg-[#003366] text-white p-4 rounded-full shadow-xl hover:bg-blue-900 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20 disabled:opacity-70 disabled:scale-100"
                 title="Descargar boletas de TODOS (Completo)"
@@ -351,7 +314,7 @@ const PayrollPage = () => {
           </motion.div>
 
           <button 
-            onClick={() => handleGlobalExport('excel')} // Cambiado para descargar TODO
+            onClick={() => handleGlobalExport('excel')}
             disabled={isExporting}
             className="bg-green-600 text-white p-4 rounded-full shadow-xl hover:bg-green-700 transition-all hover:scale-105 flex items-center gap-3 border-2 border-white/20 disabled:opacity-70 disabled:scale-100"
             title="Exportar Reporte Excel Completo"
@@ -363,7 +326,6 @@ const PayrollPage = () => {
           </button>
       </div>
 
-      {/* Modal recibe ahora fullPayrollData en lugar de la data parcial */}
       <PayrollModal 
         isOpen={isPayrollModalOpen} 
         onClose={() => setIsPayrollModalOpen(false)} 

@@ -13,9 +13,7 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
 
     // 2. Ingresos Básicos
     const basicSalary = daysWorked * dailyRate;
-    // Dominical: Si 6 días trabajados, 1 jornal completo. Si menos, proporcional (aquí simplificado a 1/6 por día trabajado)
-    // Para ser exactos con la tabla "X 6 = Total", si daysWorked = 6, dominical = 1 jornal.
-    const dominicalUnit = dailyRate; // El valor unitario para mostrar es el jornal
+    const dominicalUnit = dailyRate; 
     const dominicalDays = (daysWorked >= 6) ? 1 : (daysWorked / 6); 
     const dominical = dominicalDays * dailyRate;
 
@@ -31,7 +29,7 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     // 3. Horas Extras
     const rate60 = Number(constants['HE_60_PCT']) || 0.60;
     const rate100 = Number(constants['HE_100_PCT']) || 1.00;
-    // Valor unitario de la hora extra (Hora base + sobretasa)
+    
     const unitHe60 = hourlyRate * (1 + rate60);
     const unitHe100 = hourlyRate * (1 + rate100);
     const amountHe60 = (heHours.he60 || 0) * unitHe60;
@@ -47,33 +45,66 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     // TOTAL INGRESOS
     const totalIncome = basicSalary + dominical + buc + mobility + schoolAssign + amountHe60 + amountHe100 + indemnity + vacation;
 
-    // 5. Descuentos
-    let pensionAmount = 0;
+    // 5. Descuentos (DESGLOSE DETALLADO PARA FORMATO BOLETA)
     let pensionName = person.pension_system || 'ONP';
     let pensionRateLabel = '';
+    
+    // Desglose de Pensiones
+    let breakdown = {
+        obligatory: 0, // Aporte Obligatorio / SNP
+        insurance: 0,  // Prima Seguro
+        commission: 0, // Comisión Variable
+        total: 0
+    };
 
     if (pensionName === 'ONP') {
         const rate = Number(constants['ONP_TASA']) || 0.13;
-        pensionAmount = totalIncome * rate;
+        breakdown.obligatory = totalIncome * rate; // En ONP todo va aquí
+        breakdown.total = breakdown.obligatory;
         pensionRateLabel = `${(rate*100).toFixed(0)}%`;
+        pensionName = 'ONP';
+    } else if (pensionName === 'Sin Régimen') {
+        pensionName = 'Sin Régimen';
+        pensionRateLabel = '0%';
     } else {
         const myAfp = afpRates.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
+        
         if (myAfp) {
-            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
-            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
-            pensionAmount = totalIncome * totalRate;
-            pensionName = `AFP ${myAfp.name}`;
-            pensionRateLabel = `${(totalRate*100).toFixed(2)}%`;
+            const isMixta = person.commission_type === 'Mixta';
+            const commissionRate = isMixta ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
+            const insuranceRate = Number(myAfp.prima_seguro);
+            const obligRate = Number(myAfp.aporte_obligatorio);
+
+            breakdown.obligatory = totalIncome * obligRate;
+            breakdown.insurance = totalIncome * insuranceRate;
+            breakdown.commission = totalIncome * commissionRate;
+            breakdown.total = breakdown.obligatory + breakdown.insurance + breakdown.commission;
+            
+            const typeLabel = isMixta ? '(M)' : '(F)';
+            pensionName = `AFP ${myAfp.name} ${typeLabel}`;
+            pensionRateLabel = `${((obligRate+insuranceRate+commissionRate)*100).toFixed(2)}%`;
         } else {
-            pensionAmount = totalIncome * 0.13;
-            pensionRateLabel = '13%';
+            // Fallback genérico
+            breakdown.obligatory = totalIncome * 0.10;
+            breakdown.commission = totalIncome * 0.016;
+            breakdown.insurance = totalIncome * 0.018;
+            breakdown.total = totalIncome * 0.134; 
+            pensionRateLabel = 'Ref';
+            pensionName = `${pensionName} (?)`;
         }
     }
 
     const conafovicer = basicSalary * (Number(constants['CONAFOVICER']) || 0.02);
-    const totalDiscounts = pensionAmount + conafovicer + totalAdvances;
+    // Cuota sindical podría venir de person (si lo implementas a futuro), por ahora 0
+    const unionDues = 0; 
+
+    const totalDiscounts = breakdown.total + conafovicer + unionDues + totalAdvances;
     
+    // Aportes Empleador
     const essalud = totalIncome * (Number(constants['ESSALUD']) || 0.09);
+    // SCTR podría calcularse si tienes la tasa, por ahora hardcodeado o 0
+    const sctrPension = 0; 
+    const sctrSalud = 0; 
 
     return {
         person,
@@ -82,8 +113,12 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
         details: { 
             // Valores Totales
             basicSalary, dominical, buc, mobility, schoolAssign, indemnity, vacation,
-            pensionAmount, conafovicer, essalud, pensionName, pensionRateLabel,
-            // Valores Unitarios para el PDF
+            pensionAmount: breakdown.total, 
+            pensionBreakdown: breakdown, // NUEVO: Objeto con el desglose
+            conafovicer, unionDues,
+            essalud, sctrPension, sctrSalud,
+            pensionName, pensionRateLabel,
+            // Valores Unitarios
             unitRates: {
                 daily: dailyRate,
                 mobility: mobilityRate,
@@ -103,7 +138,7 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
 };
 
 export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, afpRates) => {
-    // Lógica estándar para staff (mensual)
+    // Lógica staff (similar ajuste en desglose si fuera necesario, por ahora mantenemos estructura básica compatible)
     const monthlySalary = Number(person.salary) || 0;
     const payBasico = (monthlySalary / 30) * daysWorked;
     const rmv = Number(constants['STAFF_RMV']) || 1025;
@@ -112,23 +147,35 @@ export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, 
     const payAsigFam = (monthlyAsigFam / 30) * daysWorked; 
     const totalIncome = payBasico + payAsigFam;
 
-    let pensionAmount = 0;
+    // Descuentos Staff
     let pensionName = person.pension_system || 'ONP';
+    let breakdown = { obligatory: 0, insurance: 0, commission: 0, total: 0 };
+    
     if (pensionName === 'ONP') {
-        pensionAmount = totalIncome * (Number(constants['STAFF_TASA_ONP']) || 0.13);
+        breakdown.total = totalIncome * (Number(constants['STAFF_TASA_ONP']) || 0.13);
+        breakdown.obligatory = breakdown.total;
+        pensionName = 'ONP';
+    } else if (pensionName === 'Sin Régimen') {
+        breakdown.total = 0;
     } else {
         const myAfp = afpRates.find(a => pensionName.includes(a.name) || a.name.includes(pensionName));
         if (myAfp) {
-            const commission = person.commission_type === 'Mixta' ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
-            const totalRate = Number(myAfp.aporte_obligatorio) + Number(myAfp.prima_seguro) + commission;
-            pensionAmount = totalIncome * totalRate;
-            pensionName = `AFP ${myAfp.name}`;
+            const isMixta = person.commission_type === 'Mixta';
+            const commRate = isMixta ? Number(myAfp.comision_mixta) : Number(myAfp.comision_flujo);
+            breakdown.obligatory = totalIncome * Number(myAfp.aporte_obligatorio);
+            breakdown.insurance = totalIncome * Number(myAfp.prima_seguro);
+            breakdown.commission = totalIncome * commRate;
+            breakdown.total = breakdown.obligatory + breakdown.insurance + breakdown.commission;
+            
+            const typeLabel = isMixta ? '(M)' : '(F)';
+            pensionName = `AFP ${myAfp.name} ${typeLabel}`;
         } else {
-            pensionAmount = totalIncome * 0.13;
+            breakdown.total = totalIncome * 0.13;
+            breakdown.obligatory = breakdown.total;
         }
     }
 
-    const totalDiscounts = pensionAmount + totalAdvances;
+    const totalDiscounts = breakdown.total + totalAdvances;
     const essalud = totalIncome * (Number(constants['STAFF_TASA_ESSALUD']) || 0.09);
 
     return {
@@ -136,7 +183,9 @@ export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, 
         type: 'staff',
         daysWorked,
         details: { 
-            basicSalary: payBasico, familyAllowance: payAsigFam, pensionAmount, pensionName, essalud 
+            basicSalary: payBasico, familyAllowance: payAsigFam, 
+            pensionAmount: breakdown.total, pensionBreakdown: breakdown, // Compatible
+            pensionName, essalud 
         },
         totalIncome, totalDiscounts, totalAdvances,
         netPay: totalIncome - totalDiscounts

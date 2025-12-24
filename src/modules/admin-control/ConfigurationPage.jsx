@@ -42,13 +42,17 @@ const ConfigurationPage = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Guardar Constantes Generales
       const updates = Object.keys(formValues).map(key => ({ key_name: key, value: parseFloat(formValues[key]) }));
       await supabase.from('payroll_constants').upsert(updates, { onConflict: 'key_name' });
 
+      // Guardar Tasas de AFP (Flujo y Mixta)
       const afpUpdates = afpRates.map(afp => ({
         id: afp.id, name: afp.name, 
-        comision_flujo: parseFloat(afp.comision_flujo), comision_mixta: parseFloat(afp.comision_mixta),
-        prima_seguro: parseFloat(afp.prima_seguro), aporte_obligatorio: parseFloat(afp.aporte_obligatorio)
+        comision_flujo: parseFloat(afp.comision_flujo || 0), 
+        comision_mixta: parseFloat(afp.comision_mixta || 0),
+        prima_seguro: parseFloat(afp.prima_seguro || 0), 
+        aporte_obligatorio: parseFloat(afp.aporte_obligatorio || 0)
       }));
       await supabase.from('afp_rates').upsert(afpUpdates, { onConflict: 'id' });
 
@@ -112,7 +116,7 @@ const ConfigurationPage = () => {
           </div>
         </div>
 
-        {/* 3. LIQUIDACIÓN SEMANAL (NUEVO) */}
+        {/* 3. LIQUIDACIÓN SEMANAL */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2 border-b pb-2">
             <Award size={18} className="text-purple-600"/> Liquidación Semanal
@@ -181,22 +185,65 @@ const ConfigurationPage = () => {
 
       </div>
       
-      {/* SECCIÓN AFP (Componente Reutilizable) */}
+      {/* SECCIÓN AFP (ACTUALIZADA: CON PASO DECIMAL) */}
       <div className="mt-8 pt-8 border-t border-slate-200">
           <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-orange-700"><TrendingUp size={20}/> Tasas de AFP</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {afpRates.map((afp) => (
-              <div key={afp.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                 <div className="font-bold text-slate-800 border-b pb-2 mb-2">{afp.name}</div>
-                 <div className="space-y-2 text-xs">
-                    <div className="flex justify-between"><span className="text-slate-500">Com. Flujo</span> 
-                       <input type="number" className="w-12 text-right bg-slate-50 border rounded" value={afp.comision_flujo} onChange={(e)=>handleAfpChange(afp.id, 'comision_flujo', e.target.value)} /></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Com. Mixta</span>
-                       <input type="number" className="w-12 text-right bg-slate-50 border rounded" value={afp.comision_mixta} onChange={(e)=>handleAfpChange(afp.id, 'comision_mixta', e.target.value)} /></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Seguro</span>
-                       <input type="number" className="w-12 text-right bg-slate-50 border rounded" value={afp.prima_seguro} onChange={(e)=>handleAfpChange(afp.id, 'prima_seguro', e.target.value)} /></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Aporte Obl.</span>
-                       <input type="number" className="w-12 text-right bg-slate-50 border rounded" value={afp.aporte_obligatorio} onChange={(e)=>handleAfpChange(afp.id, 'aporte_obligatorio', e.target.value)} /></div>
+              <div key={afp.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                 <div className="font-bold text-slate-800 border-b pb-2 mb-3 flex justify-between">
+                    <span>{afp.name}</span>
+                    <Percent size={14} className="text-slate-400 mt-1"/>
+                 </div>
+                 <div className="space-y-3 text-xs">
+                    {/* COMISIÓN SOBRE FLUJO */}
+                    <div className="flex justify-between items-center">
+                       <span className="text-slate-600 font-medium">Com. Flujo</span> 
+                       <div className="relative w-20">
+                          <input 
+                            type="number" step="0.01" 
+                            className="w-full text-right bg-slate-50 border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-mono text-slate-700" 
+                            value={afp.comision_flujo} 
+                            onChange={(e)=>handleAfpChange(afp.id, 'comision_flujo', e.target.value)} 
+                          />
+                       </div>
+                    </div>
+                    {/* COMISIÓN MIXTA */}
+                    <div className="flex justify-between items-center">
+                       <span className="text-slate-600 font-medium">Com. Mixta</span>
+                       <div className="relative w-20">
+                          <input 
+                            type="number" step="0.01" 
+                            className="w-full text-right bg-slate-50 border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-mono text-slate-700" 
+                            value={afp.comision_mixta} 
+                            onChange={(e)=>handleAfpChange(afp.id, 'comision_mixta', e.target.value)} 
+                          />
+                       </div>
+                    </div>
+                    {/* PRIMA SEGURO */}
+                    <div className="flex justify-between items-center">
+                       <span className="text-slate-600 font-medium">Prima Seguro</span>
+                       <div className="relative w-20">
+                          <input 
+                            type="number" step="0.01" 
+                            className="w-full text-right bg-slate-50 border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-mono text-slate-700" 
+                            value={afp.prima_seguro} 
+                            onChange={(e)=>handleAfpChange(afp.id, 'prima_seguro', e.target.value)} 
+                          />
+                       </div>
+                    </div>
+                    {/* APORTE OBLIGATORIO */}
+                    <div className="flex justify-between items-center">
+                       <span className="text-slate-600 font-medium">Aporte Obl.</span>
+                       <div className="relative w-20">
+                          <input 
+                            type="number" step="0.01" 
+                            className="w-full text-right bg-slate-50 border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-mono text-slate-700" 
+                            value={afp.aporte_obligatorio} 
+                            onChange={(e)=>handleAfpChange(afp.id, 'aporte_obligatorio', e.target.value)} 
+                          />
+                       </div>
+                    </div>
                  </div>
               </div>
             ))}
@@ -216,7 +263,7 @@ const ConfigurationPage = () => {
     <div className="space-y-6 pb-20">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Settings className="text-[#003366]" /> Configuración</h1>
-        <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-6 py-3 bg-[#003366] text-white rounded-xl font-bold shadow-lg">
+        <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-6 py-3 bg-[#003366] text-white rounded-xl font-bold shadow-lg hover:bg-blue-900 transition-colors">
           {saving ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18} />} Guardar
         </button>
       </div>

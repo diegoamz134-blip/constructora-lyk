@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Upload, Eye, RefreshCw, CheckCircle, AlertCircle, 
-  Loader2, Calendar, ArrowLeft, Clock, AlertTriangle, FileText
+  Loader2, Calendar, ArrowLeft, Clock, AlertTriangle, FileText, Trash2
 } from 'lucide-react';
 import { supabase } from '../../../services/supabase';
 import StatusModal from '../../../components/common/StatusModal'; 
@@ -132,6 +132,53 @@ const EmployeeDocumentsModal = ({ isOpen, onClose, person }) => {
     }
   };
 
+  // --- NUEVA FUNCIÓN: ELIMINAR DOCUMENTO ---
+  const handleDelete = async (doc) => {
+    if (!window.confirm(`¿Estás seguro de eliminar el documento: ${doc.doc_type}? Esta acción es irreversible.`)) return;
+
+    setLoadingList(true);
+    try {
+      // 1. Eliminar archivo del Storage si existe
+      if (doc.file_url) {
+         try {
+             const bucketName = 'hr-documents';
+             const urlParts = doc.file_url.split(`${bucketName}/`);
+             
+             if (urlParts.length > 1) {
+                 const filePath = decodeURIComponent(urlParts[1]);
+                 await supabase.storage.from(bucketName).remove([filePath]);
+             }
+         } catch (storageErr) {
+             console.warn("Advertencia al borrar archivo físico:", storageErr);
+         }
+      }
+
+      // 2. Eliminar registro de la Base de Datos
+      const { error } = await supabase
+        .from('hr_documents')
+        .delete()
+        .eq('id', doc.id);
+
+      if (error) throw error;
+
+      // 3. Actualizar UI
+      await fetchDocuments();
+      setNotification({
+        isOpen: true, type: 'success', title: 'Eliminado', 
+        message: 'Documento eliminado correctamente.'
+      });
+
+    } catch (error) {
+      console.error(error);
+      setNotification({
+        isOpen: true, type: 'error', title: 'Error', 
+        message: 'No se pudo eliminar el documento.'
+      });
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
   const handleSave = async () => {
     // Validación: Si no hay archivo nuevo y tampoco existe uno previo, error.
     const existingDoc = documents.find(d => d.doc_type === activeDocType);
@@ -149,25 +196,21 @@ const EmployeeDocumentsModal = ({ isOpen, onClose, person }) => {
           // A. LIMPIEZA: BORRAR EL ARCHIVO ANTIGUO DEL STORAGE SI EXISTE
           if (existingDoc && existingDoc.file_url) {
              try {
-                 // Extraemos la ruta relativa del archivo antiguo
-                 // URL típica: .../hr-documents/worker/123/dni_...
                  const bucketName = 'hr-documents';
                  const urlParts = existingDoc.file_url.split(`${bucketName}/`);
                  
                  if (urlParts.length > 1) {
-                     const oldPath = decodeURIComponent(urlParts[1]); // Decodificar por si tiene espacios
-                     console.log("Eliminando archivo antiguo:", oldPath);
+                     const oldPath = decodeURIComponent(urlParts[1]); 
                      await supabase.storage.from(bucketName).remove([oldPath]);
                  }
              } catch (deleteErr) {
-                 console.warn("No se pudo eliminar el archivo físico antiguo (puede que ya no exista):", deleteErr);
-                 // Continuamos sin error crítico
+                 console.warn("No se pudo eliminar el archivo físico antiguo:", deleteErr);
              }
           }
 
           // B. SUBIDA: CARGAR EL NUEVO ARCHIVO
           const fileExt = formData.file.name.split('.').pop();
-          const cleanDocType = activeDocType.replace(/[^a-zA-Z0-9]/g, '_'); // Sanitizar nombre
+          const cleanDocType = activeDocType.replace(/[^a-zA-Z0-9]/g, '_'); 
           const fileName = `${person.type || (person.role === 'worker' ? 'worker' : 'employee')}/${person.id}/${cleanDocType}_${Date.now()}.${fileExt}`;
 
           const { error: uploadError } = await supabase.storage
@@ -181,17 +224,17 @@ const EmployeeDocumentsModal = ({ isOpen, onClose, person }) => {
       }
 
       // 2. ACTUALIZAR BASE DE DATOS
-      // Borramos el registro antiguo (la fila en BD)
+      // Borramos el registro antiguo para evitar duplicados del mismo tipo
       await supabase.from('hr_documents').delete()
         .eq('person_id', person.id)
         .eq('doc_type', activeDocType);
 
-      // Insertamos el nuevo registro con la nueva URL (o la vieja si no se cambió archivo) y las nuevas fechas
+      // Insertamos el nuevo registro
       const { error: dbError } = await supabase.from('hr_documents').insert([{
         person_id: person.id,
         person_type: person.type || (person.role === 'worker' ? 'worker' : 'employee'),
         doc_type: activeDocType,
-        file_url: publicUrl || existingDoc?.file_url, // Si no hubo archivo nuevo, mantenemos el link del viejo
+        file_url: publicUrl || existingDoc?.file_url, // Usar nueva URL o mantener la vieja
         start_date: formData.startDate || null,
         expiration_date: formData.expirationDate || null
       }]);
@@ -288,16 +331,28 @@ const EmployeeDocumentsModal = ({ isOpen, onClose, person }) => {
                                             </div>
 
                                             <div className="flex gap-2">
+                                                {/* Botones de Acción */}
                                                 {existingDoc && (
-                                                    <a 
-                                                        href={existingDoc.file_url} 
-                                                        target="_blank" 
-                                                        rel="noreferrer"
-                                                        className="p-2 text-slate-400 hover:text-[#003366] hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
-                                                        title="Ver Documento"
-                                                    >
-                                                        <Eye size={18} />
-                                                    </a>
+                                                    <>
+                                                      <a 
+                                                          href={existingDoc.file_url} 
+                                                          target="_blank" 
+                                                          rel="noreferrer"
+                                                          className="p-2 text-slate-400 hover:text-[#003366] hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+                                                          title="Ver Documento"
+                                                      >
+                                                          <Eye size={18} />
+                                                      </a>
+                                                      
+                                                      {/* BOTÓN DE ELIMINAR (LA CESTA) */}
+                                                      <button 
+                                                          onClick={() => handleDelete(existingDoc)}
+                                                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                                                          title="Eliminar Documento"
+                                                      >
+                                                          <Trash2 size={18} />
+                                                      </button>
+                                                    </>
                                                 )}
 
                                                 <button 

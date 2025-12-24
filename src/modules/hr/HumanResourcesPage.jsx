@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion'; // Agregado AnimatePresence
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, Search, Plus, UserCog, HardHat, 
   Briefcase, Filter, Trash2, Pencil, Baby, BookOpen, 
   Activity, DollarSign,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight // Agregados iconos de paginación
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
-// Componentes
-import CreateUserModal from './components/CreateUserModal';
+// --- IMPORTAMOS LOS NUEVOS MODALES SEPARADOS ---
+import AddEmployeeModal from './AddEmployeeModal';
+import AddWorkerModal from './AddWorkerModal';
 import ChangeStatusModal from './components/ChangeStatusModal'; 
 import StatusModal from '../../components/common/StatusModal';
 
@@ -19,14 +20,16 @@ const HumanResourcesPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Estados para Modales
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // --- ESTADOS DE MODALES SEPARADOS ---
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
+  
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState(null);
   const [userToChangeStatus, setUserToChangeStatus] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
 
-  // --- ESTADOS DE PAGINACIÓN ---
+  // --- PAGINACIÓN ---
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -43,7 +46,6 @@ const HumanResourcesPage = () => {
     setLoading(true);
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
-      // Seleccionamos todo para asegurarnos de traer pension_system y custom_daily_rate
       const { data, error } = await supabase
         .from(table)
         .select('*')
@@ -75,14 +77,23 @@ const HumanResourcesPage = () => {
     }
   };
 
+  // --- NUEVA LÓGICA DE APERTURA DE MODALES ---
   const handleCreate = () => {
     setUserToEdit(null);
-    setIsModalOpen(true);
+    if (activeTab === 'staff') {
+      setIsEmployeeModalOpen(true);
+    } else {
+      setIsWorkerModalOpen(true);
+    }
   };
 
   const handleEdit = (user) => {
     setUserToEdit(user);
-    setIsModalOpen(true);
+    if (activeTab === 'staff') {
+      setIsEmployeeModalOpen(true);
+    } else {
+      setIsWorkerModalOpen(true);
+    }
   };
 
   const handleStatusChange = (user) => {
@@ -305,7 +316,7 @@ const HumanResourcesPage = () => {
               </table>
             </div>
 
-            {/* CONTROLES DE PAGINACIÓN */}
+            {/* CONTROLES DE PAGINACIÓN (Original Restaurado) */}
             {totalPages > 1 && (
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4 animate-in fade-in slide-in-from-bottom-4">
                   <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium hidden md:block">
@@ -370,10 +381,17 @@ const HumanResourcesPage = () => {
         )}
       </div>
 
-      <CreateUserModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        activeTab={activeTab}
+      {/* RENDERIZADO CONDICIONAL DE LOS NUEVOS MODALES */}
+      <AddEmployeeModal 
+        isOpen={isEmployeeModalOpen}
+        onClose={() => setIsEmployeeModalOpen(false)}
+        onSuccess={fetchData}
+        userToEdit={userToEdit}
+      />
+
+      <AddWorkerModal 
+        isOpen={isWorkerModalOpen}
+        onClose={() => setIsWorkerModalOpen(false)}
         onSuccess={fetchData}
         userToEdit={userToEdit}
       />
