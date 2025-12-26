@@ -25,7 +25,7 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     doc.text("R.U.C. 20482531301", 14, y);
 
     // Cuadro Derecha: Semana y Mes (Con celdas)
-    const dateStart = new Date(weekRange.start);
+    const dateStart = new Date(weekRange.start + 'T00:00:00'); // Fix zona horaria simple
     const monthName = dateStart.toLocaleString('es-ES', { month: 'long' }).toUpperCase();
     const weekNumber = getWeekNumber(dateStart);
 
@@ -41,11 +41,11 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
 
     // --- 2. DATOS DEL TRABAJADOR (GRID COMPLETO) ---
     
-    // TABLA 1: DATOS PERSONALES Y CUENTA (NUEVO)
+    // TABLA 1: DATOS PERSONALES Y CUENTA
     autoTable(doc, {
         startY: 35,
         head: [['APELLIDOS Y NOMBRES', 'DOC. IDENTIDAD', 'NUMERO DE CUENTA']],
-        body: [[(p.full_name || '').toUpperCase(), `${p.document_type} ${p.document_number}`, p.bank_account || '-']],
+        body: [[(p.full_name || '').toUpperCase(), `${p.document_type || 'DNI'} ${p.document_number}`, p.bank_account || '-']],
         theme: 'grid',
         styles: { fontSize: 7, halign: 'left', cellPadding: 1.5, lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0] },
         headStyles: { fillColor: lightBlue, textColor: [0,0,0], fontStyle: 'bold', halign: 'center' },
@@ -54,7 +54,7 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     });
 
     // TABLA 2: FECHAS Y JORNAL
-    const workerGrid2 = [[p.entry_date || '-', p.contract_end_date || '-', p.birth_date || '-', fmt(d.unitRates?.daily)]];
+    const workerGrid2 = [[p.start_date || '-', p.contract_end_date || '-', p.birth_date || '-', fmt(d.unitRates?.daily)]];
     autoTable(doc, {
         startY: doc.lastAutoTable.finalY - 0.1, // Pegado
         head: [['F. DE INGRESO', 'F. DE CESE', 'F. NACIMIENTO', 'JORNAL DIARIO']],
@@ -66,10 +66,10 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     });
 
     // TABLA 3: AFP Y DETALLES
-    const workerGrid3 = [['-', d.pensionName || 'ONP', p.cuspp || '-', item.daysWorked, fmt(d.unitRates?.daily)]];
+    const workerGrid3 = [['-', d.pensionName || 'ONP', p.cuspp || '-', item.daysWorked, fmt(d.dominicalDays * (d.unitRates?.daily || 0))]];
     autoTable(doc, {
         startY: doc.lastAutoTable.finalY - 0.1, // Pegado
-        head: [['CARNET ESSALUD', 'AFP/ONP', 'CUSPP', 'DIAS TRAB', 'DOMINICAL']],
+        head: [['CARNET ESSALUD', 'AFP/ONP', 'CUSPP', 'DIAS TRAB', 'DOMINICAL (REF)']],
         body: workerGrid3,
         theme: 'grid',
         styles: { fontSize: 7, halign: 'center', cellPadding: 1.5, lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0] },
@@ -78,21 +78,33 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     });
 
     // --- 3. CUERPO DE LA BOLETA (3 COLUMNAS EN CELDAS) ---
+    // AQUI AGREGAMOS LA GRATIFICACION Y HORAS EXTRAS
     const ingresos = [
-        { l: 'JORNAL BASICO', v: d.basicSalary }, { l: 'DOMINICAL', v: d.dominical },
-        { l: 'ASIGNACION ESCOLAR', v: d.schoolAssign }, { l: 'TRAB. DIA DESCANSO', v: d.he100?.amount }, 
-        { l: 'TRAB. DIA FERIADO', v: 0 }, { l: 'B.U.C.', v: d.buc },
-        { l: 'MOVILIDAD', v: d.mobility }, { l: 'VACACIONES', v: d.vacation }, { l: 'INDEMNIZACION', v: d.indemnity },
+        { l: 'JORNAL BASICO', v: d.basicSalary }, 
+        { l: 'DOMINICAL', v: d.dominical },
+        { l: 'ASIGNACION ESCOLAR', v: d.schoolAssign }, 
+        { l: 'HORAS EXTRAS 60%', v: d.he60?.amount },   // Agregado
+        { l: 'HORAS EXTRAS 100%', v: d.he100?.amount }, // Agregado
+        { l: 'B.U.C.', v: d.buc },
+        { l: 'MOVILIDAD', v: d.mobility }, 
+        { l: 'VACACIONES', v: d.vacation }, 
+        { l: 'GRATIFICACION', v: d.gratification },     // <--- ¡NUEVO CAMPO!
+        { l: 'INDEMNIZACION (CTS)', v: d.indemnity },
     ].filter(x => x.v > 0);
 
     const descuentos = [
         { l: d.pensionName === 'ONP' ? 'SIST. NAC. PENS.' : 'AFP-OBLIG', v: pb.obligatory },
-        { l: 'AFP-SEGURO', v: pb.insurance }, { l: 'AFP-COMISION', v: pb.commission },
-        { l: 'CONAFOVICER', v: d.conafovicer }, { l: 'ADELANTOS', v: item.totalAdvances }, { l: 'CUOTA SINDICAL', v: d.unionDues }
+        { l: 'AFP-SEGURO', v: pb.insurance }, 
+        { l: 'AFP-COMISION', v: pb.commission },
+        { l: 'CONAFOVICER', v: d.conafovicer }, 
+        { l: 'ADELANTOS', v: item.totalAdvances }, 
+        { l: 'CUOTA SINDICAL', v: d.unionDues }
     ].filter(x => x.v > 0);
 
     const aportes = [
-        { l: 'ES-SALUD', v: d.essalud }, { l: 'SCTR-SALUD', v: d.sctrSalud }, { l: 'SCTR-PENSION', v: d.sctrPension }
+        { l: 'ES-SALUD', v: d.essalud }, 
+        { l: 'SCTR-SALUD', v: d.sctrSalud }, 
+        { l: 'SCTR-PENSION', v: d.sctrPension }
     ].filter(x => x.v > 0);
 
     const maxRows = Math.max(ingresos.length, descuentos.length, aportes.length, 8); 
@@ -101,28 +113,54 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         const ing = ingresos[i] || { l: '', v: '' };
         const desc = descuentos[i] || { l: '', v: '' };
         const aport = aportes[i] || { l: '', v: '' };
-        bodyRows.push([ing.l, typeof ing.v === 'number' ? fmt(ing.v) : '', desc.l, typeof desc.v === 'number' ? fmt(desc.v) : '', aport.l, typeof aport.v === 'number' ? fmt(aport.v) : '']);
+        bodyRows.push([
+            ing.l, typeof ing.v === 'number' ? fmt(ing.v) : '', 
+            desc.l, typeof desc.v === 'number' ? fmt(desc.v) : '', 
+            aport.l, typeof aport.v === 'number' ? fmt(aport.v) : ''
+        ]);
     }
 
     autoTable(doc, {
         startY: doc.lastAutoTable.finalY + 5,
-        head: [[{ content: 'REMUNERACIONES', colSpan: 2 }, { content: 'DESCUENTOS DEL TRABAJADOR', colSpan: 2 }, { content: 'APORTES DEL EMPLEADOR', colSpan: 2 }]],
+        head: [[
+            { content: 'REMUNERACIONES', colSpan: 2 }, 
+            { content: 'DESCUENTOS DEL TRABAJADOR', colSpan: 2 }, 
+            { content: 'APORTES DEL EMPLEADOR', colSpan: 2 }
+        ]],
         body: bodyRows,
         theme: 'grid', 
         styles: { fontSize: 6.5, cellPadding: 1.5, lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0], halign: 'center' },
         headStyles: { fillColor: lightBlue, textColor: [0,0,0], fontStyle: 'bold' },
-        columnStyles: { 0: { cellWidth: 40, halign: 'left' }, 1: { cellWidth: 15, halign: 'right' }, 2: { cellWidth: 40, halign: 'left' }, 3: { cellWidth: 15, halign: 'right' }, 4: { cellWidth: 40, halign: 'left' }, 5: { cellWidth: 15, halign: 'right' } },
+        columnStyles: { 
+            0: { cellWidth: 40, halign: 'left' }, 1: { cellWidth: 15, halign: 'right' }, 
+            2: { cellWidth: 40, halign: 'left' }, 3: { cellWidth: 15, halign: 'right' }, 
+            4: { cellWidth: 40, halign: 'left' }, 5: { cellWidth: 15, halign: 'right' } 
+        },
         margin: { left: 14, right: 14 }
     });
 
     // --- 4. TOTALES ---
-    const totalIncome = fmt(item.totalIncome); const totalDisc = fmt(item.totalDiscounts); const totalContrib = fmt(d.essalud + (d.sctrSalud||0) + (d.sctrPension||0));
+    const totalIncome = fmt(item.totalIncome); 
+    const totalDisc = fmt(item.totalDiscounts); 
+    const totalContrib = fmt(d.essalud + (d.sctrSalud||0) + (d.sctrPension||0));
+    
     autoTable(doc, {
         startY: doc.lastAutoTable.finalY - 0.1,
-        body: [[{ content: 'TOTAL REMUNERACION', styles: { fontStyle: 'bold', halign: 'right' } }, { content: totalIncome, styles: { fontStyle: 'bold', halign: 'right' } }, { content: 'TOTAL DESCUENTO', styles: { fontStyle: 'bold', halign: 'right' } }, { content: totalDisc, styles: { fontStyle: 'bold', halign: 'right' } }, { content: 'TOTAL APORTES', styles: { fontStyle: 'bold', halign: 'right' } }, { content: totalContrib, styles: { fontStyle: 'bold', halign: 'right' } }]],
+        body: [[
+            { content: 'TOTAL REMUNERACION', styles: { fontStyle: 'bold', halign: 'right' } }, 
+            { content: totalIncome, styles: { fontStyle: 'bold', halign: 'right' } }, 
+            { content: 'TOTAL DESCUENTO', styles: { fontStyle: 'bold', halign: 'right' } }, 
+            { content: totalDisc, styles: { fontStyle: 'bold', halign: 'right' } }, 
+            { content: 'TOTAL APORTES', styles: { fontStyle: 'bold', halign: 'right' } }, 
+            { content: totalContrib, styles: { fontStyle: 'bold', halign: 'right' } }
+        ]],
         theme: 'grid',
         styles: { fontSize: 7, cellPadding: 1.5, lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0] },
-        columnStyles: { 0: { cellWidth: 40, fillColor: lightBlue }, 1: { cellWidth: 15 }, 2: { cellWidth: 40, fillColor: lightBlue }, 3: { cellWidth: 15 }, 4: { cellWidth: 40, fillColor: lightBlue }, 5: { cellWidth: 15 } },
+        columnStyles: { 
+            0: { cellWidth: 40, fillColor: lightBlue }, 1: { cellWidth: 15 }, 
+            2: { cellWidth: 40, fillColor: lightBlue }, 3: { cellWidth: 15 }, 
+            4: { cellWidth: 40, fillColor: lightBlue }, 5: { cellWidth: 15 } 
+        },
         margin: { left: 14, right: 14 }
     });
 
@@ -130,8 +168,13 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     const finalY = doc.lastAutoTable.finalY;
     autoTable(doc, {
         startY: finalY + 2, margin: { left: 110 },
-        body: [[{ content: 'NETO A PAGAR S/.', styles: { fontStyle: 'bold', halign: 'center', fillColor: lightBlue } }, { content: fmt(item.netPay), styles: { fontStyle: 'bold', halign: 'center', fontSize: 10 } }]],
-        theme: 'grid', styles: { lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0] }, columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 30 } }
+        body: [[
+            { content: 'NETO A PAGAR S/.', styles: { fontStyle: 'bold', halign: 'center', fillColor: lightBlue } }, 
+            { content: fmt(item.netPay), styles: { fontStyle: 'bold', halign: 'center', fontSize: 10 } }
+        ]],
+        theme: 'grid', 
+        styles: { lineColor: borderColor, lineWidth: 0.1, textColor: [0,0,0] }, 
+        columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 30 } }
     });
 
     // --- FIRMAS ---

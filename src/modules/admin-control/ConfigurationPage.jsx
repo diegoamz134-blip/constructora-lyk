@@ -124,17 +124,36 @@ const ConfigurationPage = () => {
           <div className="space-y-3">
              <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 text-xs font-bold text-slate-400 uppercase">Porcentajes de Ley</div>
+                
+                {/* CTS / INDEMNIZACION */}
                 <div>
-                    <label className="text-[10px] font-bold text-slate-500">Indemniz. (%)</label>
-                    <input type="number" step="0.01" value={formValues['PCT_INDEMNIZACION'] || '0.15'} onChange={(e) => handleChange('PCT_INDEMNIZACION', e.target.value)} className="w-full px-2 py-1 bg-slate-50 border rounded text-sm font-bold text-slate-700 outline-none focus:border-purple-500"/>
+                    <label className="text-[10px] font-bold text-slate-500">CTS / Indemniz. (%)</label>
+                    <div className="relative">
+                        <input type="number" step="0.0001" value={formValues['PCT_INDEMNIZACION'] || '0.15'} onChange={(e) => handleChange('PCT_INDEMNIZACION', e.target.value)} className="w-full px-2 py-1 bg-slate-50 border rounded text-sm font-bold text-slate-700 outline-none focus:border-purple-500"/>
+                    </div>
                 </div>
+
+                {/* VACACIONES */}
                 <div>
                     <label className="text-[10px] font-bold text-slate-500">Vacaciones (%)</label>
-                    <input type="number" step="0.01" value={formValues['PCT_VACACIONES'] || '0.10'} onChange={(e) => handleChange('PCT_VACACIONES', e.target.value)} className="w-full px-2 py-1 bg-slate-50 border rounded text-sm font-bold text-slate-700 outline-none focus:border-purple-500"/>
+                    <div className="relative">
+                        <input type="number" step="0.0001" value={formValues['PCT_VACACIONES'] || '0.10'} onChange={(e) => handleChange('PCT_VACACIONES', e.target.value)} className="w-full px-2 py-1 bg-slate-50 border rounded text-sm font-bold text-slate-700 outline-none focus:border-purple-500"/>
+                    </div>
                 </div>
+
+                {/* NUEVO: GRATIFICACIÓN */}
+                <div className="col-span-2 mt-2">
+                    <label className="text-[10px] font-bold text-slate-500">Gratificación Proporcional (%)</label>
+                    <div className="relative flex items-center gap-2">
+                        <input type="number" step="0.0001" value={formValues['PCT_GRATIFICACION'] || '0.21'} onChange={(e) => handleChange('PCT_GRATIFICACION', e.target.value)} className="w-full px-2 py-1 bg-purple-50 border border-purple-200 rounded text-sm font-bold text-purple-700 outline-none focus:border-purple-500"/>
+                        <span className="text-xs font-bold text-purple-400 bg-purple-100 px-2 py-1 rounded">{(parseFloat(formValues['PCT_GRATIFICACION'] || 0) * 100).toFixed(2)}%</span>
+                    </div>
+                    <p className="text-[9px] text-slate-400 mt-1">Suele ser entre 19% y 21% (Ej: 0.1905)</p>
+                </div>
+
              </div>
              <div className="bg-purple-50 p-3 rounded-lg border border-purple-100 text-[10px] text-purple-800">
-                <strong>Nota:</strong> Estos porcentajes (15% y 10%) se calculan sobre el Jornal Básico acumulado de la semana.
+                <strong>Nota:</strong> Estos porcentajes se calculan sobre el Jornal Básico acumulado de la semana.
              </div>
           </div>
         </div>
@@ -151,14 +170,14 @@ const ConfigurationPage = () => {
                     <input type="number" step="0.01" value={formValues['HE_60_PCT'] || '0.60'} onChange={(e) => handleChange('HE_60_PCT', e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-blue-500" />
                     <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">{(parseFloat(formValues['HE_60_PCT'] || 0) * 100).toFixed(0)}%</span>
                 </div>
-            </div>
+             </div>
              <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500">A partir de 2 Horas (100%)</label>
                 <div className="flex items-center gap-2">
                     <input type="number" step="0.01" value={formValues['HE_100_PCT'] || '1.00'} onChange={(e) => handleChange('HE_100_PCT', e.target.value)} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-blue-500" />
                     <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">{(parseFloat(formValues['HE_100_PCT'] || 0) * 100).toFixed(0)}%</span>
                 </div>
-            </div>
+             </div>
           </div>
         </div>
 

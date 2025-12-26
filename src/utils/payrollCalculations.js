@@ -1,5 +1,6 @@
 /**
  * Calcula la planilla semanal para un OBRERO (Régimen Construcción Civil)
+ * CORREGIDO: Base imponible correcta, Conafovicer ajustado y Gratificación añadida.
  */
 export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants, afpRates, heHours = { he60: 0, he100: 0 }) => {
     const catUpper = (person.category || 'PEON').toUpperCase();
@@ -13,14 +14,16 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
 
     // 2. Ingresos Básicos
     const basicSalary = daysWorked * dailyRate;
-    const dominicalUnit = dailyRate; 
+    
+    // Dominical: Se paga 1 jornal si trabajó la semana completa (o proporcional)
+    // Nota: En construcción a veces es proporcional, a veces fijo por semana completa. Usamos la lógica estándar.
     const dominicalDays = (daysWorked >= 6) ? 1 : (daysWorked / 6); 
     const dominical = dominicalDays * dailyRate;
 
-    const bucFactor = Number(constants[`BUC_${catUpper}`]) || 0;
+    const bucFactor = Number(constants[`BUC_${catUpper}`]) || 0; // Ej: 0.32 Operario, 0.30 Peon
     const buc = basicSalary * bucFactor;
 
-    const mobilityRate = Number(constants['MOVILIDAD']) || 0;
+    const mobilityRate = Number(constants['MOVILIDAD']) || 0; // Ej: 8.00
     const mobility = daysWorked * mobilityRate;
 
     const schoolRate = person.has_children ? (Number(constants['ASIG_ESCOLAR_DIARIO']) || 0) : 0;
@@ -35,31 +38,45 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     const amountHe60 = (heHours.he60 || 0) * unitHe60;
     const amountHe100 = (heHours.he100 || 0) * unitHe100;
 
-    // 4. Liquidación Semanal (15% Indemnización + 10% Vacaciones)
-    const pctIndemnity = Number(constants['PCT_INDEMNIZACION']) || 0.15;
-    const pctVacation = Number(constants['PCT_VACACIONES']) || 0.10;
+    // 4. Liquidación Semanal (Beneficios Sociales)
+    const pctIndemnity = Number(constants['PCT_INDEMNIZACION']) || 0.15; // CTS (15%) - NO AFECTO
+    const pctVacation = Number(constants['PCT_VACACIONES']) || 0.10;     // Vacaciones (10%) - AFECTO
+    const pctGratification = Number(constants['PCT_GRATIFICACION']) || 0.21; // Gratificación (aprox 21% o según param) - AFECTO
+
+    const indemnity = basicSalary * pctIndemnity; // CTS
+    const vacation = basicSalary * pctVacation;   // Vacaciones
+    const gratification = basicSalary * pctGratification; // Gratificaciones Truncas
+
+    // ----------------------------------------------------------------------
+    // CÁLCULO DE BASES IMPONIBLES (CRUCIAL PARA QUE CUADRE CON EXCEL)
+    // ----------------------------------------------------------------------
     
-    const indemnity = basicSalary * pctIndemnity;
-    const vacation = basicSalary * pctVacation;
+    // A. Base para AFP/ONP y EsSalud (Remuneración Asegurable)
+    // Generalmente: Básico + Dominical + BUC + Vacaciones + Gratificación + H.E. + Asig. Escolar
+    // EXCLUYE: CTS (Indemnity) y Movilidad
+    const taxableIncome = basicSalary + dominical + buc + schoolAssign + amountHe60 + amountHe100 + vacation + gratification;
 
-    // TOTAL INGRESOS
-    const totalIncome = basicSalary + dominical + buc + mobility + schoolAssign + amountHe60 + amountHe100 + indemnity + vacation;
+    // B. Base para Conafovicer (Básico + Dominical)
+    const conafovicerBase = basicSalary + dominical;
 
-    // 5. Descuentos (DESGLOSE DETALLADO PARA FORMATO BOLETA)
+    // C. Total de Ingresos (Bolsillo del trabajador)
+    const totalIncome = taxableIncome + indemnity + mobility;
+
+    // 5. Descuentos
     let pensionName = person.pension_system || 'ONP';
     let pensionRateLabel = '';
     
     // Desglose de Pensiones
     let breakdown = {
-        obligatory: 0, // Aporte Obligatorio / SNP
-        insurance: 0,  // Prima Seguro
-        commission: 0, // Comisión Variable
+        obligatory: 0,
+        insurance: 0, 
+        commission: 0,
         total: 0
     };
 
     if (pensionName === 'ONP') {
         const rate = Number(constants['ONP_TASA']) || 0.13;
-        breakdown.obligatory = totalIncome * rate; // En ONP todo va aquí
+        breakdown.obligatory = taxableIncome * rate; // USA BASE IMPONIBLE, NO TOTAL
         breakdown.total = breakdown.obligatory;
         pensionRateLabel = `${(rate*100).toFixed(0)}%`;
         pensionName = 'ONP';
@@ -75,34 +92,30 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
             const insuranceRate = Number(myAfp.prima_seguro);
             const obligRate = Number(myAfp.aporte_obligatorio);
 
-            breakdown.obligatory = totalIncome * obligRate;
-            breakdown.insurance = totalIncome * insuranceRate;
-            breakdown.commission = totalIncome * commissionRate;
+            breakdown.obligatory = taxableIncome * obligRate; // USA BASE IMPONIBLE
+            breakdown.insurance = taxableIncome * insuranceRate;
+            breakdown.commission = taxableIncome * commissionRate;
             breakdown.total = breakdown.obligatory + breakdown.insurance + breakdown.commission;
             
             const typeLabel = isMixta ? '(M)' : '(F)';
             pensionName = `AFP ${myAfp.name} ${typeLabel}`;
             pensionRateLabel = `${((obligRate+insuranceRate+commissionRate)*100).toFixed(2)}%`;
         } else {
-            // Fallback genérico
-            breakdown.obligatory = totalIncome * 0.10;
-            breakdown.commission = totalIncome * 0.016;
-            breakdown.insurance = totalIncome * 0.018;
-            breakdown.total = totalIncome * 0.134; 
+            // Fallback
+            breakdown.total = taxableIncome * 0.13; 
+            breakdown.obligatory = breakdown.total;
             pensionRateLabel = 'Ref';
-            pensionName = `${pensionName} (?)`;
         }
     }
 
-    const conafovicer = basicSalary * (Number(constants['CONAFOVICER']) || 0.02);
-    // Cuota sindical podría venir de person (si lo implementas a futuro), por ahora 0
+    // CONAFOVICER: 2% del (Básico + Dominical)
+    const conafovicer = conafovicerBase * (Number(constants['CONAFOVICER']) || 0.02);
     const unionDues = 0; 
 
     const totalDiscounts = breakdown.total + conafovicer + unionDues + totalAdvances;
     
-    // Aportes Empleador
-    const essalud = totalIncome * (Number(constants['ESSALUD']) || 0.09);
-    // SCTR podría calcularse si tienes la tasa, por ahora hardcodeado o 0
+    // Aportes Empleador (EsSalud sobre Base Imponible)
+    const essalud = taxableIncome * (Number(constants['ESSALUD']) || 0.09);
     const sctrPension = 0; 
     const sctrSalud = 0; 
 
@@ -111,14 +124,13 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
         type: 'worker',
         daysWorked,
         details: { 
-            // Valores Totales
-            basicSalary, dominical, buc, mobility, schoolAssign, indemnity, vacation,
+            basicSalary, dominical, buc, mobility, schoolAssign, 
+            indemnity, vacation, gratification, // Agregado Gratificación
             pensionAmount: breakdown.total, 
-            pensionBreakdown: breakdown, // NUEVO: Objeto con el desglose
+            pensionBreakdown: breakdown,
             conafovicer, unionDues,
             essalud, sctrPension, sctrSalud,
             pensionName, pensionRateLabel,
-            // Valores Unitarios
             unitRates: {
                 daily: dailyRate,
                 mobility: mobilityRate,
@@ -137,6 +149,7 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     };
 };
 
+// ... (calculateStaffPay se mantiene igual o puedes aplicar lógica similar si es necesario)
 export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, afpRates) => {
     // Lógica staff (similar ajuste en desglose si fuera necesario, por ahora mantenemos estructura básica compatible)
     const monthlySalary = Number(person.salary) || 0;
@@ -145,7 +158,9 @@ export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, 
     const asigFamPct = Number(constants['STAFF_ASIG_FAMILIAR_PCT']) || 0.10;
     const monthlyAsigFam = person.has_children ? (rmv * asigFamPct) : 0;
     const payAsigFam = (monthlyAsigFam / 30) * daysWorked; 
-    const totalIncome = payBasico + payAsigFam;
+    
+    // STAFF usualmente todo es imponible excepto movilidad supeditada, aquí asumimos simple
+    const totalIncome = payBasico + payAsigFam; 
 
     // Descuentos Staff
     let pensionName = person.pension_system || 'ONP';

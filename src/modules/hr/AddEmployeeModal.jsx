@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, User, Briefcase, DollarSign, Loader2, 
   Baby, BookOpen, ChevronDown, Check,
-  Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart
+  Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart, Hash
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import bcrypt from 'bcryptjs';
@@ -35,7 +35,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
     document_type: 'DNI', document_number: '', position: '', salary: '', 
     start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
-    password: '', afp: '', commission_type: 'Flujo', // NUEVO CAMPO
+    password: '', afp: '', commission_type: 'Flujo', cuspp: '', // CUSPP AGREGADO
     has_children: false, children_count: 0, email: '', role: 'Usuario'
   });
 
@@ -66,7 +66,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         contract_end_date: userToEdit.contract_end_date || '',
         password: '',
         afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
-        commission_type: userToEdit.commission_type || 'Flujo', // Cargar comisión
+        commission_type: userToEdit.commission_type || 'Flujo',
+        cuspp: userToEdit.cuspp || '', // Cargar CUSPP
         has_children: userToEdit.has_children || false,
         children_count: userToEdit.children_count || 0,
         email: userToEdit.email || '',
@@ -77,7 +78,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
         document_type: 'DNI', document_number: '', position: '', salary: '', 
         start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
-        password: '', afp: 'ONP', commission_type: 'Flujo', // Default
+        password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
         has_children: false, children_count: 0, email: '', role: 'Usuario'
       });
     }
@@ -131,7 +132,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         email: formData.email,
         role: formData.role,
         pension_system: formData.afp,
-        commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null // Solo guardar si es AFP
+        commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
+        cuspp: formData.cuspp // GUARDAR CUSPP
       };
 
       if (formData.password || !userToEdit) {
@@ -228,8 +230,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                   {/* INFO ADICIONAL: AFP Y COMISIÓN */}
                   <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
                     
-                    {/* AFP Y TIPO DE COMISIÓN */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    {/* AFP, COMISIÓN Y CUSPP */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                       {/* SELECTOR AFP */}
                       <div className="space-y-1 relative" ref={afpRef}>
                         <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
@@ -251,6 +253,21 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                                     </motion.div>
                                 )}
                             </AnimatePresence>
+                        </div>
+                      )}
+
+                      {/* CAMPO CUSPP (NUEVO) */}
+                      {formData.afp && formData.afp !== 'Sin Régimen' && (
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
+                            <input 
+                                type="text" 
+                                name="cuspp" 
+                                value={formData.cuspp} 
+                                onChange={handleChange} 
+                                className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] font-mono"
+                                placeholder="Código AFP"
+                            />
                         </div>
                       )}
                     </div>
