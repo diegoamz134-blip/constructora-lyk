@@ -24,7 +24,7 @@ import { calculateWorkerPay, calculateStaffPay } from '../../utils/payrollCalcul
 
 import { generatePayslip, generateBulkPayslips } from '../../utils/pdfGenerator';
 import PayrollModal from './components/PayrollModal';
-import AdjustmentsModal from './components/AdjustmentsModal'; // <--- IMPORTADO
+import AdjustmentsModal from './components/AdjustmentsModal'; 
 
 // IMÁGENES
 import logoLyk from '../../assets/images/logo-lk-full.png';
@@ -54,7 +54,7 @@ const PayrollPage = () => {
   
   // NOVEDADES / AJUSTES MANUALES
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
-  const [adjustments, setAdjustments] = useState({}); // { [id]: { bonus, deduction, holiday } }
+  const [adjustments, setAdjustments] = useState({}); // { [id]: { bonus, deduction, holiday, heightDays, waterDays... } }
   const [editingPerson, setEditingPerson] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -145,7 +145,7 @@ const PayrollPage = () => {
     }
   };
 
-  // Función Central de Cálculo (Ahora acepta ajustes manuales)
+  // Función Central de Cálculo (Ahora acepta ajustes manuales completos)
   const performCalculation = (person, attData, advData, currentAdjustments) => {
     try {
         const personId = person.id;
@@ -157,6 +157,7 @@ const PayrollPage = () => {
         const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
         // Obtener ajustes manuales específicos para esta persona
+        // Aquí vienen: bonus, deduction, heightDays, waterDays, viaticos, etc.
         const myAdjustments = currentAdjustments[personId] || {};
 
         if (activeTab === 'workers') {
@@ -186,6 +187,7 @@ const PayrollPage = () => {
                 holidayDays: autoHolidayDays
             };
 
+            // Pasamos myAdjustments completo a la función de cálculo
             return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, attendanceDetails, myAdjustments);
         } else {
             return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
@@ -211,7 +213,7 @@ const PayrollPage = () => {
       
       const newAdjustments = {
           ...adjustments,
-          [editingPerson.id]: data
+          [editingPerson.id]: data // data contiene TODOS los campos del modal
       };
       setAdjustments(newAdjustments);
 
@@ -296,8 +298,8 @@ const PayrollPage = () => {
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
                                                 {/* Indicador de Ajuste Manual */}
-                                                {(item.details.manualBonus > 0 || item.details.manualDeduction > 0) && (
-                                                    <span className="w-2 h-2 rounded-full bg-yellow-400" title="Tiene ajustes manuales"></span>
+                                                {(item.details.manualBonus > 0 || item.details.manualDeduction > 0 || item.details.heightBonus > 0) && (
+                                                    <span className="w-2 h-2 rounded-full bg-yellow-400" title="Tiene novedades manuales"></span>
                                                 )}
                                             </div>
                                         </td>

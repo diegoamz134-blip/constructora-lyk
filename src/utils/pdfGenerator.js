@@ -24,8 +24,8 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     doc.text("AV. LOS CONSTRUCTORES 123 - LIMA", 14, y); y+=4; 
     doc.text("R.U.C. 20482531301", 14, y);
 
-    // Cuadro Derecha: Semana y Mes (Con celdas)
-    const dateStart = new Date(weekRange.start + 'T00:00:00'); // Fix zona horaria simple
+    // Cuadro Derecha: Semana y Mes
+    const dateStart = new Date(weekRange.start + 'T00:00:00'); 
     const monthName = dateStart.toLocaleString('es-ES', { month: 'long' }).toUpperCase();
     const weekNumber = getWeekNumber(dateStart);
 
@@ -39,9 +39,9 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         headStyles: { fillColor: lightBlue, textColor: [0,0,0], fontStyle: 'bold' }
     });
 
-    // --- 2. DATOS DEL TRABAJADOR (GRID COMPLETO) ---
+    // --- 2. DATOS DEL TRABAJADOR ---
     
-    // TABLA 1: DATOS PERSONALES Y CUENTA
+    // TABLA 1: DATOS PERSONALES
     autoTable(doc, {
         startY: 35,
         head: [['APELLIDOS Y NOMBRES', 'DOC. IDENTIDAD', 'NUMERO DE CUENTA']],
@@ -77,19 +77,35 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         margin: { left: 14, right: 14 }
     });
 
-    // --- 3. CUERPO DE LA BOLETA (3 COLUMNAS EN CELDAS) ---
-    // AQUI AGREGAMOS LA GRATIFICACION Y HORAS EXTRAS
+    // --- 3. CUERPO DE LA BOLETA (INGRESOS / DESCUENTOS) ---
     const ingresos = [
         { l: 'JORNAL BASICO', v: d.basicSalary }, 
         { l: 'DOMINICAL', v: d.dominical },
-        { l: 'ASIGNACION ESCOLAR', v: d.schoolAssign }, 
-        { l: 'HORAS EXTRAS 60%', v: d.he60?.amount },   // Agregado
-        { l: 'HORAS EXTRAS 100%', v: d.he100?.amount }, // Agregado
         { l: 'B.U.C.', v: d.buc },
-        { l: 'MOVILIDAD', v: d.mobility }, 
+        { l: 'ASIGNACION ESCOLAR', v: d.schoolAssign }, 
+        
+        // --- HORAS EXTRAS Y FERIADOS ---
+        { l: 'HORAS EXTRAS 60%', v: d.he60?.amount },
+        { l: 'HORAS EXTRAS 100%', v: d.he100?.amount },
+        { l: 'TRABAJO EN FERIADO', v: d.holidayPay + (d.holidayWorkAmount || 0) },
+        { l: 'TRABAJO DIA DESCANSO', v: d.sundayWorkAmount },
+
+        // --- BONIFICACIONES ESPECIALES ---
+        { l: 'BONIF. ALTURA (7%)', v: d.heightBonus },
+        { l: 'BONIF. AGUA (20%)', v: d.waterBonus },
+        { l: 'BONIF. BAE', v: d.baeBonus },
+        { l: 'BONIF. VOLUNTARIA', v: d.manualBonus },
+
+        // --- CONCEPTOS SOCIALES Y AJUSTES ---
         { l: 'VACACIONES', v: d.vacation }, 
-        { l: 'GRATIFICACION', v: d.gratification },     // <--- ¡NUEVO CAMPO!
+        { l: 'GRATIFICACION', v: d.gratification },
         { l: 'INDEMNIZACION (CTS)', v: d.indemnity },
+        { l: 'MOVILIDAD', v: d.mobility },
+        { l: 'REINTEGRO SUELDO PACTADO', v: d.salaryAdjustment },
+        
+        // --- NO REMUNERATIVOS ---
+        { l: 'VIATICOS / NO IMPONIBLE', v: d.viaticos },
+
     ].filter(x => x.v > 0);
 
     const descuentos = [
@@ -98,7 +114,8 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         { l: 'AFP-COMISION', v: pb.commission },
         { l: 'CONAFOVICER', v: d.conafovicer }, 
         { l: 'ADELANTOS', v: item.totalAdvances }, 
-        { l: 'CUOTA SINDICAL', v: d.unionDues }
+        { l: 'CUOTA SINDICAL', v: d.unionDues },
+        { l: 'OTROS DESCUENTOS', v: d.manualDeduction }
     ].filter(x => x.v > 0);
 
     const aportes = [
@@ -107,7 +124,7 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         { l: 'SCTR-PENSION', v: d.sctrPension }
     ].filter(x => x.v > 0);
 
-    const maxRows = Math.max(ingresos.length, descuentos.length, aportes.length, 8); 
+    const maxRows = Math.max(ingresos.length, descuentos.length, aportes.length, 10); 
     const bodyRows = [];
     for (let i = 0; i < maxRows; i++) {
         const ing = ingresos[i] || { l: '', v: '' };
@@ -123,9 +140,9 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
     autoTable(doc, {
         startY: doc.lastAutoTable.finalY + 5,
         head: [[
-            { content: 'REMUNERACIONES', colSpan: 2 }, 
-            { content: 'DESCUENTOS DEL TRABAJADOR', colSpan: 2 }, 
-            { content: 'APORTES DEL EMPLEADOR', colSpan: 2 }
+            { content: 'INGRESOS', colSpan: 2 }, 
+            { content: 'DESCUENTOS', colSpan: 2 }, 
+            { content: 'APORTES EMPLEADOR', colSpan: 2 }
         ]],
         body: bodyRows,
         theme: 'grid', 

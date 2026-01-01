@@ -1,7 +1,7 @@
 /**
  * src/utils/payrollCalculations.js
  * Lógica de Planilla - Régimen Construcción Civil Perú
- * VERSIÓN FINAL: Incluye Feriados (Triple), Bonos Manuales y Ajustes de Novedades.
+ * ACTUALIZADO: Corrige BUC y Movilidad en semanas con feriados (se pagan sobre días efectivos).
  */
 
 export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants, afpRates, attendanceDetails = {}, manualAdjustments = {}) => {
@@ -18,40 +18,54 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     
     const hourlyRate = dailyRate / 8; 
 
-    // --- A. INGRESOS AUTOMÁTICOS ---
+    // --- A. LÓGICA DE DÍAS (EFECTIVOS VS PAGADOS) ---
+    // En semanas con feriados (ej. 28 y 29 Julio), se paga el jornal completo (6 días),
+    // pero el BUC y la Movilidad solo se pagan por los días que realmente se pisó la obra (4 días).
 
-    // A1. Básico
-    const basicSalary = daysWorked * dailyRate;
+    // Días marcados en asistencia (que generan pago de jornal)
+    const daysForSalary = daysWorked; 
+
+    // Feriados pagados pero NO trabajados (Ingresados en el Modal)
+    const paidHolidaysNotWorked = Number(manualAdjustments.paidHolidays || 0);
+
+    // Días Efectivos (Para BUC y Movilidad)
+    let daysForBonuses = daysForSalary - paidHolidaysNotWorked;
+    if (daysForBonuses < 0) daysForBonuses = 0;
+
+    // --- B. INGRESOS AUTOMÁTICOS ---
+
+    // B1. Básico (Se paga completo, incluyendo feriados)
+    const basicSalary = daysForSalary * dailyRate;
     
-    // A2. Dominical (1 jornal si semana completa, sino proporcional)
-    const dominicalDays = (daysWorked >= 6) ? 1 : (daysWorked / 6); 
+    // B2. Dominical (1 jornal si semana completa o proporcional)
+    const dominicalDays = (daysForSalary >= 6) ? 1 : (daysForSalary / 6); 
     const dominical = dominicalDays * dailyRate;
 
-    // A3. Feriados Trabajados (CON FLEXIBILIDAD MANUAL)
-    let holidayDays = 0;
+    // B3. Feriados TRABAJADOS (Override manual o detección automática)
+    // Esto es para pagar la SOBRETASA del feriado si se trabajó.
+    let holidayDaysWorked = 0;
     if (manualAdjustments.holidayDaysOverride !== undefined && manualAdjustments.holidayDaysOverride !== null && manualAdjustments.holidayDaysOverride !== "") {
-         holidayDays = Number(manualAdjustments.holidayDaysOverride);
+         holidayDaysWorked = Number(manualAdjustments.holidayDaysOverride);
     } else {
-         holidayDays = Number(attendanceDetails.holidayDays) || 0;
+         holidayDaysWorked = Number(attendanceDetails.holidayDays) || 0;
     }
-
-    // Sobretasa Feriado (200% adicional = Pago Triple total con el día trabajado)
+    // Sobretasa (normalmente se paga doble extra por trabajar feriado)
     const holidayFactor = Number(constants['TASA_FERIADO_TRABAJADO']) || 2.0; 
-    const holidayPay = holidayDays * dailyRate * holidayFactor;
+    const holidayPay = holidayDaysWorked * dailyRate * holidayFactor;
 
-    // A4. BUC
+    // B4. BUC (CORREGIDO: Usa daysForBonuses)
     const bucFactor = Number(constants[`BUC_${catUpper}`]) || 0; 
-    const buc = basicSalary * bucFactor;
+    const buc = (dailyRate * daysForBonuses) * bucFactor;
 
-    // A5. Movilidad (S/ 8.00 o constante)
+    // B5. Movilidad (CORREGIDO: Usa daysForBonuses)
     const mobilityRate = Number(constants['MOVILIDAD']) || 0; 
-    const mobility = daysWorked * mobilityRate;
+    const mobility = daysForBonuses * mobilityRate;
 
-    // A6. Asignación Escolar (S/ 3.08 aprox o constante)
+    // B6. Asignación Escolar (30 jornales al año prorrateados sobre días pagados)
     const schoolRate = person.has_children ? (Number(constants['ASIG_ESCOLAR_DIARIO']) || 0) : 0;
-    const schoolAssign = daysWorked * schoolRate;
+    const schoolAssign = daysForSalary * schoolRate;
 
-    // A7. Horas Extras
+    // B7. Horas Extras (Reloj Control)
     const he60Hours = Number(attendanceDetails.he60) || 0;
     const he100Hours = Number(attendanceDetails.he100) || 0;
     
@@ -64,10 +78,32 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     const amountHe60 = he60Hours * unitHe60;
     const amountHe100 = he100Hours * unitHe100;
 
-    // --- B. INGRESOS MANUALES (NOVEDADES) ---
+    // --- C. INGRESOS MANUALES Y BONIFICACIONES ESPECIALES ---
+    
+    // C1. Bonificación por Altura (7% del Básico por día efectivo)
+    const heightDays = Number(manualAdjustments.heightDays || 0);
+    const heightBonus = (dailyRate * 0.07) * heightDays;
+
+    // C2. Bonificación por Contacto con Agua (20% del Básico por día efectivo)
+    const waterDays = Number(manualAdjustments.waterDays || 0);
+    const waterBonus = (dailyRate * 0.20) * waterDays;
+
+    // C3. BAE (Bonificación Alta Especialización)
+    const baePercent = Number(person.bae_percent || 0) / 100;
+    const baeBonus = basicSalary * baePercent;
+
+    // C4. Horas Extras Manuales / Especiales
+    const sundayWorkHours = Number(manualAdjustments.sundayHours || 0);
+    const holidayWorkHours = Number(manualAdjustments.holidayHours || 0);
+    
+    const sundayWorkAmount = (hourlyRate * 2.00) * sundayWorkHours;
+    const holidayWorkAmount = (hourlyRate * 2.00) * holidayWorkHours;
+
+    // C5. Bono Voluntario (Imponible)
     const manualBonus = Number(manualAdjustments.bonus) || 0;
 
-    // --- C. BENEFICIOS SOCIALES ---
+    // --- D. BENEFICIOS SOCIALES (Liquidación semanal) ---
+    // Se calculan sobre el BÁSICO PAGADO (daysForSalary), igual que en tu Excel (CTS salía 61.32 = 6 días)
     const pctIndemnity = Number(constants['PCT_CTS']) || 0.15;
     const pctVacation = Number(constants['PCT_VACACIONES']) || 0.10;
     const pctGratification = Number(constants['PCT_GRATIFICACION']) || 0.21;
@@ -76,13 +112,25 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     const vacation = basicSalary * pctVacation;   
     const gratification = basicSalary * pctGratification; 
 
-    // --- D. BASES IMPONIBLES ---
-    // Sumamos manualBonus asumiendo que es remunerativo
-    const taxableIncome = basicSalary + dominical + buc + schoolAssign + amountHe60 + amountHe100 + vacation + holidayPay + gratification + manualBonus;
-    const conafovicerBase = basicSalary + dominical + holidayPay + manualBonus;
-    const totalIncome = taxableIncome + indemnity + mobility;
+    // --- E. TOTALES ---
+    // Total Imponible (Afecto a AFP/ONP)
+    const taxableIncome = basicSalary + dominical + buc + schoolAssign + 
+                          amountHe60 + amountHe100 + 
+                          heightBonus + waterBonus + baeBonus + 
+                          sundayWorkAmount + holidayWorkAmount + holidayPay + 
+                          vacation + gratification + manualBonus;
 
-    // --- E. DESCUENTOS ---
+    // Base imponible para Conafovicer (suele excluir gratificaciones/CTS en algunos criterios, pero aquí usamos el estándar)
+    // Ajusta según tu criterio exacto si difiere.
+    const conafovicerBase = basicSalary + dominical + holidayPay + manualBonus;
+
+    // Ingresos NO Imponibles
+    const viaticos = Number(manualAdjustments.viaticos || 0); 
+    
+    // Total Bruto
+    let totalIncome = taxableIncome + indemnity + mobility + viaticos;
+
+    // --- F. DESCUENTOS ---
     let pensionName = person.pension_system || 'ONP';
     let breakdown = { obligatory: 0, insurance: 0, commission: 0, total: 0 };
     let pensionRateLabel = '';
@@ -114,35 +162,59 @@ export const calculateWorkerPay = (person, daysWorked, totalAdvances, constants,
     }
 
     const conafovicer = conafovicerBase * (Number(constants['CONAFOVICER']) || 0.02);
-    
-    // Descuentos Manuales
     const manualDeduction = Number(manualAdjustments.deduction) || 0;
     
     const totalDiscounts = breakdown.total + conafovicer + totalAdvances + manualDeduction;
+    
+    // Aportes Empleador
     const essalud = taxableIncome * (Number(constants['ESSALUD']) || 0.09);
+
+    // --- G. NETO Y AJUSTE SUELDO PACTADO ---
+    let netPay = totalIncome - totalDiscounts;
+    let salaryAdjustment = 0;
+
+    if (person.agreed_weekly_salary && Number(person.agreed_weekly_salary) > 0) {
+        const agreed = Number(person.agreed_weekly_salary);
+        if (netPay < agreed) {
+            salaryAdjustment = agreed - netPay;
+            netPay = agreed; 
+            totalIncome += salaryAdjustment; 
+        }
+    }
 
     return {
         person,
-        daysWorked,
+        daysWorked: daysForSalary, // Mostramos los días pagados (6)
         details: { 
+            // Conceptos Base
             basicSalary, dominical, buc, mobility, schoolAssign, 
             indemnity, vacation, gratification, holidayPay,
+            
+            // Conceptos Especiales
+            heightBonus, waterBonus, baeBonus,
+            sundayWorkAmount, holidayWorkAmount,
+            viaticos, salaryAdjustment,
+
+            // Manuales y Descuentos
             manualBonus, manualDeduction,
             pensionAmount: breakdown.total, pensionBreakdown: breakdown,
             conafovicer, essalud, pensionName, pensionRateLabel,
+            
+            // Metadatos para debug/visualización
             he60: { hours: he60Hours, amount: amountHe60 },
             he100: { hours: he100Hours, amount: amountHe100 },
-            unitRates: { daily: dailyRate, school: schoolRate, mobility: mobilityRate }
+            unitRates: { daily: dailyRate, school: schoolRate, mobility: mobilityRate },
+            daysForBonuses // Útil si quieres mostrar "4 días" en el PDF para BUC
         },
         totalIncome,
         totalDiscounts,
         totalAdvances,
-        netPay: totalIncome - totalDiscounts
+        netPay
     };
 };
 
 export const calculateStaffPay = (person, daysWorked, totalAdvances, constants, afpRates) => {
-    // Cálculo simplificado para Staff (sin cambios mayores)
+    // Cálculo simplificado para Staff (Sin cambios)
     const monthlySalary = Number(person.salary) || 0;
     const payBasico = (monthlySalary / 30) * daysWorked;
     const rmv = Number(constants['STAFF_RMV']) || 1025;
