@@ -4,7 +4,7 @@ import {
   DollarSign, Calculator, Printer, HardHat, UserCog, 
   FileSpreadsheet, FileDown, Calendar, RefreshCw,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Loader2 
+  Loader2, Edit3 
 } from 'lucide-react';
 
 // Servicios
@@ -24,15 +24,15 @@ import { calculateWorkerPay, calculateStaffPay } from '../../utils/payrollCalcul
 
 import { generatePayslip, generateBulkPayslips } from '../../utils/pdfGenerator';
 import PayrollModal from './components/PayrollModal';
+import AdjustmentsModal from './components/AdjustmentsModal'; // <--- IMPORTADO
 
-// IMÁGENES (Logo y Firma)
+// IMÁGENES
 import logoLyk from '../../assets/images/logo-lk-full.png';
-import firmaGerente from '../../assets/images/firma-gerente.png'; // <--- FIRMA IMPORTADA
+import firmaGerente from '../../assets/images/firma-gerente.png';
 
 const PayrollPage = () => {
   const [activeTab, setActiveTab] = useState('workers'); 
   const [loading, setLoading] = useState(false);
-  
   const [isExporting, setIsExporting] = useState(false);
 
   const { constants, afpRates, refreshConfig } = useCompany();
@@ -44,7 +44,18 @@ const PayrollPage = () => {
 
   const [calculatedPayroll, setCalculatedPayroll] = useState([]);
   const [fullPayrollData, setFullPayrollData] = useState([]);
+  
+  // Datos crudos para recalculo rápido
+  const [attendanceData, setAttendanceData] = useState([]);
+  const [advancesData, setAdvancesData] = useState([]);
+
+  // Modales
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
+  
+  // NOVEDADES / AJUSTES MANUALES
+  const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+  const [adjustments, setAdjustments] = useState({}); // { [id]: { bonus, deduction, holiday } }
+  const [editingPerson, setEditingPerson] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0); 
@@ -52,6 +63,9 @@ const PayrollPage = () => {
 
   useEffect(() => {
     setCalculatedPayroll([]);
+    setAttendanceData([]);
+    setAdvancesData([]);
+    setAdjustments({}); // Limpiamos ajustes al cambiar pestaña
     setCurrentPage(1); 
     setTotalRecords(0);
   }, [activeTab]);
@@ -76,8 +90,12 @@ const PayrollPage = () => {
         const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
+        // Guardamos datos crudos para poder recalcular novedades sin ir al servidor
+        setAttendanceData(attData);
+        setAdvancesData(advData);
+
         const results = (freshPeople || []).map(person => {
-           return performCalculation(person, attData, advData);
+           return performCalculation(person, attData, advData, adjustments);
         });
 
         setCalculatedPayroll(results.filter(r => r !== null));
@@ -103,7 +121,7 @@ const PayrollPage = () => {
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
         const allResults = (allPeople || []).map(person => {
-            return performCalculation(person, attData, advData);
+            return performCalculation(person, attData, advData, adjustments);
         }).filter(r => r !== null);
 
         if (allResults.length === 0) {
@@ -127,7 +145,8 @@ const PayrollPage = () => {
     }
   };
 
-  const performCalculation = (person, attData, advData) => {
+  // Función Central de Cálculo (Ahora acepta ajustes manuales)
+  const performCalculation = (person, attData, advData, currentAdjustments) => {
     try {
         const personId = person.id;
         
@@ -137,10 +156,14 @@ const PayrollPage = () => {
         const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
         const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
-        let totalHe60 = 0;
-        let totalHe100 = 0;
+        // Obtener ajustes manuales específicos para esta persona
+        const myAdjustments = currentAdjustments[personId] || {};
 
         if (activeTab === 'workers') {
+            let totalHe60 = 0;
+            let totalHe100 = 0;
+            let autoHolidayDays = 0;
+
             myAtt.forEach(record => {
                 const dailyOvertime = Number(record.overtime_hours) || 0;
                 if (dailyOvertime > 0) {
@@ -151,10 +174,19 @@ const PayrollPage = () => {
                         totalHe100 += (dailyOvertime - 2);
                     }
                 }
+                // Detectar feriados desde asistencia
+                if (record.worked_holiday_days) {
+                    autoHolidayDays += Number(record.worked_holiday_days);
+                }
             });
             
-            const heHours = { he60: totalHe60, he100: totalHe100 };
-            return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, heHours);
+            const attendanceDetails = { 
+                he60: totalHe60, 
+                he100: totalHe100,
+                holidayDays: autoHolidayDays
+            };
+
+            return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, attendanceDetails, myAdjustments);
         } else {
             return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
         }
@@ -166,6 +198,29 @@ const PayrollPage = () => {
 
   const handleDownloadSingle = (item) => {
       generatePayslip(item, weekRange, logoLyk, firmaGerente);
+  };
+
+  // --- MANEJO DE NOVEDADES ---
+  const openAdjustmentModal = (item) => {
+      setEditingPerson(item.person);
+      setIsAdjustmentModalOpen(true);
+  };
+
+  const handleSaveAdjustment = (data) => {
+      if (!editingPerson) return;
+      
+      const newAdjustments = {
+          ...adjustments,
+          [editingPerson.id]: data
+      };
+      setAdjustments(newAdjustments);
+
+      // Recalcular solo la fila afectada inmediatamente
+      const updatedResult = performCalculation(editingPerson, attendanceData, advancesData, newAdjustments);
+      
+      setCalculatedPayroll(prev => prev.map(item => 
+          item.person.id === editingPerson.id ? updatedResult : item
+      ));
   };
 
   return (
@@ -240,6 +295,10 @@ const PayrollPage = () => {
                                             <div className="flex items-center gap-2 mt-1">
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
+                                                {/* Indicador de Ajuste Manual */}
+                                                {(item.details.manualBonus > 0 || item.details.manualDeduction > 0) && (
+                                                    <span className="w-2 h-2 rounded-full bg-yellow-400" title="Tiene ajustes manuales"></span>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-center">
@@ -251,9 +310,21 @@ const PayrollPage = () => {
                                             <span className="font-mono font-bold text-lg text-green-600 bg-green-50 px-2 py-1 rounded">S/. {item.netPay.toFixed(2)}</span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <button onClick={() => handleDownloadSingle(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
-                                                <Printer size={20}/>
-                                            </button>
+                                            <div className="flex items-center justify-center gap-2">
+                                                {/* BOTÓN EDITAR NOVEDADES */}
+                                                {activeTab === 'workers' && (
+                                                    <button 
+                                                        onClick={() => openAdjustmentModal(item)} 
+                                                        className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 p-2 rounded-lg transition-all" 
+                                                        title="Editar Novedades / Bonos"
+                                                    >
+                                                        <Edit3 size={20}/>
+                                                    </button>
+                                                )}
+                                                <button onClick={() => handleDownloadSingle(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 p-2 rounded-lg transition-all" title="Imprimir Boleta">
+                                                    <Printer size={20}/>
+                                                </button>
+                                            </div>
                                         </td>
                                     </motion.tr>
                                 ))}
@@ -325,6 +396,15 @@ const PayrollPage = () => {
               </span>
           </button>
       </div>
+
+      {/* MODAL DE NOVEDADES */}
+      <AdjustmentsModal
+        isOpen={isAdjustmentModalOpen}
+        onClose={() => setIsAdjustmentModalOpen(false)}
+        onSave={handleSaveAdjustment}
+        initialData={editingPerson ? adjustments[editingPerson.id] : null}
+        workerName={editingPerson?.full_name}
+      />
 
       <PayrollModal 
         isOpen={isPayrollModalOpen} 
