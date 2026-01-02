@@ -8,11 +8,13 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
-// --- IMPORTAMOS LOS NUEVOS MODALES SEPARADOS ---
+// --- IMPORTAMOS LOS MODALES ---
 import AddEmployeeModal from './AddEmployeeModal';
 import AddWorkerModal from './AddWorkerModal';
 import ChangeStatusModal from './components/ChangeStatusModal'; 
 import StatusModal from '../../components/common/StatusModal';
+// Importamos el Modal de Confirmación (Reutilizamos el de proyectos)
+import ConfirmDeleteModal from '../projects/components/ConfirmDeleteModal';
 
 const HumanResourcesPage = () => {
   const [activeTab, setActiveTab] = useState('staff');
@@ -20,11 +22,16 @@ const HumanResourcesPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // --- ESTADOS DE MODALES SEPARADOS ---
+  // --- ESTADOS DE MODALES ---
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
-  
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  
+  // --- ESTADOS PARA ELIMINACIÓN (NUEVO) ---
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const [userToEdit, setUserToEdit] = useState(null);
   const [userToChangeStatus, setUserToChangeStatus] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
@@ -37,7 +44,6 @@ const HumanResourcesPage = () => {
     fetchData();
   }, [activeTab]);
 
-  // Resetear página al cambiar pestaña o búsqueda
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab, searchTerm]);
@@ -77,7 +83,7 @@ const HumanResourcesPage = () => {
     }
   };
 
-  // --- NUEVA LÓGICA DE APERTURA DE MODALES ---
+  // --- MANEJO DE MODALES ---
   const handleCreate = () => {
     setUserToEdit(null);
     if (activeTab === 'staff') {
@@ -101,21 +107,47 @@ const HumanResourcesPage = () => {
     setIsStatusModalOpen(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("¿Estás seguro de eliminar este registro? Esta acción no se puede deshacer.")) return;
+  // --- NUEVA LÓGICA DE ELIMINACIÓN CON MODAL ---
+  
+  // 1. Abrir el modal al hacer clic en el basurero
+  const handleDeleteClick = (id) => {
+    setItemToDelete(id);
+    setIsDeleteModalOpen(true);
+  };
+
+  // 2. Ejecutar borrado al confirmar en el modal
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    
+    setIsDeleting(true);
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
-      const { error } = await supabase.from(table).delete().eq('id', id);
+      
+      // Intentamos borrar directamente (asumiendo que ya configuraste ON DELETE CASCADE en la BD)
+      const { error } = await supabase.from(table).delete().eq('id', itemToDelete);
+      
       if (error) throw error;
+
       setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro eliminado correctamente.' });
-      fetchData();
+      fetchData(); // Recargar lista
+      setIsDeleteModalOpen(false);
+      setItemToDelete(null);
+
     } catch (error) {
       console.error(error);
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo eliminar el registro.' });
+      setNotification({ 
+        isOpen: true, 
+        type: 'error', 
+        title: 'Error', 
+        message: 'No se pudo eliminar el registro. Verifica que no tenga datos asociados si no activaste el borrado en cascada.' 
+      });
+      setIsDeleteModalOpen(false);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  // --- HELPER PARA RENDERIZAR BADGE DE ESTADO ---
+  // --- HELPER PARA BADGE DE ESTADO ---
   const renderStatusBadge = (status) => {
     let colorClass = 'bg-slate-100 text-slate-500 border-slate-200';
     let dotClass = 'bg-slate-400';
@@ -299,8 +331,10 @@ const HumanResourcesPage = () => {
                               >
                                 <Pencil size={18}/>
                               </button>
+                              
+                              {/* BOTÓN ELIMINAR ACTUALIZADO */}
                               <button 
-                                onClick={() => handleDelete(user.id)}
+                                onClick={() => handleDeleteClick(user.id)}
                                 className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                 title="Eliminar"
                               >
@@ -316,7 +350,7 @@ const HumanResourcesPage = () => {
               </table>
             </div>
 
-            {/* CONTROLES DE PAGINACIÓN (Original Restaurado) */}
+            {/* CONTROLES DE PAGINACIÓN */}
             {totalPages > 1 && (
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4 animate-in fade-in slide-in-from-bottom-4">
                   <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium hidden md:block">
@@ -381,7 +415,7 @@ const HumanResourcesPage = () => {
         )}
       </div>
 
-      {/* RENDERIZADO CONDICIONAL DE LOS NUEVOS MODALES */}
+      {/* RENDERIZADO CONDICIONAL DE LOS MODALES */}
       <AddEmployeeModal 
         isOpen={isEmployeeModalOpen}
         onClose={() => setIsEmployeeModalOpen(false)}
@@ -402,6 +436,22 @@ const HumanResourcesPage = () => {
         user={userToChangeStatus}
         activeTab={activeTab}
         onSuccess={fetchData}
+      />
+
+      {/* MODAL DE CONFIRMACIÓN DE ELIMINACIÓN */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleConfirmDelete}
+        loading={isDeleting}
+        title={activeTab === 'staff' ? "¿Eliminar Personal?" : "¿Eliminar Obrero?"}
+        message={
+          <span>
+            ¿Estás seguro de que deseas eliminar este registro? <br/>
+            Esta acción es irreversible.
+          </span>
+        }
+        warning="Se eliminará todo su historial, asistencias y pagos permanentemente."
       />
 
       <StatusModal 

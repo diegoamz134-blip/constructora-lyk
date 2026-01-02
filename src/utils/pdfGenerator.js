@@ -100,6 +100,7 @@ const drawPayslipContent = (doc, item, weekRange, companyAddress, logoImg, signa
         { l: 'VACACIONES', v: d.vacation }, 
         { l: 'GRATIFICACION', v: d.gratification },
         { l: 'INDEMNIZACION (CTS)', v: d.indemnity },
+        { l: 'INDEMNIZACION H.E.', v: d.indemnizacionHe }, // <--- NUEVO CAMPO AGREGADO AQUÍ
         { l: 'MOVILIDAD', v: d.mobility },
         { l: 'REINTEGRO SUELDO PACTADO', v: d.salaryAdjustment },
         

@@ -31,41 +31,64 @@ import logoLyk from '../../assets/images/logo-lk-full.png';
 import firmaGerente from '../../assets/images/firma-gerente.png';
 
 const PayrollPage = () => {
-  const [activeTab, setActiveTab] = useState('workers'); 
+  // --- ESTADOS CON PERSISTENCIA (LOCAL STORAGE) ---
+  
+  // 1. Pestaña Activa
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('payroll_activeTab') || 'workers';
+  });
+
+  // 2. Rango de Fechas
+  const [weekRange, setWeekRange] = useState(() => {
+    const saved = localStorage.getItem('payroll_weekRange');
+    if (saved) return JSON.parse(saved);
+    // Default: Hoy
+    return {
+      start: new Date().toISOString().split('T')[0],
+      end: new Date().toISOString().split('T')[0]
+    };
+  });
+
+  // 3. Ajustes Manuales (Datos del Modal)
+  const [adjustments, setAdjustments] = useState(() => {
+    const saved = localStorage.getItem('payroll_adjustments');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // --- EFECTOS DE GUARDADO AUTOMÁTICO ---
+  useEffect(() => { localStorage.setItem('payroll_activeTab', activeTab); }, [activeTab]);
+  useEffect(() => { localStorage.setItem('payroll_weekRange', JSON.stringify(weekRange)); }, [weekRange]);
+  useEffect(() => { localStorage.setItem('payroll_adjustments', JSON.stringify(adjustments)); }, [adjustments]);
+
+  // --- ESTADOS NORMALES ---
   const [loading, setLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
   const { constants, afpRates, refreshConfig } = useCompany();
-
-  const [weekRange, setWeekRange] = useState({
-    start: new Date().toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
 
   const [calculatedPayroll, setCalculatedPayroll] = useState([]);
   const [fullPayrollData, setFullPayrollData] = useState([]);
   
-  // Datos crudos para recalculo rápido
+  // Datos crudos
   const [attendanceData, setAttendanceData] = useState([]);
   const [advancesData, setAdvancesData] = useState([]);
 
   // Modales
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
-  
-  // NOVEDADES / AJUSTES MANUALES
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
-  const [adjustments, setAdjustments] = useState({}); // { [id]: { bonus, deduction, holiday, heightDays, waterDays... } }
+  
   const [editingPerson, setEditingPerson] = useState(null);
+  const [currentCalculation, setCurrentCalculation] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0); 
   const itemsPerPage = 10;
 
+  // Al cambiar pestaña, solo limpiamos la vista, NO los ajustes guardados
   useEffect(() => {
     setCalculatedPayroll([]);
     setAttendanceData([]);
     setAdvancesData([]);
-    setAdjustments({}); // Limpiamos ajustes al cambiar pestaña
+    // setAdjustments({}); <--- ESTO SE ELIMINÓ PARA QUE NO SE BORREN LOS DATOS
     setCurrentPage(1); 
     setTotalRecords(0);
   }, [activeTab]);
@@ -90,7 +113,6 @@ const PayrollPage = () => {
         const attData = await getAttendanceByRange(weekRange.start, weekRange.end);
         const advData = await getAdvancesByRange(weekRange.start, weekRange.end);
 
-        // Guardamos datos crudos para poder recalcular novedades sin ir al servidor
         setAttendanceData(attData);
         setAdvancesData(advData);
 
@@ -145,7 +167,7 @@ const PayrollPage = () => {
     }
   };
 
-  // Función Central de Cálculo (Ahora acepta ajustes manuales completos)
+  // Función Central de Cálculo
   const performCalculation = (person, attData, advData, currentAdjustments) => {
     try {
         const personId = person.id;
@@ -156,9 +178,9 @@ const PayrollPage = () => {
         const daysWorked = myAtt.filter(a => a.status === 'Presente').length;
         const totalAdvances = myAdv.reduce((sum, a) => sum + (Number(a.amount)||0), 0);
 
-        // Obtener ajustes manuales específicos para esta persona
-        // Aquí vienen: bonus, deduction, heightDays, waterDays, viaticos, etc.
-        const myAdjustments = currentAdjustments[personId] || {};
+        // USAMOS CLAVE ÚNICA (TABLA_ID) PARA EVITAR CONFLICTOS
+        const uniqueKey = `${activeTab}_${personId}`;
+        const myAdjustments = currentAdjustments[uniqueKey] || {};
 
         if (activeTab === 'workers') {
             let totalHe60 = 0;
@@ -175,7 +197,6 @@ const PayrollPage = () => {
                         totalHe100 += (dailyOvertime - 2);
                     }
                 }
-                // Detectar feriados desde asistencia
                 if (record.worked_holiday_days) {
                     autoHolidayDays += Number(record.worked_holiday_days);
                 }
@@ -187,7 +208,6 @@ const PayrollPage = () => {
                 holidayDays: autoHolidayDays
             };
 
-            // Pasamos myAdjustments completo a la función de cálculo
             return calculateWorkerPay(person, daysWorked, totalAdvances, constants, afpRates, attendanceDetails, myAdjustments);
         } else {
             return calculateStaffPay(person, daysWorked, totalAdvances, constants, afpRates);
@@ -202,22 +222,24 @@ const PayrollPage = () => {
       generatePayslip(item, weekRange, logoLyk, firmaGerente);
   };
 
-  // --- MANEJO DE NOVEDADES ---
   const openAdjustmentModal = (item) => {
       setEditingPerson(item.person);
+      setCurrentCalculation(item);
       setIsAdjustmentModalOpen(true);
   };
 
   const handleSaveAdjustment = (data) => {
       if (!editingPerson) return;
       
+      // GUARDAMOS CON CLAVE ÚNICA (workers_1, staff_5, etc.)
+      const uniqueKey = `${activeTab}_${editingPerson.id}`;
+
       const newAdjustments = {
           ...adjustments,
-          [editingPerson.id]: data // data contiene TODOS los campos del modal
+          [uniqueKey]: data 
       };
       setAdjustments(newAdjustments);
 
-      // Recalcular solo la fila afectada inmediatamente
       const updatedResult = performCalculation(editingPerson, attendanceData, advancesData, newAdjustments);
       
       setCalculatedPayroll(prev => prev.map(item => 
@@ -297,8 +319,7 @@ const PayrollPage = () => {
                                             <div className="flex items-center gap-2 mt-1">
                                                 <span className="px-2 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 font-bold border border-slate-200">{item.person.category || 'Staff'}</span>
                                                 <span className="text-[10px] text-blue-600 font-medium truncate max-w-[150px]">{item.details.pensionName}</span>
-                                                {/* Indicador de Ajuste Manual */}
-                                                {(item.details.manualBonus > 0 || item.details.manualDeduction > 0 || item.details.heightBonus > 0) && (
+                                                {(item.details.manualBonus > 0 || item.details.manualDeduction > 0) && (
                                                     <span className="w-2 h-2 rounded-full bg-yellow-400" title="Tiene novedades manuales"></span>
                                                 )}
                                             </div>
@@ -313,7 +334,6 @@ const PayrollPage = () => {
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <div className="flex items-center justify-center gap-2">
-                                                {/* BOTÓN EDITAR NOVEDADES */}
                                                 {activeTab === 'workers' && (
                                                     <button 
                                                         onClick={() => openAdjustmentModal(item)} 
@@ -399,12 +419,13 @@ const PayrollPage = () => {
           </button>
       </div>
 
-      {/* MODAL DE NOVEDADES */}
       <AdjustmentsModal
         isOpen={isAdjustmentModalOpen}
         onClose={() => setIsAdjustmentModalOpen(false)}
         onSave={handleSaveAdjustment}
-        initialData={editingPerson ? adjustments[editingPerson.id] : null}
+        // USAMOS LA MISMA CLAVE ÚNICA PARA LEER LOS DATOS CORRECTOS
+        initialData={editingPerson ? adjustments[`${activeTab}_${editingPerson.id}`] : null}
+        autoCalculatedData={currentCalculation}
         workerName={editingPerson?.full_name}
       />
 
