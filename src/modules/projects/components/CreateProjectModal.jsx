@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Save, Loader2, Building2, MapPin } from 'lucide-react';
+import { X, Save, Loader2, Building2, MapPin, Hash } from 'lucide-react';
+// CORRECCIÓN: Ruta correcta hacia supabase (3 niveles arriba)
 import { supabase } from '../../../services/supabase';
 
 const overlayVariants = {
@@ -17,8 +18,11 @@ const modalVariants = {
 
 const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
   const [loading, setLoading] = useState(false);
+  
+  // Estado inicial incluyendo project_code
   const [formData, setFormData] = useState({
     name: '',
+    project_code: '', 
     location: '',
     start_date: '',
     end_date: '',
@@ -30,6 +34,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
     if (projectToEdit) {
       setFormData({
         name: projectToEdit.name || '',
+        project_code: projectToEdit.project_code || '', 
         location: projectToEdit.location || '',
         start_date: projectToEdit.start_date || '',
         end_date: projectToEdit.end_date || '',
@@ -37,7 +42,14 @@ const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
       });
     } else {
       // Limpiar si es nuevo
-      setFormData({ name: '', location: '', start_date: '', end_date: '', status: 'En Ejecución' });
+      setFormData({ 
+        name: '', 
+        project_code: '', 
+        location: '', 
+        start_date: '', 
+        end_date: '', 
+        status: 'En Ejecución' 
+      });
     }
   }, [projectToEdit, isOpen]);
 
@@ -99,6 +111,8 @@ const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              
+              {/* CAMPO 1: NOMBRE DEL PROYECTO */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-500 uppercase">Nombre del Proyecto</label>
                 <div className="relative">
@@ -111,6 +125,23 @@ const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
                 </div>
               </div>
 
+              {/* CAMPO 2: CÓDIGO ÚNICO / C.C. */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase">Código / C.C.</label>
+                <div className="relative">
+                  <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    name="project_code" 
+                    required 
+                    value={formData.project_code} 
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#003366]"
+                    placeholder="Ej: PC-25572"
+                  />
+                </div>
+              </div>
+
+              {/* CAMPO 3: UBICACIÓN */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-500 uppercase">Ubicación</label>
                 <div className="relative">
@@ -123,6 +154,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSuccess, projectToEdit }) => {
                 </div>
               </div>
 
+              {/* FECHAS */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase">Fecha Inicio</label>
