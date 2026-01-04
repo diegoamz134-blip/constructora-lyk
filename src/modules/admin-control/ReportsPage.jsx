@@ -18,8 +18,10 @@ import {
 } from 'recharts';
 
 import { getProjects } from '../../services/projectsService';
+// IMPORT PARA EXCEL (Asegúrate que la ruta sea correcta)
+import { generateTareoExcel } from '../../utils/excelTareoGenerator';
 
-// --- VARIANTES DE ANIMACIÓN (EFECTO CASCADA) ---
+// --- VARIANTES DE ANIMACIÓN ---
 const containerVariants = {
   hidden: { opacity: 0 },
   show: {
@@ -46,12 +48,15 @@ const ReportsPage = () => {
   const [attendanceData, setAttendanceData] = useState([]); 
   const [loading, setLoading] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
   
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
   // --- FILTROS ---
   const [dateRange, setDateRange] = useState(() => {
+    // IMPORTANTE: Por defecto mostramos la semana actual.
+    // Si tus datos son de JULIO 2025, recuerda cambiar la fecha en la pantalla.
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 6); 
@@ -79,7 +84,7 @@ const ReportsPage = () => {
     } catch (error) { console.error(error); }
   };
 
-  // --- 2. FETCH DE ASISTENCIA ---
+  // --- 2. FETCH DE ASISTENCIA (TABLA EN PANTALLA) ---
   const fetchAttendance = async (page = 1, project = selectedProject, isSearch = false) => {
     setLoading(true);
     try {
@@ -193,11 +198,10 @@ const ReportsPage = () => {
 
   const isGlobalSearchMode = viewMode === 'projects' && (filterText !== '' || filterRole !== 'Todos');
 
-  // --- GENERADOR PDF PREMIUM (ESTILO AZUL L&K CON UBICACIÓN) ---
+  // --- GENERADOR PDF PREMIUM ---
   const generatePDF = async () => {
     setIsGeneratingPdf(true);
     try {
-      // 1. Fetch Completo
       let query = supabase
         .from('attendance')
         .select(`*, workers(full_name,category,document_number), employees(full_name,position,document_number)`)
@@ -218,17 +222,14 @@ const ReportsPage = () => {
           });
       }
 
-      // 2. Configuración PDF
-      const doc = new jsPDF('l', 'mm', 'a4'); // Horizontal
+      const doc = new jsPDF('l', 'mm', 'a4'); 
       const imgLogo = new Image(); imgLogo.src = logoFull;
       await new Promise(r => { imgLogo.onload = r; imgLogo.onerror = r; });
 
-      // Helper imágenes
       const getImgBase64 = async (url) => {
         try { const r = await fetch(url); const b = await r.blob(); return new Promise(res => { const fr = new FileReader(); fr.onloadend=()=>res(fr.result); fr.readAsDataURL(b); }); } catch{ return null; }
       };
       
-      // Helper Semana
       const getWeekNumber = (d) => {
           d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
           d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
@@ -243,50 +244,28 @@ const ReportsPage = () => {
         const dateObj = new Date(d + 'T00:00:00');
         if (i>0) doc.addPage();
         
-        // --- CABECERA PREMIUM (AZUL) ---
         doc.addImage(imgLogo, 'PNG', 14, 10, 35, 12);
-        
-        doc.setFontSize(16); 
-        doc.setTextColor(0, 51, 102); 
-        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16); doc.setTextColor(0, 51, 102); doc.setFont("helvetica", "bold");
         doc.text("LISTA DE ASISTENCIA DE PERSONAL - L&K", 280, 18, { align: "right" });
-        
-        doc.setDrawColor(0, 51, 102);
-        doc.setLineWidth(0.5);
-        doc.line(14, 25, 283, 25);
+        doc.setDrawColor(0, 51, 102); doc.setLineWidth(0.5); doc.line(14, 25, 283, 25);
 
-        // Bloque de Información
-        doc.setFontSize(9);
-        doc.setTextColor(50); 
-        doc.setFont("helvetica", "bold");
-        
+        doc.setFontSize(9); doc.setTextColor(50); doc.setFont("helvetica", "bold");
         const fechaStr = dateObj.toLocaleDateString('es-PE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }).toUpperCase();
         
-        // Fila 1
-        doc.text("OBRA:", 14, 32);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
+        doc.text("OBRA:", 14, 32); doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
         doc.text(selectedProject ? selectedProject.name.toUpperCase() : 'REPORTE GLOBAL', 28, 32);
         
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50);
-        doc.text("C.C.:", 150, 32);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0);
-        doc.text(selectedProject?.project_code || '---', 160, 32);
+        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("C.C.:", 150, 32);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(selectedProject?.project_code || '---', 160, 32);
 
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50);
-        doc.text("SEMANA:", 240, 32);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0);
-        doc.text(`${getWeekNumber(dateObj)}`, 260, 32);
+        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("SEMANA:", 240, 32);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(`${getWeekNumber(dateObj)}`, 260, 32);
 
-        // Fila 2
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50);
-        doc.text("FECHA:", 14, 38);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0);
-        doc.text(fechaStr, 28, 38);
-
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50);
-        doc.text("TURNO:", 150, 38);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0);
-        doc.text("DÍA", 165, 38);
+        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("FECHA:", 14, 38);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(fechaStr, 28, 38);
+        
+        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("TURNO:", 150, 38);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text("DÍA", 165, 38);
 
         const dayRows = reportData.filter(x => x.date === d);
         const tableBody = [];
@@ -298,101 +277,117 @@ const ReportsPage = () => {
              item.check_out_photo ? getImgBase64(item.check_out_photo) : null
           ]);
           
-          // --- FORMATO DE HORA Y UBICACIÓN ---
           const hiTime = item.check_in_time ? new Date(item.check_in_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '-';
           const hiLoc = item.check_in_location || 'Sin GPS';
-          const hiText = `${hiTime}\n${hiLoc}`;
-
           const hsTime = item.check_out_time ? new Date(item.check_out_time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '-';
           const hsLoc = item.check_out_location || 'Sin GPS';
-          const hsText = `${hsTime}\n${hsLoc}`;
 
           tableBody.push({
              index: idx + 1,
              name: u.name.toUpperCase(),
              doc: u.doc,
              cat: `${u.role.toUpperCase()}\n${u.role === 'Operario' ? '(Albañil)' : ''}`, 
-             hi: hiText, // Hora + Ubicación
+             hi: `${hiTime}\n${hiLoc}`, 
              firma_in: pIn, 
-             hs: hsText, // Hora + Ubicación
+             hs: `${hsTime}\n${hsLoc}`, 
              firma_out: pOut, 
              obs: ''
           });
         }
 
-        // --- TABLA (ANCHOS AJUSTADOS PARA UBICACIÓN) ---
         autoTable(doc, {
            startY: 42,
            head: [['N°', 'APELLIDOS Y NOMBRES', 'DNI / C.E.', 'CATEGORIA\nESPECIALIDAD', 'H.I\n(HORA Y UBICACIÓN)', 'FIRMA (ENTRADA)', 'H.S\n(HORA Y UBICACIÓN)', 'FIRMA (SALIDA)', 'OBSERVACIONES']],
-           body: tableBody.map(r => [
-               r.index, r.name, r.doc, r.cat, r.hi, '', r.hs, '', r.obs 
-           ]),
+           body: tableBody.map(r => [ r.index, r.name, r.doc, r.cat, r.hi, '', r.hs, '', r.obs ]),
            theme: 'grid',
-           styles: { 
-               fontSize: 6, // Reducimos un poco la fuente para que quepa la ubicación
-               valign: 'middle', 
-               halign: 'center',
-               lineColor: [200, 200, 200],
-               lineWidth: 0.1,
-               cellPadding: 1,
-               textColor: [0, 0, 0]
-           },
-           headStyles: { 
-               fillColor: [0, 51, 102], 
-               textColor: [255, 255, 255], 
-               fontStyle: 'bold',
-               halign: 'center',
-               valign: 'middle'
-           },
-           columnStyles: { 
-               0: {cellWidth: 8},  
-               1: {cellWidth: 50, halign: 'left'}, // Nombres
-               2: {cellWidth: 18}, // DNI
-               3: {cellWidth: 20}, // Categoría
-               4: {cellWidth: 30}, // H.I (Más ancho para ubicación)
-               5: {cellWidth: 22}, // Firma IN (Foto)
-               6: {cellWidth: 30}, // H.S (Más ancho para ubicación)
-               7: {cellWidth: 22}, // Firma OUT (Foto)
-               8: {cellWidth: 'auto'} // Obs (Resto)
-           },
+           styles: { fontSize: 6, valign: 'middle', halign: 'center', lineColor: [200, 200, 200], lineWidth: 0.1, cellPadding: 1, textColor: [0, 0, 0] },
+           headStyles: { fillColor: [0, 51, 102], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+           columnStyles: { 0: {cellWidth: 8}, 1: {cellWidth: 50, halign: 'left'}, 2: {cellWidth: 18}, 3: {cellWidth: 20}, 4: {cellWidth: 30}, 5: {cellWidth: 22}, 6: {cellWidth: 30}, 7: {cellWidth: 22}, 8: {cellWidth: 'auto'} },
            bodyStyles: { minCellHeight: 18 },
            didDrawCell: (data) => {
               if (data.section === 'body') {
                   const row = tableBody[data.row.index];
-                  // Firma Entrada (Foto)
                   if (data.column.index === 5 && row.firma_in) {
-                      const { x, y, width, height } = data.cell;
-                      const imgDim = 16; 
-                      const xPos = x + (width - imgDim) / 2;
-                      const yPos = y + (height - imgDim) / 2;
-                      try { 
-                        doc.addImage(row.firma_in, 'JPEG', xPos, yPos, imgDim, imgDim); 
-                        doc.setDrawColor(0, 51, 102); doc.rect(xPos, yPos, imgDim, imgDim);
-                      } catch(e){}
+                      try { doc.addImage(row.firma_in, 'JPEG', data.cell.x + (data.cell.width - 16)/2, data.cell.y + (data.cell.height - 16)/2, 16, 16); } catch(e){}
                   }
-                  // Firma Salida (Foto)
                   if (data.column.index === 7 && row.firma_out) {
-                      const { x, y, width, height } = data.cell;
-                      const imgDim = 16;
-                      const xPos = x + (width - imgDim) / 2;
-                      const yPos = y + (height - imgDim) / 2;
-                      try { 
-                        doc.addImage(row.firma_out, 'JPEG', xPos, yPos, imgDim, imgDim);
-                        doc.setDrawColor(0, 51, 102); doc.rect(xPos, yPos, imgDim, imgDim);
-                      } catch(e){}
+                      try { doc.addImage(row.firma_out, 'JPEG', data.cell.x + (data.cell.width - 16)/2, data.cell.y + (data.cell.height - 16)/2, 16, 16); } catch(e){}
                   }
               }
            }
         });
         
         const pageCount = doc.internal.getNumberOfPages();
-        doc.setFontSize(7);
-        doc.setTextColor(150);
+        doc.setFontSize(7); doc.setTextColor(150);
         doc.text(`Sistema de Gestión L&K - Página ${pageCount}`, 14, 200);
       }
       doc.save(`TAREO_${selectedProject?.name || 'GLOBAL'}_${dateRange.start}.pdf`);
     } catch (e) { alert("Error PDF"); console.error(e); }
     finally { setIsGeneratingPdf(false); }
+  };
+
+  // --- GENERADOR EXCEL (CORREGIDO) ---
+  const handleExportExcel = async () => {
+    setIsGeneratingExcel(true);
+    try {
+      console.log("Iniciando exportación Excel. Rango:", dateRange);
+
+      // 1. Fetch Completo (CORREGIDO: Pedimos entry_date para empleados)
+      let query = supabase
+        .from('attendance')
+        .select(`
+            *, 
+            workers(id, full_name, category, document_number, start_date), 
+            employees(id, full_name, position, document_number, entry_date)
+        `)
+        .gte('date', dateRange.start)
+        .lte('date', dateRange.end)
+        .order('date', { ascending: true });
+        
+      if (selectedProject) query = query.eq('project_name', selectedProject.name);
+      
+      const { data: fullData, error } = await query;
+      
+      if (error) {
+        console.error("Error Supabase Excel:", error);
+        alert(`Error al consultar datos: ${error.message}`);
+        return;
+      }
+      
+      if (!fullData || fullData.length === 0) { 
+          // Alerta descriptiva para ayudar al usuario
+          alert(`Sin datos para exportar en el rango ${dateRange.start} a ${dateRange.end}. \n\n¿Tus datos son de otra fecha? Revisa el filtro.`); 
+          return; 
+      }
+
+      // 2. Normalizar datos para el generador
+      // (El generador espera start_date, pero empleados tienen entry_date)
+      let reportData = fullData.map(item => {
+        // Clonamos el objeto para no afectar el estado original si fuera necesario
+        const newItem = { ...item };
+        if (newItem.employees) {
+          // Truco: copiamos entry_date a start_date para que el generador lo encuentre
+          newItem.employees.start_date = newItem.employees.entry_date;
+        }
+        return newItem;
+      });
+
+      if (filterText) {
+          reportData = reportData.filter(item => {
+             const u = getUserData(item);
+             return u.name.toLowerCase().includes(filterText.toLowerCase());
+          });
+      }
+
+      // 3. Llamar al Generador
+      await generateTareoExcel(reportData, dateRange, selectedProject);
+
+    } catch (e) {
+      console.error("Error General Excel:", e);
+      alert("Error inesperado al generar Excel. Revisa la consola.");
+    } finally {
+      setIsGeneratingExcel(false);
+    }
   };
 
   return (
@@ -452,8 +447,20 @@ const ReportsPage = () => {
          </div>
 
          {/* EXPORTAR */}
-         <div className="md:col-span-2 flex justify-end">
-             <button onClick={generatePDF} disabled={isGeneratingPdf || totalRecords === 0} className="w-full py-2.5 bg-red-600 text-white rounded-xl font-bold text-sm shadow hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+         <div className="md:col-span-2 flex justify-end gap-2">
+             <button 
+                onClick={handleExportExcel} 
+                disabled={isGeneratingExcel || totalRecords === 0} 
+                className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm shadow hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+             >
+                {isGeneratingExcel ? <Loader2 className="animate-spin" size={16}/> : <FileText size={16}/>} Excel
+             </button>
+
+             <button 
+                onClick={generatePDF} 
+                disabled={isGeneratingPdf || totalRecords === 0} 
+                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-sm shadow hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+             >
                 {isGeneratingPdf ? <Loader2 className="animate-spin" size={16}/> : <FileDown size={16}/>} PDF
              </button>
          </div>
@@ -523,13 +530,13 @@ const ReportsPage = () => {
              </div>
            )}
 
-           {/* TABLA PAGINADA CON ANIMACIÓN CASCADA */}
+           {/* TABLA PAGINADA */}
            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
               <div className="overflow-x-auto flex-1">
                  {loading ? (
                     <div className="py-20 flex justify-center text-slate-400 gap-2"><Loader2 className="animate-spin"/> Cargando registros...</div>
                  ) : attendanceData.length === 0 ? (
-                    <div className="py-20 flex flex-col items-center text-slate-400"><FileText size={40} className="opacity-30 mb-2"/><p>No se encontraron registros.</p></div>
+                    <div className="py-20 flex flex-col items-center text-slate-400"><FileText size={40} className="opacity-30 mb-2"/><p>No se encontraron registros en este rango.</p></div>
                  ) : (
                     <table className="w-full text-left text-sm">
                        <thead className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase">
@@ -543,7 +550,6 @@ const ReportsPage = () => {
                           </tr>
                        </thead>
                        
-                       {/* ANIMACIÓN CASCADA */}
                        <motion.tbody 
                           variants={containerVariants}
                           initial="hidden"
@@ -596,7 +602,7 @@ const ReportsPage = () => {
                  )}
               </div>
 
-              {/* CONTROLES DE PAGINACIÓN */}
+              {/* PAGINACIÓN */}
               {totalPages > 1 && !filterText && (
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 relative flex flex-col md:flex-row justify-center items-center gap-4">
                     <div className="md:absolute md:left-6 text-xs text-slate-400 font-medium order-2 md:order-1">
@@ -606,13 +612,9 @@ const ReportsPage = () => {
                     <div className="flex items-center gap-1 order-1 md:order-2 z-10 bg-white/50 p-1 rounded-xl border border-slate-100 shadow-sm">
                         <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
                         <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 text-slate-500 transition-all"><ChevronLeft size={18}/></button>
-                        
                         <div className="flex items-center gap-1 mx-2">
-                            <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-[#003366] text-white font-bold text-xs shadow-md">
-                                {currentPage}
-                            </span>
+                            <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-[#003366] text-white font-bold text-xs shadow-md">{currentPage}</span>
                         </div>
-
                         <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 text-slate-500 transition-all"><ChevronRight size={18}/></button>
                         <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white disabled:opacity-30 text-slate-500 transition-all"><ChevronsRight size={18}/></button>
                     </div>
