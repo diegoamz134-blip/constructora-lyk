@@ -14,6 +14,8 @@ import ConfirmDeleteModal from '../projects/components/ConfirmDeleteModal';
 // IMPORTAMOS EL NUEVO MODAL DE RECORTE
 import ImageCropperModal from '../../components/common/ImageCropperModal';
 
+const ADMIN_SESSION_KEY = 'lyk_admin_session'; // CLAVE DE SESIÓN LOCAL
+
 const UserProfilePage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -55,12 +57,37 @@ const UserProfilePage = () => {
     avatar_url: '' 
   });
 
+  // --- FUNCIÓN AUXILIAR PARA OBTENER USUARIO (CON FALLBACK) ---
+  const getCurrentUserWithFallback = async () => {
+    // 1. Intentar con Supabase Auth (Servidor)
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) return user;
+
+    // 2. Si falla, intentar con LocalStorage (Sesión persistida)
+    const localSession = localStorage.getItem(ADMIN_SESSION_KEY);
+    if (localSession) {
+      try {
+        const parsed = JSON.parse(localSession);
+        // Normalizamos para devolver algo con estructura { id, email }
+        return {
+          id: parsed.id || parsed.user?.id,
+          email: parsed.email || parsed.user?.email,
+          ...parsed
+        };
+      } catch (e) {
+        console.error("Error leyendo sesión local", e);
+      }
+    }
+    return null;
+  };
+
   // --- 1. CARGA DE PERFIL ---
   const fetchProfile = async () => {
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const user = await getCurrentUserWithFallback();
       
-      if (authError || !user) {
+      // Si después de intentar ambos métodos no hay usuario, entonces sí redirigimos
+      if (!user || !user.id) {
         navigate('/'); 
         return;
       }
@@ -77,7 +104,7 @@ const UserProfilePage = () => {
         setProfile(prev => ({
           ...prev,
           email: user.email || '',
-          full_name: user.user_metadata?.full_name || ''
+          full_name: user.user_metadata?.full_name || user.full_name || ''
         }));
       }
 
@@ -146,25 +173,20 @@ const UserProfilePage = () => {
     setIsCropperOpen(false); // Cerramos el modal
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Sesión expirada");
+      const user = await getCurrentUserWithFallback();
+      if (!user || !user.id) throw new Error("Sesión expirada o inválida");
 
       // Usamos un timestamp para hacer el nombre de archivo ÚNICO cada vez.
-      // Esto soluciona el problema de caché del navegador/CDN.
       const timestamp = new Date().getTime();
       const fileName = `avatar_${user.id}_${timestamp}.jpg`; 
-
-      // NOTA OPCIONAL: Idealmente, aquí primero listarías y borrarías 
-      // los avatares viejos de este usuario para no llenar el bucket, 
-      // pero para simplificar, solo subimos el nuevo.
 
       // Subimos la imagen ya recortada y comprimida (es un Blob)
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(fileName, croppedBlob, {
            contentType: 'image/jpeg',
-           cacheControl: '3600', // Cache por 1 hora en CDN, el nombre único maneja la actualización inmediata
-           upsert: false // No sobrescribimos, creamos nuevo
+           cacheControl: '3600', 
+           upsert: false 
         });
 
       if (uploadError) throw uploadError;
@@ -179,7 +201,7 @@ const UserProfilePage = () => {
         .from('profiles')
         .upsert({ 
             id: user.id, 
-            avatar_url: publicUrl, // Guardamos la URL limpia
+            avatar_url: publicUrl, 
             updated_at: new Date()
         });
 
@@ -215,7 +237,8 @@ const UserProfilePage = () => {
   const handleUpdate = async (section) => {
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUserWithFallback();
+      if (!user || !user.id) throw new Error("No se pudo identificar al usuario");
       
       const cleanProfile = {
         ...profile,
@@ -309,7 +332,6 @@ const UserProfilePage = () => {
                  showFallback
                  name={profile.full_name}
                  imgProps={{ 
-                    // Importante: Evita que el navegador envíe headers que puedan causar problemas de caché con Supabase
                     referrerPolicy: "no-referrer",
                     onError: (e) => { e.target.src = 'https://via.placeholder.com/150?text=IMG'; }
                  }} 
@@ -466,8 +488,6 @@ const UserProfilePage = () => {
       </div>
 
       {/* --- MODALES --- */}
-      
-      {/* 1. Modal para Notificaciones (Éxito/Error) */}
       <StatusModal 
         isOpen={notification.isOpen}
         onClose={() => setNotification({ ...notification, isOpen: false })}
@@ -476,22 +496,20 @@ const UserProfilePage = () => {
         message={notification.message}
       />
 
-      {/* 2. Modal de Confirmación para Contraseña */}
       <ConfirmDeleteModal
         isOpen={isConfirmResetOpen}
         onClose={() => setIsConfirmResetOpen(false)}
         onConfirm={executePasswordReset}
         title="¿Restablecer contraseña?"
         message={`Se enviará un correo a ${profile.email} con las instrucciones para crear una nueva contraseña. ¿Deseas continuar?`}
-        confirmText="Enviar Correo" // Personalizamos el texto del botón
+        confirmText="Enviar Correo" 
       />
 
-      {/* 3. Modal de Recorte de Imagen */}
       <ImageCropperModal 
         isOpen={isCropperOpen}
         onClose={() => {
             setIsCropperOpen(false);
-            setTempImageSrc(null); // Limpiamos si cancela
+            setTempImageSrc(null); 
         }}
         imageSrc={tempImageSrc}
         onCropComplete={handleCropComplete}
@@ -501,7 +519,6 @@ const UserProfilePage = () => {
   );
 };
 
-// Componente Field Helper (Sin cambios)
 const Field = ({ label, name, value, onChange, isEditing, type = "text", suffix = "" }) => (
   <div className="flex flex-col gap-2">
     <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400">{label}</label>

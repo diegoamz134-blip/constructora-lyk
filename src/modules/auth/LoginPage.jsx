@@ -1,245 +1,213 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Mail, Lock, HardHat, Briefcase, ArrowRight, Loader2, KeyRound, Eye, EyeOff
-} from 'lucide-react';
-// ELIMINADO: import bcrypt from 'bcryptjs'; <-- YA NO ES NECESARIO NI SEGURO
-import { useWorkerAuth } from '../../context/WorkerAuthContext';
-
+import { Eye, EyeOff, Lock, User, HardHat, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { supabase } from '../../services/supabase';
+import { useWorkerAuth } from '../../context/WorkerAuthContext'; 
+import fondoLogin from '../../assets/images/fondo-login.jpg';
 import logoFull from '../../assets/images/logo-lk-full.png';
-import bgImage from '../../assets/images/fondo-login.jpg';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { loginWorker, worker } = useWorkerAuth();
-  const ADMIN_SESSION_KEY = 'lyk_admin_session';
+  const { loginWorker } = useWorkerAuth();
   
-  const [loginMode, setLoginMode] = useState('admin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [dni, setDni] = useState('');
-  const [workerPassword, setWorkerPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false); 
-  const [showWorkerPassword, setShowWorkerPassword] = useState(false);
+  const [userType, setUserType] = useState('admin'); 
+  const [formData, setFormData] = useState({ identifier: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [showWelcome, setShowWelcome] = useState(false);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const storedAdmin = localStorage.getItem(ADMIN_SESSION_KEY);
+  const handleInputChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setError('');
+  };
 
-      if (session || storedAdmin) {
-        navigate('/dashboard', { replace: true });
-        return;
-      }
-      if (worker) { 
-        navigate('/worker/dashboard', { replace: true });
-      }
-    };
-    checkSession();
-  }, [worker, navigate]);
-
-  const handleAdminSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg(null);
+    setError('');
 
     try {
-      // 1) Intentar autenticación estándar de Supabase Auth (Por si migras en el futuro)
-      const { error: authError, data: authData } = await supabase.auth.signInWithPassword({
-        email: email,
-        password: password,
-      });
+      if (userType === 'admin') {
+        const { data, error: rpcError } = await supabase.rpc('login_admin_secure', { 
+          email_input: formData.identifier, 
+          password_input: formData.password 
+        });
 
-      if (!authError && authData.session) {
-        // Lógica de sesión híbrida (Auth + Datos de tabla employees)
-        const { data: employeeData } = await supabase
-            .from('employees')
-            .select('*')
-            .eq('email', email)
-            .maybeSingle();
+        if (rpcError) throw rpcError;
 
-        if (employeeData) {
-            const sessionPayload = {
-                id: employeeData.id,
-                full_name: employeeData.full_name,
-                email: employeeData.email,
-                role: employeeData.role || 'admin',
-                avatar_url: employeeData.avatar_url
-            };
-            localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(sessionPayload));
+        if (data) {
+          const sessionData = {
+            user: data,
+            token: 'secure-session-token', 
+            role: data.role || 'staff'
+          };
+          localStorage.setItem('lyk_admin_session', JSON.stringify(sessionData));
+          
+          // --- REDIRECCIÓN INTELIGENTE ---
+          switch (data.role) {
+            case 'admin':
+              navigate('/dashboard');
+              break;
+            case 'resident_engineer':
+              navigate('/campo/tareo'); // RESIDENTE VA DIRECTO A CAMPO
+              break;
+            case 'rrhh':
+              navigate('/users');
+              break;
+            default:
+              navigate('/dashboard');
+          }
+        } else {
+          setError('Credenciales incorrectas o usuario no encontrado');
         }
-        showSuccessAndRedirect('/dashboard');
-        return;
+
+      } else {
+        const { success, error: workerError } = await loginWorker(formData.identifier, formData.password);
+        if (success) {
+          navigate('/worker/dashboard');
+        } else {
+          setError(workerError || 'Error al iniciar sesión');
+        }
       }
-
-      // 2) MÉTODO SEGURO RPC (Reemplaza la validación insegura anterior)
-      // Llamamos a la función segura en la base de datos
-      const { data: userData, error: rpcError } = await supabase
-        .rpc('login_admin_secure', { 
-          email_input: email, 
-          password_input: password 
-        });
-
-      if (rpcError) throw rpcError;
-
-      if (!userData) {
-        throw new Error('Credenciales incorrectas.');
-      }
-
-      // Si llegamos aquí, la contraseña es correcta y tenemos los datos SIN el hash
-      localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userData));
-      showSuccessAndRedirect('/dashboard');
-
-    } catch (error) {
-      console.error("Login error:", error);
-      setErrorMsg(error.message || 'Error al iniciar sesión.');
+    } catch (err) {
+      console.error("Login error:", err);
+      setError('Error de conexión o credenciales inválidas.');
+    } finally {
       setLoading(false);
     }
-  };
-
-  const handleWorkerSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setErrorMsg(null);
-
-    try {
-      // Llamada a la función segura de base de datos para obreros
-      const { data: workerData, error } = await supabase
-        .rpc('login_worker_secure', { 
-          dni_input: dni, 
-          password_input: workerPassword 
-        });
-
-      if (error) throw error;
-
-      // Validaciones de respuesta
-      if (!workerData) {
-         throw new Error('Documento o contraseña incorrectos.');
-      }
-      if (workerData.error) {
-         throw new Error(workerData.error); // Ej: "Usuario inactivo"
-      }
-
-      // Login exitoso
-      loginWorker(workerData);
-      showSuccessAndRedirect('/worker/dashboard');
-
-    } catch (error) {
-      console.error(error);
-      setErrorMsg(error.message || 'Error de autenticación.');
-      setLoading(false);
-    }
-  };
-
-  const showSuccessAndRedirect = (path) => {
-    setShowWelcome(true);
-    setTimeout(() => navigate(path, { replace: true }), 2000);
   };
 
   return (
-    <div className="min-h-screen w-full flex bg-gray-50 font-sans">
-      <AnimatePresence>
-        {showWelcome && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#003366]"
-          >
-            <motion.div initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }} className="flex flex-col items-center">
-              <img src={logoFull} alt="L&K Logo" className="h-24 brightness-0 invert mb-6" />
-              <h2 className="text-4xl font-bold text-white mb-2">Bienvenido</h2>
-              <Loader2 className="w-10 h-10 text-blue-400 animate-spin mt-4" />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="min-h-screen flex items-center justify-center bg-cover bg-center relative font-sans"
+      style={{ backgroundImage: `url(${fondoLogin})` }}
+    >
+      <div className="absolute inset-0 bg-[#003366]/80 backdrop-blur-sm"></div>
 
-      <div className="hidden lg:flex w-1/2 p-6 items-center justify-center relative">
-        <div className="w-full h-full relative rounded-[3rem] shadow-2xl overflow-hidden bg-[#003366] z-10">
-            <img src={bgImage} alt="Construcción L&K" className="absolute inset-0 w-full h-full object-cover animate-slow-pan scale-110"/>
-            <div className="absolute inset-0 bg-gradient-to-tr from-[#003366]/95 via-[#003366]/60 to-transparent mix-blend-multiply"></div>
-            <div className="absolute inset-0 bg-gradient-to-t from-[#001a33] via-transparent to-transparent opacity-90"></div>
-            <div className="relative z-10 h-full flex flex-col justify-between p-16 text-white">
-                <div><img src={logoFull} alt="L&K" className="h-16 brightness-0 invert opacity-90 drop-shadow-lg" /></div>
-                <div className="mb-10">
-                    <h1 className="text-5xl font-extrabold leading-tight mb-6 drop-shadow-md tracking-tight">Construyendo el <br/><span className="text-[#f0c419]">futuro, hoy.</span></h1>
-                    <p className="text-xl text-blue-100 opacity-90 max-w-md font-medium leading-relaxed drop-shadow-sm">Plataforma integral de gestión de obras y control de personal en tiempo real.</p>
-                </div>
-            </div>
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden m-4"
+      >
+        <div className="bg-white p-8 pb-0 flex justify-center">
+          <img src={logoFull} alt="L&K Logo" className="h-16 object-contain" />
         </div>
-      </div>
 
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 lg:p-24 bg-white relative z-0">
-        <div className="w-full max-w-md space-y-10 relative z-10">
-          <div className="text-center lg:text-left">
-            <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-3">Iniciar Sesión</h2>
-            <p className="text-slate-500 text-lg">Bienvenido de nuevo a L&K Construcciones.</p>
+        <div className="p-8">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-bold text-slate-800">Bienvenido</h2>
+            <p className="text-slate-500 text-sm mt-1">Sistema de Gestión Integral</p>
           </div>
 
-          <div className="flex p-1.5 bg-slate-100 rounded-2xl">
-            <button onClick={() => { setLoginMode('admin'); setErrorMsg(null); }} className={`flex-1 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${loginMode === 'admin' ? 'bg-white text-[#003366] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}><Briefcase size={20} /> Administrativo</button>
-            <button onClick={() => { setLoginMode('worker'); setErrorMsg(null); }} className={`flex-1 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${loginMode === 'worker' ? 'bg-white text-[#003366] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}><HardHat size={20} /> Personal Obrero</button>
+          <div className="flex bg-slate-100 p-1 rounded-xl mb-8 relative">
+            <motion.div 
+              className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm"
+              initial={false}
+              animate={{ x: userType === 'admin' ? 0 : '100%' }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            />
+            <button
+              type="button"
+              onClick={() => { setUserType('admin'); setError(''); setFormData({identifier:'', password:''}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold rounded-lg relative z-10 transition-colors ${userType === 'admin' ? 'text-[#003366]' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <User size={18} /> Administrativo
+            </button>
+            <button
+              type="button"
+              onClick={() => { setUserType('worker'); setError(''); setFormData({identifier:'', password:''}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold rounded-lg relative z-10 transition-colors ${userType === 'worker' ? 'text-[#f0c419]' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <HardHat size={18} /> Obrero
+            </button>
           </div>
 
-          <AnimatePresence>
-            {errorMsg && (
-              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-sm font-medium flex items-center gap-2">
-                <div className="w-1.5 h-1.5 bg-red-500 rounded-full"></div>{errorMsg}
+          <form onSubmit={handleLogin} className="space-y-5">
+            <AnimatePresence mode='wait'>
+              <motion.div
+                key={userType}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">
+                      {userType === 'admin' ? 'Correo Electrónico' : 'DNI / Documento'}
+                    </label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#003366] transition-colors">
+                        <User size={18} />
+                      </div>
+                      <input
+                        type={userType === 'admin' ? "email" : "text"}
+                        name="identifier"
+                        value={formData.identifier}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#003366] transition-all font-medium text-slate-700"
+                        placeholder={userType === 'admin' ? "ejemplo@lyk.com" : "Ingrese su DNI"}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Contraseña</label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#003366] transition-colors">
+                        <Lock size={18} />
+                      </div>
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        name="password"
+                        value={formData.password}
+                        onChange={handleInputChange}
+                        className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#003366] transition-all font-medium text-slate-700"
+                        placeholder="••••••••"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3 rounded-lg bg-red-50 border border-red-100 flex items-center gap-2 text-red-600 text-sm font-medium"
+              >
+                <AlertCircle size={16} /> {error}
               </motion.div>
             )}
-          </AnimatePresence>
 
-          {loginMode === 'admin' && (
-            <motion.form initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3 }} onSubmit={handleAdminSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-700 ml-1">Correo Electrónico</label>
-                <div className="relative group">
-                    <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={20} />
-                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all" placeholder="ejemplo@lyk.com" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-700 ml-1">Contraseña</label>
-                <div className="relative group">
-                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={20} />
-                    <input type={showPassword ? "text" : "password"} required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-14 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all" placeholder="••••••••" />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#003366] transition-colors">{showPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
-                </div>
-              </div>
-              <div className="pt-4"><button type="submit" disabled={loading} className="w-full py-4 bg-[#003366] text-white rounded-2xl font-bold text-lg hover:bg-[#002244] shadow-xl shadow-blue-900/20 active:scale-[0.98] transition-all flex justify-center items-center gap-3 disabled:opacity-70">{loading ? <Loader2 className="animate-spin" /> : <>Ingresar <ArrowRight size={22}/></>}</button></div>
-            </motion.form>
-          )}
-
-          {loginMode === 'worker' && (
-            <motion.form initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3 }} onSubmit={handleWorkerSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-700 ml-1">Documento (DNI/CE)</label>
-                <div className="relative group">
-                    <HardHat className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={20} />
-                    <input type="tel" required maxLength={15} value={dni} onChange={(e) => setDni(e.target.value.replace(/\D/g, ''))} className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-bold tracking-widest placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all text-lg" placeholder="00000000" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-700 ml-1">Contraseña</label>
-                <div className="relative group">
-                    <KeyRound className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#003366] transition-colors" size={20} />
-                    <input type={showWorkerPassword ? "text" : "password"} required value={workerPassword} onChange={(e) => setWorkerPassword(e.target.value)} className="w-full pl-14 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#003366] focus:bg-white transition-all" placeholder="••••" />
-                    <button type="button" onClick={() => setShowWorkerPassword(!showWorkerPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#003366] transition-colors">{showWorkerPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
-                </div>
-              </div>
-              <div className="pt-4"><button type="submit" disabled={loading} className="w-full py-4 bg-[#003366] text-white rounded-2xl font-bold text-lg hover:bg-[#002244] shadow-xl shadow-blue-900/20 active:scale-[0.98] transition-all flex justify-center items-center gap-3 disabled:opacity-70">{loading ? <Loader2 className="animate-spin" /> : <>Acceder al Panel <ArrowRight size={22}/></>}</button></div>
-            </motion.form>
-          )}
-
-          <div className="text-center pt-8 border-t border-slate-100 relative z-10">
-            <p className="text-xs text-slate-400 font-medium">&copy; 2024 L&K Constructora e Inversiones. Todos los derechos reservados.</p>
-          </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full py-3.5 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed
+                ${userType === 'admin' 
+                  ? 'bg-[#003366] hover:bg-[#002244]' 
+                  : 'bg-[#f0c419] hover:bg-[#d4aa00]'
+                }`}
+            >
+              {loading ? <Loader2 className="animate-spin" size={20} /> : <>Ingresar al Sistema <ArrowRight size={18} /></>}
+            </button>
+          </form>
         </div>
-      </div>
+        
+        <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
+          <p className="text-xs text-slate-400">© 2025 Constructora L&K. Todos los derechos reservados.</p>
+        </div>
+      </motion.div>
     </div>
   );
 };

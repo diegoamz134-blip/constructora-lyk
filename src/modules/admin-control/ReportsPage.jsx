@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 
 import { getProjects } from '../../services/projectsService';
-// IMPORT PARA EXCEL (Asegúrate que la ruta sea correcta)
+// IMPORT PARA EXCEL
 import { generateTareoExcel } from '../../utils/excelTareoGenerator';
 
 // --- VARIANTES DE ANIMACIÓN ---
@@ -55,8 +55,7 @@ const ReportsPage = () => {
 
   // --- FILTROS ---
   const [dateRange, setDateRange] = useState(() => {
-    // IMPORTANTE: Por defecto mostramos la semana actual.
-    // Si tus datos son de JULIO 2025, recuerda cambiar la fecha en la pantalla.
+    // Por defecto mostramos la semana actual
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 6); 
@@ -84,12 +83,10 @@ const ReportsPage = () => {
     } catch (error) { console.error(error); }
   };
 
-  // --- 2. FETCH DE ASISTENCIA (TABLA EN PANTALLA) ---
-  const fetchAttendance = async (page = 1, project = selectedProject, isSearch = false) => {
+  // --- 2. FETCH DE ASISTENCIA (PARA PANTALLA) ---
+  const fetchAttendance = async (page = 1, project = selectedProject) => {
     setLoading(true);
     try {
-      const shouldPaginateServer = !isSearch && filterText === '';
-
       let query = supabase
         .from('attendance')
         .select(`
@@ -106,28 +103,31 @@ const ReportsPage = () => {
         query = query.eq('project_name', project.name);
       }
 
-      if (shouldPaginateServer) {
-        const from = (page - 1) * ITEMS_PER_PAGE;
-        const to = from + ITEMS_PER_PAGE - 1;
-        query = query.range(from, to);
-      }
-
-      const { data, error, count } = await query;
+      const { data, error } = await query;
       if (error) throw error;
 
       let finalData = data || [];
-      if (!shouldPaginateServer && filterText) {
+
+      // Filtro de Texto (Local)
+      if (filterText) {
          finalData = finalData.filter(item => {
             const u = getUserData(item);
             return u.name.toLowerCase().includes(filterText.toLowerCase()) || u.doc.includes(filterText);
          });
-         setTotalRecords(finalData.length);
-      } else {
-         setTotalRecords(count || 0);
       }
 
-      setAttendanceData(finalData);
-      setCurrentPage(page);
+      // Filtro de Rol (Local)
+      if (filterRole !== 'Todos') {
+         finalData = finalData.filter(item => {
+            const u = getUserData(item);
+            if (filterRole === 'Staff') return u.type === 'STAFF';
+            return u.role === filterRole;
+         });
+      }
+
+      setAttendanceData(finalData); 
+      setTotalRecords(finalData.length);
+      setCurrentPage(1);
 
     } catch (error) {
       console.error('Error cargando asistencia:', error);
@@ -139,17 +139,23 @@ const ReportsPage = () => {
   useEffect(() => {
     if (viewMode === 'detail' || (viewMode === 'projects' && (filterText || filterRole !== 'Todos'))) {
        const timer = setTimeout(() => {
-          fetchAttendance(1, selectedProject, filterText !== '');
+          fetchAttendance(1, selectedProject);
        }, 500);
        return () => clearTimeout(timer);
     }
   }, [dateRange, selectedProject, filterText, filterRole]);
 
+  // --- LÓGICA DE PAGINACIÓN LOCAL ---
   const totalPages = Math.ceil(totalRecords / ITEMS_PER_PAGE);
   
+  const paginatedTableData = useMemo(() => {
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      return attendanceData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [attendanceData, currentPage]);
+
   const goToPage = (page) => {
     if (page >= 1 && page <= totalPages) {
-      fetchAttendance(page, selectedProject, filterText !== '');
+      setCurrentPage(page);
     }
   };
 
@@ -198,7 +204,7 @@ const ReportsPage = () => {
 
   const isGlobalSearchMode = viewMode === 'projects' && (filterText !== '' || filterRole !== 'Todos');
 
-  // --- GENERADOR PDF PREMIUM ---
+  // --- GENERADOR PDF ---
   const generatePDF = async () => {
     setIsGeneratingPdf(true);
     try {
@@ -207,7 +213,8 @@ const ReportsPage = () => {
         .select(`*, workers(full_name,category,document_number), employees(full_name,position,document_number)`)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
-        .order('date', { ascending: true });
+        .order('date', { ascending: true })
+        .range(0, 9999);
         
       if (selectedProject) query = query.eq('project_name', selectedProject.name);
       
@@ -326,13 +333,28 @@ const ReportsPage = () => {
     finally { setIsGeneratingPdf(false); }
   };
 
-  // --- GENERADOR EXCEL (CORREGIDO) ---
+  // --- GENERADOR EXCEL (MULTI-HOJA) ---
   const handleExportExcel = async () => {
     setIsGeneratingExcel(true);
     try {
-      console.log("Iniciando exportación Excel. Rango:", dateRange);
+      console.log("Iniciando exportación Excel Completa.");
 
-      // 1. Fetch Completo (CORREGIDO: Pedimos entry_date para empleados)
+      // 1. CARGAR MASTER LIST (Todos los activos)
+      const { data: allWorkers, error: errWorkers } = await supabase
+          .from('workers')
+          .select('*')
+          .eq('status', 'Activo')
+          .range(0, 4999);
+      
+      const { data: allStaff, error: errStaff } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('status', 'Activo')
+          .range(0, 4999);
+
+      if (errWorkers || errStaff) throw new Error("Error cargando lista de personal.");
+
+      // 2. CARGAR ASISTENCIAS DEL RANGO
       let query = supabase
         .from('attendance')
         .select(`
@@ -342,45 +364,23 @@ const ReportsPage = () => {
         `)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
-        .order('date', { ascending: true });
+        .order('date', { ascending: true })
+        .range(0, 9999); 
         
       if (selectedProject) query = query.eq('project_name', selectedProject.name);
       
-      const { data: fullData, error } = await query;
-      
-      if (error) {
-        console.error("Error Supabase Excel:", error);
-        alert(`Error al consultar datos: ${error.message}`);
-        return;
-      }
-      
-      if (!fullData || fullData.length === 0) { 
-          // Alerta descriptiva para ayudar al usuario
-          alert(`Sin datos para exportar en el rango ${dateRange.start} a ${dateRange.end}. \n\n¿Tus datos son de otra fecha? Revisa el filtro.`); 
-          return; 
-      }
+      const { data: attendanceData, error } = await query;
+      if (error) throw error;
 
-      // 2. Normalizar datos para el generador
-      // (El generador espera start_date, pero empleados tienen entry_date)
-      let reportData = fullData.map(item => {
-        // Clonamos el objeto para no afectar el estado original si fuera necesario
-        const newItem = { ...item };
-        if (newItem.employees) {
-          // Truco: copiamos entry_date a start_date para que el generador lo encuentre
-          newItem.employees.start_date = newItem.employees.entry_date;
-        }
-        return newItem;
-      });
-
-      if (filterText) {
-          reportData = reportData.filter(item => {
-             const u = getUserData(item);
-             return u.name.toLowerCase().includes(filterText.toLowerCase());
-          });
-      }
-
-      // 3. Llamar al Generador
-      await generateTareoExcel(reportData, dateRange, selectedProject);
+      // 3. GENERAR EXCEL (Pasamos projectsList para generar hojas)
+      await generateTareoExcel(
+          attendanceData || [], 
+          allWorkers || [], 
+          allStaff || [], 
+          dateRange, 
+          selectedProject,
+          projectsList || [] // NUEVO: Pasamos la lista de proyectos para crear las hojas
+      );
 
     } catch (e) {
       console.error("Error General Excel:", e);
@@ -450,7 +450,7 @@ const ReportsPage = () => {
          <div className="md:col-span-2 flex justify-end gap-2">
              <button 
                 onClick={handleExportExcel} 
-                disabled={isGeneratingExcel || totalRecords === 0} 
+                disabled={isGeneratingExcel} 
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm shadow hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
              >
                 {isGeneratingExcel ? <Loader2 className="animate-spin" size={16}/> : <FileText size={16}/>} Excel
@@ -499,25 +499,25 @@ const ReportsPage = () => {
              </div>
            )}
 
-           {/* GRÁFICOS (Visibles si hay datos y no es búsqueda texto) */}
+           {/* GRÁFICOS (VISIBLES CON TODA LA DATA) */}
            {attendanceData.length > 0 && !filterText && (
              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <div className="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm min-h-[300px]">
-                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Asistencia Cargada (Página Actual)</h4>
+                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Asistencia Total (Rango Seleccionado)</h4>
                    <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={stats.barData}>
-                         <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize:11}} dy={10}/>
-                         <YAxis axisLine={false} tickLine={false} tick={{fontSize:11}}/>
-                         <Tooltip cursor={{fill: 'transparent'}}/>
-                         <Legend />
-                         <Bar dataKey="Obrero" stackId="a" fill={COLORS.obrero} radius={[0,0,4,4]} barSize={30}/>
-                         <Bar dataKey="Staff" stackId="a" fill={COLORS.staff} radius={[4,4,0,0]} barSize={30}/>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize:11}} dy={10}/>
+                          <YAxis axisLine={false} tickLine={false} tick={{fontSize:11}}/>
+                          <Tooltip cursor={{fill: 'transparent'}}/>
+                          <Legend />
+                          <Bar dataKey="Obrero" stackId="a" fill={COLORS.obrero} radius={[0,0,4,4]} barSize={30}/>
+                          <Bar dataKey="Staff" stackId="a" fill={COLORS.staff} radius={[4,4,0,0]} barSize={30}/>
                       </BarChart>
                    </ResponsiveContainer>
                 </div>
                 <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center">
-                   <h4 className="font-bold text-slate-700 mb-2 text-sm uppercase text-center">Distribución</h4>
+                   <h4 className="font-bold text-slate-700 mb-2 text-sm uppercase text-center">Distribución Total</h4>
                    <ResponsiveContainer width="100%" height={200}>
                       <PieChart>
                          <Pie data={stats.pieData} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
@@ -526,11 +526,15 @@ const ReportsPage = () => {
                          <Tooltip/>
                       </PieChart>
                    </ResponsiveContainer>
+                   <div className="mt-2 text-center">
+                      <span className="block text-3xl font-bold text-slate-800">{stats.total}</span>
+                      <span className="text-xs text-slate-400">TOTAL REGISTROS</span>
+                   </div>
                 </div>
              </div>
            )}
 
-           {/* TABLA PAGINADA */}
+           {/* TABLA PAGINADA (LOCALMENTE) */}
            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
               <div className="overflow-x-auto flex-1">
                  {loading ? (
@@ -558,7 +562,7 @@ const ReportsPage = () => {
                           key={currentPage} 
                           className="divide-y divide-slate-50"
                        >
-                          {attendanceData.map(item => {
+                          {paginatedTableData.map(item => {
                              const u = getUserData(item);
                              return (
                                 <motion.tr 

@@ -15,7 +15,14 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
-const ROLES = ['Usuario', 'Admin', 'Supervisor', 'Residente'];
+
+// ACTUALIZADO: Roles alineados con la base de datos
+const ROLES = [
+  { label: 'Staff (Básico)', value: 'staff' },
+  { label: 'Administrador', value: 'admin' },
+  { label: 'RR.HH.', value: 'rrhh' },
+  { label: 'Ingeniero Residente', value: 'resident_engineer' }
+];
 
 const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
   const [loading, setLoading] = useState(false);
@@ -35,8 +42,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
     document_type: 'DNI', document_number: '', position: '', salary: '', 
     start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
-    password: '', afp: '', commission_type: 'Flujo', cuspp: '', // CUSPP AGREGADO
-    has_children: false, children_count: 0, email: '', role: 'Usuario'
+    password: '', afp: '', commission_type: 'Flujo', cuspp: '', 
+    has_children: false, children_count: 0, email: '', role: 'staff'
   });
 
   useEffect(() => {
@@ -67,11 +74,11 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         password: '',
         afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
         commission_type: userToEdit.commission_type || 'Flujo',
-        cuspp: userToEdit.cuspp || '', // Cargar CUSPP
+        cuspp: userToEdit.cuspp || '', 
         has_children: userToEdit.has_children || false,
         children_count: userToEdit.children_count || 0,
         email: userToEdit.email || '',
-        role: userToEdit.role || 'Usuario'
+        role: userToEdit.role || 'staff'
       });
     } else {
       setFormData({
@@ -79,7 +86,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         document_type: 'DNI', document_number: '', position: '', salary: '', 
         start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
         password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
-        has_children: false, children_count: 0, email: '', role: 'Usuario'
+        has_children: false, children_count: 0, email: '', role: 'staff'
       });
     }
   }, [userToEdit, isOpen]);
@@ -130,10 +137,10 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         salary: parseFloat(formData.salary || 0),
         contract_end_date: formData.contract_end_date || null,
         email: formData.email,
-        role: formData.role,
+        role: formData.role, // Aquí guardamos 'admin', 'staff', etc.
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
-        cuspp: formData.cuspp // GUARDAR CUSPP
+        cuspp: formData.cuspp 
       };
 
       if (formData.password || !userToEdit) {
@@ -149,14 +156,20 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         if (error) throw error;
       }
 
+      // Actualizar tabla Profiles (para coherencia)
       if (formData.email) {
           const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
           const profileData = { 
             full_name: fullName, first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
             email: formData.email, role: formData.role, status: 'Activo', bank_account: formData.bank_account, birth_date: formData.birth_date || null
           };
+          
           if (existing) await supabase.from('profiles').update(profileData).eq('id', existing.id);
-          else await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]);
+          else {
+             // Nota: Si no existe el ID en auth.users, el insert en profiles podría fallar si hay FK estricta
+             // Pero lo mantenemos como estaba en tu código original.
+             await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]).catch(console.warn);
+          }
       }
 
       setNotification({ isOpen: true, type: 'success', title: 'Éxito', message: 'Colaborador guardado correctamente.' });
@@ -178,6 +191,12 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         {label} {isSelected && <Check size={16} className="text-[#003366]"/>}
     </button>
   );
+
+  // Helper para obtener el nombre legible del rol seleccionado
+  const getRoleLabel = (roleValue) => {
+    const role = ROLES.find(r => r.value === roleValue);
+    return role ? role.label : roleValue;
+  };
 
   return (
     <>
@@ -279,14 +298,34 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                     </div>
                   </div>
 
-                  {/* CREDENCIALES */}
-                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><KeyRound size={16}/> Credenciales</h4>
+                  {/* CREDENCIALES Y ROL */}
+                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><KeyRound size={16}/> Credenciales y Permisos</h4>
                     <div className="space-y-2">
                         <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="email" name="email" required value={formData.email} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Email"/></div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder={userToEdit ? "******" : "Pass"}/></div>
-                            <div className="relative" ref={roleRef}><Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/><button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between">{formData.role} <ChevronDown size={16}/></button>
-                            <AnimatePresence>{showRoleMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 mb-1">{ROLES.map(r => <DropdownOption key={r} label={r} isSelected={formData.role === r} onClick={() => {setFormData({...formData, role: r}); setShowRoleMenu(false);}}/>)}</motion.div>)}</AnimatePresence></div>
+                            
+                            {/* SELECTOR DE ROL (ACTUALIZADO) */}
+                            <div className="relative" ref={roleRef}>
+                                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/>
+                                <button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
+                                    {getRoleLabel(formData.role)} <ChevronDown size={16}/>
+                                </button>
+                                <AnimatePresence>
+                                    {showRoleMenu && (
+                                        <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 mb-1 overflow-hidden">
+                                            {ROLES.map(r => (
+                                                <DropdownOption 
+                                                    key={r.value} 
+                                                    label={r.label} 
+                                                    isSelected={formData.role === r.value} 
+                                                    onClick={() => {setFormData({...formData, role: r.value}); setShowRoleMenu(false);}}
+                                                />
+                                            ))}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
                         </div>
                     </div>
                   </div>

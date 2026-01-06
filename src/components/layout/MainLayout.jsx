@@ -5,7 +5,8 @@ import {
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
-  DollarSign      // Icono Planillas
+  DollarSign, 
+  ClipboardCheck 
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -13,13 +14,39 @@ import { supabase } from '../../services/supabase';
 
 const ADMIN_SESSION_KEY = 'lyk_admin_session';
 
+// DEFINICIÓN DE MENÚ CON PERMISOS (ROLES ACTUALIZADOS)
 const navItems = [
-  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/proyectos', icon: Building2, label: 'Proyectos' },
-  { path: '/licitaciones', icon: FileSpreadsheet, label: 'Licitaciones' },
+  { 
+    path: '/dashboard', 
+    icon: LayoutDashboard, 
+    label: 'Dashboard',
+    allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica']
+  },
+  // SOLO ADMIN VE PROYECTOS AHORA
+  { 
+    path: '/proyectos', 
+    icon: Building2, 
+    label: 'Proyectos',
+    allowed: ['admin'] 
+  },
+  // RESIDENTE Y ADMIN VEN SUPERVISIÓN
+  { 
+    path: '/campo/tareo', 
+    icon: ClipboardCheck, 
+    label: 'Supervisión Campo',
+    allowed: ['admin', 'resident_engineer'] 
+  },
+  // SOLO ADMIN VE LICITACIONES AHORA
+  { 
+    path: '/licitaciones', 
+    icon: FileSpreadsheet, 
+    label: 'Licitaciones',
+    allowed: ['admin']
+  },
   { 
     label: 'Recursos Humanos', 
     icon: Users,
+    allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
@@ -27,18 +54,22 @@ const navItems = [
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
     ]
   },
-  { path: '/finanzas', icon: Briefcase, label: 'Contabilidad' },
+  { 
+    path: '/finanzas', 
+    icon: Briefcase, 
+    label: 'Contabilidad',
+    allowed: ['admin'] 
+  },
 ];
 
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ name: 'Cargando...', role: '...', avatar_url: '' });
+  const [currentUser, setCurrentUser] = useState({ name: 'Cargando...', role: 'staff', avatar_url: '' });
   
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Mantener abierto el menú si estamos en alguna sub-ruta de RRHH
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': location.pathname.includes('/users') || 
                         location.pathname.includes('/documentacion') || 
@@ -55,12 +86,12 @@ const MainLayout = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data } = await supabase.from('profiles').select('full_name, role, avatar_url').eq('id', user.id).single();
-        if (data) setCurrentUser({ name: data.full_name || user.email, role: data.role || 'Colaborador', avatar_url: data.avatar_url });
+        if (data) setCurrentUser({ name: data.full_name || user.email, role: data.role || 'staff', avatar_url: data.avatar_url });
       } else {
           const stored = localStorage.getItem(ADMIN_SESSION_KEY);
           if (stored) {
               const u = JSON.parse(stored);
-              setCurrentUser({ name: u.full_name, role: u.role, avatar_url: '' });
+              setCurrentUser({ name: u.user?.full_name || u.full_name, role: u.role || 'staff', avatar_url: '' });
           }
       }
     } catch (error) { console.error(error); }
@@ -94,6 +125,10 @@ const MainLayout = () => {
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
+          if (item.allowed && !item.allowed.includes(currentUser.role)) {
+             return null;
+          }
+
           if (item.children) {
             const isOpen = openMenus[item.label];
             const isActiveParent = item.children.some(child => child.path === location.pathname);
@@ -161,9 +196,11 @@ const MainLayout = () => {
       </nav>
 
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
-            <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
-         </NavLink>
+         {['admin'].includes(currentUser.role) && (
+             <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
+                <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
+             </NavLink>
+         )}
          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl">
             <LogOut size={20} /> <span className="text-sm font-medium">Cerrar Sesión</span>
          </button>
@@ -171,15 +208,19 @@ const MainLayout = () => {
     </>
   );
 
-  // Títulos dinámicos para el Header
   const getPageTitle = () => {
     if (location.pathname === '/documentacion') return 'Gestión Documental';
     if (location.pathname.includes('/licitaciones')) return 'Gestión de Licitaciones';
     if (location.pathname.includes('/planillas')) return 'Planillas y Boletas de Pago';
+    if (location.pathname.includes('/campo/tareo')) return 'Supervisión de Campo';
     
-    return navItems.find(item => item.path === location.pathname)?.label || 
-           navItems.find(i => i.children)?.children.find(c => c.path === location.pathname)?.label || 
-           'Panel de Control';
+    const foundItem = navItems.find(item => item.path === location.pathname);
+    if(foundItem) return foundItem.label;
+
+    const foundChild = navItems.find(i => i.children)?.children.find(c => c.path === location.pathname);
+    if(foundChild) return foundChild.label;
+
+    return 'Panel de Control';
   };
 
   return (
@@ -233,7 +274,7 @@ const MainLayout = () => {
                 <Avatar key={currentUser.avatar_url} src={currentUser.avatar_url} name={currentUser.name} className="w-8 h-8 md:w-9 md:h-9 ring-2 ring-transparent group-hover:ring-[#0F172A]/10 transition-all" />
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{currentUser.name}</p>
-                  <p className="text-[11px] text-slate-400 font-medium">{currentUser.role}</p>
+                  <p className="text-[11px] text-slate-400 font-medium capitalize">{currentUser.role.replace('_', ' ')}</p>
                 </div>
                 <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors hidden md:block" />
               </div>
