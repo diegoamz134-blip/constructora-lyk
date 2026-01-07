@@ -1,21 +1,81 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Lock, User, HardHat, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, HardHat, ArrowRight, Loader2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useWorkerAuth } from '../../context/WorkerAuthContext'; 
+import { useAuth } from '../../context/AuthContext';
 import fondoLogin from '../../assets/images/fondo-login.jpg';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
 const LoginPage = () => {
   const navigate = useNavigate();
   const { loginWorker } = useWorkerAuth();
+  const { login } = useAuth();
   
   const [userType, setUserType] = useState('admin'); 
   const [formData, setFormData] = useState({ identifier: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // ESTADOS DE DIAGNÓSTICO
+  const [connectionStatus, setConnectionStatus] = useState('checking'); // 'checking', 'ok', 'error'
+  const [envStatus, setEnvStatus] = useState(null);
+
+  // 1. CHEQUEO AUTOMÁTICO AL CARGAR
+  useEffect(() => {
+    const runDiagnostics = async () => {
+      console.log("--- INICIANDO DIAGNÓSTICO ---");
+      
+      // A) Verificar Variables de Entorno (Sin mostrar las claves reales por seguridad)
+      const url = import.meta.env.VITE_SUPABASE_URL;
+      const key = import.meta.env.VITE_SUPABASE_KEY;
+      
+      const envCheck = {
+        hasUrl: !!url && url.length > 0,
+        hasKey: !!key && key.length > 0,
+        urlPreview: url ? `${url.substring(0, 15)}...` : 'Falta definir',
+      };
+      setEnvStatus(envCheck);
+      console.log("Estado ENV:", envCheck);
+
+      if (!envCheck.hasUrl || !envCheck.hasKey) {
+        setConnectionStatus('error');
+        setError("FALTAN VARIABLES DE ENTORNO. Revisa tu archivo .env y reinicia la terminal.");
+        return;
+      }
+
+      // B) Ping a Supabase (Intentamos leer algo público)
+      try {
+        const start = Date.now();
+        // Intentamos conectar. Usamos 'workers' que ya habilitaste para lectura pública
+        const { count, error } = await supabase.from('workers').select('*', { count: 'exact', head: true });
+        
+        if (error) {
+          console.error("Error de conexión:", error);
+          // Si es un error de RLS (permisos), al menos sabemos que conectó.
+          // Si es Network Error, es que no llega.
+          if (error.message.includes('FetchError') || error.message.includes('Failed to fetch')) {
+             setConnectionStatus('error');
+             setError("ERROR DE RED: No se puede conectar con Supabase. Verifica tu internet o firewall.");
+          } else {
+             // Si responde error 401 o permisos, ¡SIGNIFICA QUE SÍ CONECTA!
+             setConnectionStatus('ok'); 
+          }
+        } else {
+          console.log(`Conexión exitosa en ${Date.now() - start}ms`);
+          setConnectionStatus('ok');
+        }
+      } catch (err) {
+        console.error("Error crítico:", err);
+        setConnectionStatus('error');
+        setError(`Error de conexión: ${err.message}`);
+      }
+    };
+
+    runDiagnostics();
+  }, []);
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -27,53 +87,44 @@ const LoginPage = () => {
     setLoading(true);
     setError('');
 
-    try {
-      if (userType === 'admin') {
-        const { data, error: rpcError } = await supabase.rpc('login_admin_secure', { 
-          email_input: formData.identifier, 
-          password_input: formData.password 
-        });
-
-        if (rpcError) throw rpcError;
-
-        if (data) {
-          const sessionData = {
-            user: data,
-            token: 'secure-session-token', 
-            role: data.role || 'staff'
-          };
-          localStorage.setItem('lyk_admin_session', JSON.stringify(sessionData));
-          
-          // --- REDIRECCIÓN INTELIGENTE ---
-          switch (data.role) {
-            case 'admin':
-              navigate('/dashboard');
-              break;
-            case 'resident_engineer':
-              navigate('/campo/tareo'); // RESIDENTE VA DIRECTO A CAMPO
-              break;
-            case 'rrhh':
-              navigate('/users');
-              break;
-            default:
-              navigate('/dashboard');
-          }
-        } else {
-          setError('Credenciales incorrectas o usuario no encontrado');
+    // Temporizador de seguridad
+    const safetyTimer = setTimeout(() => {
+      setLoading(current => {
+        if (current) {
+          setError('TIMEOUT: El servidor no responde. Mira la consola (F12) para más detalles.');
+          return false;
         }
+        return false;
+      });
+    }, 10000); // 10 segundos
 
+    try {
+      console.log("Intentando Login...");
+      
+      if (userType === 'admin') {
+        // Usamos el login del contexto
+        const response = await login(formData.identifier, formData.password);
+        
+        if (response?.user || response?.data?.user) {
+           // Si llegamos aquí, ¡ÉXITO!
+           console.log("Login exitoso, redirigiendo...");
+           // (La lógica de redirección la maneja el componente o el useEffect de AuthContext, 
+           // pero aquí forzamos la navegación por si acaso)
+           navigate('/dashboard'); 
+        }
       } else {
         const { success, error: workerError } = await loginWorker(formData.identifier, formData.password);
-        if (success) {
-          navigate('/worker/dashboard');
-        } else {
-          setError(workerError || 'Error al iniciar sesión');
-        }
+        if (success) navigate('/worker/dashboard');
+        else setError(workerError || 'Error al iniciar sesión');
       }
     } catch (err) {
-      console.error("Login error:", err);
-      setError('Error de conexión o credenciales inválidas.');
+      console.error("Login Falló:", err);
+      let msg = 'Error desconocido';
+      if (err.message) msg = err.message;
+      if (msg.includes('Invalid login')) msg = 'Contraseña incorrecta o usuario no encontrado.';
+      setError(msg);
     } finally {
+      clearTimeout(safetyTimer);
       setLoading(false);
     }
   };
@@ -89,17 +140,34 @@ const LoginPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden m-4"
       >
-        <div className="bg-white p-8 pb-0 flex justify-center">
+        {/* CABECERA DE DIAGNÓSTICO (Solo visible si hay problemas o cargando) */}
+        <div className={`p-2 text-xs text-center font-bold flex items-center justify-center gap-2 
+          ${connectionStatus === 'ok' ? 'bg-green-100 text-green-700' : 
+            connectionStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+          
+          {connectionStatus === 'checking' && <><Loader2 className="animate-spin" size={12}/> Probando conexión...</>}
+          {connectionStatus === 'ok' && <><Wifi size={14}/> Conexión con Supabase: OK</>}
+          {connectionStatus === 'error' && <><WifiOff size={14}/> Sin conexión a Supabase</>}
+        </div>
+
+        {envStatus && (!envStatus.hasUrl || !envStatus.hasKey) && (
+           <div className="bg-red-500 text-white p-2 text-xs text-center font-bold">
+             ⚠️ ERROR CRÍTICO: No se detectan las API KEYS en .env
+           </div>
+        )}
+
+        <div className="bg-white p-6 pb-0 flex justify-center">
           <img src={logoFull} alt="L&K Logo" className="h-16 object-contain" />
         </div>
 
-        <div className="p-8">
-          <div className="text-center mb-8">
+        <div className="p-8 pt-4">
+          <div className="text-center mb-6">
             <h2 className="text-2xl font-bold text-slate-800">Bienvenido</h2>
             <p className="text-slate-500 text-sm mt-1">Sistema de Gestión Integral</p>
           </div>
 
-          <div className="flex bg-slate-100 p-1 rounded-xl mb-8 relative">
+          <div className="flex bg-slate-100 p-1 rounded-xl mb-6 relative">
+             {/* ... (Tus botones de Admin/Obrero sin cambios) ... */}
             <motion.div 
               className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm"
               initial={false}
@@ -111,7 +179,7 @@ const LoginPage = () => {
               onClick={() => { setUserType('admin'); setError(''); setFormData({identifier:'', password:''}); }}
               className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold rounded-lg relative z-10 transition-colors ${userType === 'admin' ? 'text-[#003366]' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              <User size={18} /> Administrativo
+              <User size={18} /> Admin
             </button>
             <button
               type="button"
@@ -122,7 +190,7 @@ const LoginPage = () => {
             </button>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-4">
             <AnimatePresence mode='wait'>
               <motion.div
                 key={userType}
@@ -192,7 +260,7 @@ const LoginPage = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || connectionStatus === 'error'}
               className={`w-full py-3.5 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all transform active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed
                 ${userType === 'admin' 
                   ? 'bg-[#003366] hover:bg-[#002244]' 
@@ -202,10 +270,6 @@ const LoginPage = () => {
               {loading ? <Loader2 className="animate-spin" size={20} /> : <>Ingresar al Sistema <ArrowRight size={18} /></>}
             </button>
           </form>
-        </div>
-        
-        <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
-          <p className="text-xs text-slate-400">© 2025 Constructora L&K. Todos los derechos reservados.</p>
         </div>
       </motion.div>
     </div>
