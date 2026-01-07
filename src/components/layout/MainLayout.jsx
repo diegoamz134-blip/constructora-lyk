@@ -10,11 +10,11 @@ import {
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
-import { supabase } from '../../services/supabase';
 
-const ADMIN_SESSION_KEY = 'lyk_admin_session';
+// IMPORTANTE: Traemos la info del usuario desde el contexto global
+import { useAuth } from '../../context/AuthContext';
 
-// DEFINICIÓN DE MENÚ CON PERMISOS (ROLES ACTUALIZADOS)
+// DEFINICIÓN DE MENÚ
 const navItems = [
   { 
     path: '/dashboard', 
@@ -22,21 +22,18 @@ const navItems = [
     label: 'Dashboard',
     allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica']
   },
-  // SOLO ADMIN VE PROYECTOS AHORA
   { 
     path: '/proyectos', 
     icon: Building2, 
     label: 'Proyectos',
     allowed: ['admin'] 
   },
-  // RESIDENTE Y ADMIN VEN SUPERVISIÓN
   { 
     path: '/campo/tareo', 
     icon: ClipboardCheck, 
     label: 'Supervisión Campo',
     allowed: ['admin', 'resident_engineer'] 
   },
-  // SOLO ADMIN VE LICITACIONES AHORA
   { 
     path: '/licitaciones', 
     icon: FileSpreadsheet, 
@@ -65,10 +62,17 @@ const navItems = [
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ name: 'Cargando...', role: 'staff', avatar_url: '' });
   
+  // 1. USAMOS EL CONTEXTO EN LUGAR DE CONSULTAR LA BD OTRA VEZ
+  const { user, role, logout } = useAuth();
+  
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Determinar nombre y rol para mostrar en UI
+  // Intentamos sacar el nombre de la metadata (guardada al migrar) o usamos el email
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuario';
+  const currentRole = role || 'staff'; // Rol por defecto si carga lento
 
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': location.pathname.includes('/users') || 
@@ -81,40 +85,17 @@ const MainLayout = () => {
     setOpenMenus(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
-  const fetchCurrentUser = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data } = await supabase.from('profiles').select('full_name, role, avatar_url').eq('id', user.id).single();
-        if (data) setCurrentUser({ name: data.full_name || user.email, role: data.role || 'staff', avatar_url: data.avatar_url });
-      } else {
-          const stored = localStorage.getItem(ADMIN_SESSION_KEY);
-          if (stored) {
-              const u = JSON.parse(stored);
-              setCurrentUser({ name: u.user?.full_name || u.full_name, role: u.role || 'staff', avatar_url: '' });
-          }
-      }
-    } catch (error) { console.error(error); }
-  };
-
-  useEffect(() => {
-    fetchCurrentUser();
-    window.addEventListener('profileUpdated', fetchCurrentUser);
-    return () => window.removeEventListener('profileUpdated', fetchCurrentUser);
-  }, []);
-
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
 
   const handleLogout = () => {
     setIsLoggingOut(true);
+    // Usamos el logout del contexto para limpiar todo correctamente
     setTimeout(async () => { 
-        await supabase.auth.signOut(); 
-        localStorage.removeItem(ADMIN_SESSION_KEY);
-        localStorage.removeItem('lyk_worker_session'); 
-        navigate('/'); 
-    }, 1500);
+        await logout(); 
+        navigate('/login'); 
+    }, 1000);
   };
 
   const SidebarContent = () => (
@@ -125,7 +106,8 @@ const MainLayout = () => {
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
-          if (item.allowed && !item.allowed.includes(currentUser.role)) {
+          // FILTRO DE SEGURIDAD VISUAL
+          if (item.allowed && !item.allowed.includes(currentRole)) {
              return null;
           }
 
@@ -196,7 +178,7 @@ const MainLayout = () => {
       </nav>
 
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         {['admin'].includes(currentUser.role) && (
+         {['admin'].includes(currentRole) && (
              <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
                 <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
              </NavLink>
@@ -271,10 +253,10 @@ const MainLayout = () => {
                 <Bell size={20} />
               </button>
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
-                <Avatar key={currentUser.avatar_url} src={currentUser.avatar_url} name={currentUser.name} className="w-8 h-8 md:w-9 md:h-9 ring-2 ring-transparent group-hover:ring-[#0F172A]/10 transition-all" />
+                <Avatar name={displayName} className="w-8 h-8 md:w-9 md:h-9 ring-2 ring-transparent group-hover:ring-[#0F172A]/10 transition-all" />
                 <div className="hidden md:block text-right">
-                  <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{currentUser.name}</p>
-                  <p className="text-[11px] text-slate-400 font-medium capitalize">{currentUser.role.replace('_', ' ')}</p>
+                  <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
+                  <p className="text-[11px] text-slate-400 font-medium capitalize">{currentRole.replace('_', ' ')}</p>
                 </div>
                 <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors hidden md:block" />
               </div>

@@ -26,51 +26,36 @@ const LoginPage = () => {
   // 1. CHEQUEO AUTOMÁTICO AL CARGAR
   useEffect(() => {
     const runDiagnostics = async () => {
-      console.log("--- INICIANDO DIAGNÓSTICO ---");
-      
-      // A) Verificar Variables de Entorno (Sin mostrar las claves reales por seguridad)
+      // A) Verificar Variables de Entorno
       const url = import.meta.env.VITE_SUPABASE_URL;
       const key = import.meta.env.VITE_SUPABASE_KEY;
       
       const envCheck = {
         hasUrl: !!url && url.length > 0,
         hasKey: !!key && key.length > 0,
-        urlPreview: url ? `${url.substring(0, 15)}...` : 'Falta definir',
       };
       setEnvStatus(envCheck);
-      console.log("Estado ENV:", envCheck);
 
       if (!envCheck.hasUrl || !envCheck.hasKey) {
         setConnectionStatus('error');
-        setError("FALTAN VARIABLES DE ENTORNO. Revisa tu archivo .env y reinicia la terminal.");
+        setError("FALTAN VARIABLES DE ENTORNO. Revisa tu archivo .env");
         return;
       }
 
-      // B) Ping a Supabase (Intentamos leer algo público)
+      // B) Ping a Supabase (Intentamos leer algo público o verificar conexión básica)
       try {
-        const start = Date.now();
-        // Intentamos conectar. Usamos 'workers' que ya habilitaste para lectura pública
-        const { count, error } = await supabase.from('workers').select('*', { count: 'exact', head: true });
+        // Usamos 'workers' si es pública, o simplemente verificamos si supabase está inicializado
+        const { error } = await supabase.from('workers').select('id').limit(1);
         
-        if (error) {
-          console.error("Error de conexión:", error);
-          // Si es un error de RLS (permisos), al menos sabemos que conectó.
-          // Si es Network Error, es que no llega.
-          if (error.message.includes('FetchError') || error.message.includes('Failed to fetch')) {
+        if (error && (error.message.includes('FetchError') || error.message.includes('Failed to fetch'))) {
              setConnectionStatus('error');
-             setError("ERROR DE RED: No se puede conectar con Supabase. Verifica tu internet o firewall.");
-          } else {
-             // Si responde error 401 o permisos, ¡SIGNIFICA QUE SÍ CONECTA!
-             setConnectionStatus('ok'); 
-          }
+             setError("ERROR DE RED: No se puede conectar con Supabase. Verifica tu internet.");
         } else {
-          console.log(`Conexión exitosa en ${Date.now() - start}ms`);
-          setConnectionStatus('ok');
+             // Si responde (incluso con error de permisos), hay conexión.
+             setConnectionStatus('ok'); 
         }
       } catch (err) {
-        console.error("Error crítico:", err);
         setConnectionStatus('error');
-        setError(`Error de conexión: ${err.message}`);
       }
     };
 
@@ -91,37 +76,33 @@ const LoginPage = () => {
     const safetyTimer = setTimeout(() => {
       setLoading(current => {
         if (current) {
-          setError('TIMEOUT: El servidor no responde. Mira la consola (F12) para más detalles.');
+          setError('El servidor tarda demasiado en responder. Verifique su conexión.');
           return false;
         }
         return false;
       });
-    }, 10000); // 10 segundos
+    }, 15000); 
 
     try {
-      console.log("Intentando Login...");
-      
       if (userType === 'admin') {
-        // Usamos el login del contexto
         const response = await login(formData.identifier, formData.password);
-        
-        if (response?.user || response?.data?.user) {
-           // Si llegamos aquí, ¡ÉXITO!
-           console.log("Login exitoso, redirigiendo...");
-           // (La lógica de redirección la maneja el componente o el useEffect de AuthContext, 
-           // pero aquí forzamos la navegación por si acaso)
-           navigate('/dashboard'); 
+        if (response?.user) {
+           navigate('/dashboard', { replace: true }); 
         }
       } else {
         const { success, error: workerError } = await loginWorker(formData.identifier, formData.password);
-        if (success) navigate('/worker/dashboard');
-        else setError(workerError || 'Error al iniciar sesión');
+        if (success) {
+            navigate('/worker/dashboard', { replace: true });
+        } else {
+            throw new Error(workerError || 'Error al iniciar sesión');
+        }
       }
     } catch (err) {
-      console.error("Login Falló:", err);
-      let msg = 'Error desconocido';
-      if (err.message) msg = err.message;
-      if (msg.includes('Invalid login')) msg = 'Contraseña incorrecta o usuario no encontrado.';
+      console.error("Login Error Catch:", err);
+      let msg = err.message || 'Error desconocido';
+      if (msg.includes('Invalid login') || msg.includes('invalid_credentials')) {
+          msg = 'Credenciales incorrectas. Verifique correo y contraseña.';
+      }
       setError(msg);
     } finally {
       clearTimeout(safetyTimer);
@@ -140,20 +121,14 @@ const LoginPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden m-4"
       >
-        {/* CABECERA DE DIAGNÓSTICO (Solo visible si hay problemas o cargando) */}
-        <div className={`p-2 text-xs text-center font-bold flex items-center justify-center gap-2 
-          ${connectionStatus === 'ok' ? 'bg-green-100 text-green-700' : 
-            connectionStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-          
-          {connectionStatus === 'checking' && <><Loader2 className="animate-spin" size={12}/> Probando conexión...</>}
-          {connectionStatus === 'ok' && <><Wifi size={14}/> Conexión con Supabase: OK</>}
-          {connectionStatus === 'error' && <><WifiOff size={14}/> Sin conexión a Supabase</>}
-        </div>
-
-        {envStatus && (!envStatus.hasUrl || !envStatus.hasKey) && (
-           <div className="bg-red-500 text-white p-2 text-xs text-center font-bold">
-             ⚠️ ERROR CRÍTICO: No se detectan las API KEYS en .env
-           </div>
+        {/* BARRA DE ESTADO (Solo si hay problemas) */}
+        {connectionStatus !== 'ok' && (
+          <div className={`p-2 text-xs text-center font-bold flex items-center justify-center gap-2 
+            ${connectionStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+            
+            {connectionStatus === 'checking' && <><Loader2 className="animate-spin" size={12}/> Probando conexión...</>}
+            {connectionStatus === 'error' && <><WifiOff size={14}/> Sin conexión a Supabase</>}
+          </div>
         )}
 
         <div className="bg-white p-6 pb-0 flex justify-center">
@@ -167,7 +142,6 @@ const LoginPage = () => {
           </div>
 
           <div className="flex bg-slate-100 p-1 rounded-xl mb-6 relative">
-             {/* ... (Tus botones de Admin/Obrero sin cambios) ... */}
             <motion.div 
               className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm"
               initial={false}

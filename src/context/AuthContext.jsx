@@ -8,27 +8,58 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Función auxiliar para limpiar todo si hay error
+  const forceLogout = async () => {
+    console.warn("Forzando cierre de sesión por token inválido...");
+    await supabase.auth.signOut();
+    localStorage.clear(); // Limpieza agresiva del storage
+    setUser(null);
+    setRole(null);
+    setLoading(false);
+  };
+
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Obtenemos sesión actual
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        // Si hay error de token inválido al arrancar, limpiamos inmediatamente
+        if (error) {
+           console.error("Error crítico de sesión:", error.message);
+           if (error.message.includes("Refresh Token") || error.message.includes("invalid_grant")) {
+             await forceLogout();
+             return;
+           }
+        }
+
         if (session?.user) {
           setUser(session.user);
           await fetchUserRole(session.user.email);
         }
       } catch (error) {
-        console.error("Error sesión:", error);
+        console.error("Excepción en checkSession:", error);
+        await forceLogout();
       } finally {
-        setLoading(false); // ¡ESTO QUITA LA RUEDITA AL INICIO!
+        setLoading(false);
       }
     };
 
     checkSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user || null);
-      if (session?.user && !role) await fetchUserRole(session.user.email);
-      setLoading(false);
+    // Escuchamos cambios en la autenticación
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Evento Auth:", event);
+      
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        setUser(null);
+        setRole(null);
+        setLoading(false);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        setUser(session?.user || null);
+        if (session?.user && !role) await fetchUserRole(session.user.email);
+        setLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -37,71 +68,70 @@ export const AuthProvider = ({ children }) => {
   const fetchUserRole = async (email) => {
     if (!email) return;
     try {
-      // 1. Buscar en Employees
       const { data: emp } = await supabase.from('employees').select('role').eq('email', email).maybeSingle();
       if (emp) { setRole(emp.role); return; }
       
-      // 2. Buscar en Workers
       const { data: wor } = await supabase.from('workers').select('role').eq('email', email).maybeSingle();
       if (wor) { setRole(wor.role); return; }
 
     } catch (e) {
-      console.error("Error roles:", e);
+      console.error("Error obteniendo roles:", e);
     }
   };
 
   const login = async (email, password) => {
-    console.log("Iniciando login para:", email);
-    
     // 1. Intento Login Normal
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     
-    if (!error && data.user) return data;
+    if (!error && data.user) {
+        await fetchUserRole(data.user.email);
+        return data;
+    }
 
-    // 2. Intento Migración (Si falló el normal)
+    // 2. Intento Migración (Solo si es necesario)
     if (error) {
-      console.log("Login falló, buscando en tabla antigua...");
-      
-      // Verificar permiso de lectura antes de consultar
-      const { data: dbUser, error: dbError } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('email', email)
-        .maybeSingle();
+      // Ignoramos errores de red o servidor, nos enfocamos en credenciales
+      try {
+        const { data: dbUser, error: dbError } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
 
-      if (dbError) {
-        console.error("Error de permisos BD:", dbError);
-        throw new Error("Error de sistema: Falta ejecutar script SQL de permisos.");
-      }
+        // Si RLS bloquea, abortamos migración
+        if (dbError) throw error; 
 
-      // Si existe en BD antigua y password coincide
-      if (dbUser && dbUser.password === password) {
-        console.log("Usuario encontrado. Migrando...");
-        
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name: dbUser.full_name, role: dbUser.role } }
-        });
+        if (dbUser && dbUser.password === password) {
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { full_name: dbUser.full_name, role: dbUser.role } }
+          });
 
-        if (signUpError) {
-          if (signUpError.message.includes("already registered")) {
-            throw new Error("Este usuario ya existe pero la contraseña no coincide. Contacte a soporte.");
+          if (signUpError) {
+             if (signUpError.message.includes("already registered")) {
+                throw new Error("Credenciales incorrectas.");
+             }
+             throw signUpError;
           }
-          throw signUpError;
+          
+          if (signUpData.user) {
+             await fetchUserRole(signUpData.user.email);
+             return signUpData;
+          }
         }
-        return signUpData;
+      } catch (migError) {
+         // Silencioso, devolvemos el error original
       }
     }
     
-    // Si no se pudo migrar ni loguear
     throw error;
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
-    setRole(null);
     setUser(null);
+    setRole(null);
   };
 
   return (
