@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, User, Briefcase, DollarSign, Loader2, 
   Baby, BookOpen, ChevronDown, Check,
-  Calendar, CreditCard, Trash2, PieChart, Hash
+  Calendar, CreditCard, Trash2, PieChart, Hash,
+  Lock, Eye, EyeOff
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import bcrypt from 'bcryptjs';
@@ -25,6 +26,8 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [showAfpMenu, setShowAfpMenu] = useState(false);
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
+  
+  const [showPassword, setShowPassword] = useState(false);
 
   const docTypeRef = useRef(null);
   const categoryRef = useRef(null);
@@ -35,7 +38,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
     first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
     document_type: 'DNI', document_number: '', category: 'Peón', custom_daily_rate: '', 
     start_date: new Date().toISOString().split('T')[0],
-    password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '', // CUSPP AGREGADO
+    password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '', 
     has_children: false, children_count: 0
   });
 
@@ -63,10 +66,10 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         category: userToEdit.category || 'Peón',
         custom_daily_rate: userToEdit.custom_daily_rate || userToEdit.weekly_rate || '',
         start_date: userToEdit.start_date || '',
-        password: '',
+        password: '', 
         afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
         commission_type: userToEdit.commission_type || 'Flujo',
-        cuspp: userToEdit.cuspp || '', // Cargar CUSPP
+        cuspp: userToEdit.cuspp || '', 
         has_children: userToEdit.has_children || false,
         children_count: userToEdit.children_count || 0
       });
@@ -79,6 +82,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         has_children: false, children_count: 0
       });
     }
+    setShowPassword(false);
   }, [userToEdit, isOpen]);
 
   const handleChange = (e) => {
@@ -123,15 +127,19 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         custom_daily_rate: formData.custom_daily_rate ? parseFloat(formData.custom_daily_rate) : null,
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
-        cuspp: formData.cuspp // Guardar CUSPP
+        cuspp: formData.cuspp
       };
 
       if (!userToEdit) payload.project_assigned = 'Sin asignar';
 
+      // --- CORRECCIÓN AQUÍ: USAMOS HASH SÍNCRONO PARA EVITAR BLOQUEOS ---
       if (formData.password || !userToEdit) {
         const plainPass = formData.password || formData.document_number;
-        payload.password = await bcrypt.hash(plainPass, await bcrypt.genSalt(10));
+        // Usamos genSaltSync y hashSync en lugar de await
+        const salt = bcrypt.genSaltSync(10); 
+        payload.password = bcrypt.hashSync(plainPass, salt);
       }
+      // ------------------------------------------------------------------
 
       if (userToEdit) {
         const { error } = await supabase.from('workers').update(payload).eq('id', userToEdit.id);
@@ -143,10 +151,10 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
 
       setNotification({ isOpen: true, type: 'success', title: 'Éxito', message: 'Obrero guardado correctamente.' });
     } catch (error) {
-      console.error(error);
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message });
+      console.error("Error al guardar obrero:", error);
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message || 'Error desconocido al guardar' });
     } finally {
-      setLoading(false);
+      setLoading(false); // Ahora esto siempre se ejecutará
     }
   };
 
@@ -201,6 +209,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cuenta Bancaria</label><div className="relative h-[48px]"><CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="0011-..."/></div></div>
                   </div>
 
+                  {/* FECHAS Y CATEGORÍA */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1 z-20" ref={categoryRef}><label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
@@ -212,10 +221,39 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     </div>
                   </div>
 
-                  {/* INFO ADICIONAL: AFP Y COMISIÓN */}
-                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
+                  {/* SECCIÓN DE CONTRASEÑA */}
+                  <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200/60">
+                     <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                            <Lock size={14} className="text-[#003366]"/> Contraseña de Acceso
+                        </label>
+                        <div className="relative group">
+                            <input 
+                                type={showPassword ? "text" : "password"}
+                                name="password"
+                                value={formData.password}
+                                onChange={handleChange}
+                                placeholder={userToEdit ? "•••••• (Dejar vacío para mantener)" : "Opcional (Por defecto será el DNI)"}
+                                className="w-full pl-4 pr-10 py-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] transition-colors"
+                                autoComplete="new-password"
+                            />
+                            <button 
+                                type="button" 
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-[#003366] transition-colors"
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 pl-1 leading-tight">
+                            * El usuario para iniciar sesión siempre será el Documento (DNI/CE).
+                        </p>
+                     </div>
+                  </div>
+
+                  {/* INFO ADICIONAL */}
+                  <div className="border-t pt-2"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
                     
-                    {/* GRID: AFP, COMISIÓN, CUSPP */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                       {/* SELECTOR AFP */}
                       <div className="space-y-1 relative" ref={afpRef}>
@@ -224,7 +262,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                         <AnimatePresence>{showAfpMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">{AFPS.map(a => <DropdownOption key={a} label={a} isSelected={formData.afp === a} onClick={() => {setFormData({...formData, afp: a}); setShowAfpMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
                       </div>
 
-                      {/* SELECTOR COMISIÓN (SOLO SI ES AFP) */}
+                      {/* SELECTOR COMISIÓN */}
                       {formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen' && (
                         <div className="space-y-1 relative" ref={commissionRef}>
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
@@ -241,7 +279,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                         </div>
                       )}
 
-                      {/* CAMPO CUSPP (NUEVO) */}
+                      {/* CAMPO CUSPP */}
                       {formData.afp && formData.afp !== 'Sin Régimen' && (
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>

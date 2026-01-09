@@ -2,11 +2,28 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft
+  CheckCircle, RefreshCw, LogIn, LogOut, ArrowLeft, 
+  MapPin, AlertTriangle, Lock 
 } from 'lucide-react';
-import { supabase } from '../../services/supabase'; //
-import { compressImage } from '../../utils/imageCompressor'; //
-import logoFull from '../../assets/images/logo-lk-full.png'; //
+import { supabase } from '../../services/supabase';
+import { compressImage } from '../../utils/imageCompressor';
+import logoFull from '../../assets/images/logo-lk-full.png';
+
+// --- UTILIDAD: Cálculo de distancia (Fórmula Haversine) ---
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371e3; // Radio de la tierra en metros
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // Retorna distancia en metros
+};
 
 const WorkerAttendance = () => {
   const contextData = useOutletContext();
@@ -17,19 +34,25 @@ const WorkerAttendance = () => {
   const [worker, setWorker] = useState(workerFromContext);
   
   const [attendanceToday, setAttendanceToday] = useState(null); 
+  const [projectLocation, setProjectLocation] = useState(null); // Coordenadas del proyecto
   const [actionType, setActionType] = useState(null); 
   
   const [loading, setLoading] = useState(false);
-  const [location, setLocation] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [distanceToProject, setDistanceToProject] = useState(null);
+  const [isOutOfRange, setIsOutOfRange] = useState(false);
+  
   const [photoBlob, setPhotoBlob] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
+  // 1. Cargar Datos Iniciales (Asistencia y Proyecto)
   useEffect(() => {
     if (worker) {
       checkAttendanceStatus(worker.id);
+      loadProjectCoordinates(worker.project_assigned);
     }
   }, [worker]);
 
@@ -53,10 +76,35 @@ const WorkerAttendance = () => {
     }
   };
 
+  const loadProjectCoordinates = async (projectName) => {
+    if (!projectName) return;
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('latitude, longitude')
+        .eq('name', projectName) // Asegúrate que el nombre coincida o usa ID
+        .maybeSingle();
+      
+      if (!error && data) {
+        setProjectLocation(data);
+      }
+    } catch (err) {
+      console.error("Error cargando ubicación proyecto:", err);
+    }
+  };
+
+  // 2. Iniciar Proceso con Validación GPS
   const startProcess = async (type) => {
+    // BLOQUEO: Si ya está validado por supervisor, no permitir cambios
+    if (attendanceToday?.validation_status === 'VALIDADO') {
+      alert("🔒 El supervisor ya cerró y validó tu asistencia de hoy. No puedes realizar más cambios.");
+      return;
+    }
+
     setActionType(type);
     setLoading(true);
     setErrorMsg('');
+    setIsOutOfRange(false);
 
     if (!navigator.geolocation) {
       setErrorMsg('Tu dispositivo no soporta geolocalización.');
@@ -66,14 +114,38 @@ const WorkerAttendance = () => {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation(`${position.coords.latitude},${position.coords.longitude}`);
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const locString = `${lat},${lng}`;
+        
+        setCurrentLocation(locString);
+        
+        // --- LOGICA GEOFENCING ---
+        if (projectLocation?.latitude && projectLocation?.longitude) {
+           const dist = calculateDistance(lat, lng, projectLocation.latitude, projectLocation.longitude);
+           setDistanceToProject(Math.round(dist));
+           
+           // Rango permitido: 500 metros
+           if (dist > 500) {
+             setIsOutOfRange(true);
+             const continuar = window.confirm(
+               `⚠️ ESTÁS LEJOS DE LA OBRA\n\nDistancia detectada: ${Math.round(dist)} metros.\n\nSe registrará una observación automática.\n¿Deseas continuar de todas formas?`
+             );
+             if (!continuar) {
+               setLoading(false);
+               return; // Cancela el proceso
+             }
+           }
+        }
+        // -------------------------
+
         setStep('camera');
         startCamera();
         setLoading(false);
       },
       (error) => {
         setLoading(false);
-        setErrorMsg('⚠️ Debes permitir el acceso a tu ubicación.');
+        setErrorMsg('⚠️ Debes permitir el acceso a tu ubicación para marcar asistencia.');
       },
       { enableHighAccuracy: true }
     );
@@ -104,7 +176,6 @@ const WorkerAttendance = () => {
         if (!blob) return;
         const file = new File([blob], "foto.jpg", { type: "image/jpeg" });
         try {
-          // Comprimimos la foto antes de guardarla en el estado
           const compressed = await compressImage(file);
           setPhotoBlob(compressed);
           const stream = video.srcObject;
@@ -117,14 +188,14 @@ const WorkerAttendance = () => {
   };
 
   const submitAttendance = async () => {
-    if (!photoBlob || !location || !worker) return;
+    if (!photoBlob || !currentLocation || !worker) return;
     setLoading(true);
 
     try {
       const timestamp = Date.now();
       const fileName = `${worker.document_number}_${actionType}_${timestamp}.jpg`;
       
-      // 1. Subir Foto Comprimida
+      // 1. Subir Foto
       const { error: uploadError } = await supabase.storage
         .from('attendance-photos')
         .upload(fileName, photoBlob);
@@ -136,8 +207,14 @@ const WorkerAttendance = () => {
         .getPublicUrl(fileName);
 
       const now = new Date().toISOString(); 
+      
+      // 2. Preparar Observación Automática si está lejos
+      let autoObservation = '';
+      if (isOutOfRange) {
+        autoObservation = `⚠️ FUERA DE RANGO (${distanceToProject}m). `;
+      }
 
-      // 2. Guardar registro en BD (Incluyendo el nombre del proyecto)
+      // 3. Guardar en BD
       if (actionType === 'CHECK_IN') {
         const { error: insertError } = await supabase
           .from('attendance')
@@ -146,19 +223,24 @@ const WorkerAttendance = () => {
             date: new Date().toISOString().split('T')[0],
             check_in_time: now,
             check_in_photo: publicUrl,
-            check_in_location: location,
-            project_name: worker.project_assigned // [IMPORTANTE] Guardamos el proyecto actual
+            check_in_location: currentLocation,
+            project_name: worker.project_assigned,
+            observation: autoObservation // Agregamos la observación automática
           }]);
         if (insertError) throw insertError;
       } else {
         if (!attendanceToday) throw new Error("No hay registro de entrada.");
-        // Al marcar salida, solo actualizamos hora y foto de salida
+        
+        // Concatenar observación si ya existía alguna
+        const newObs = (attendanceToday.observation || '') + (autoObservation ? ` | Salida: ${autoObservation}` : '');
+
         const { error: updateError } = await supabase
           .from('attendance')
           .update({
             check_out_time: now,
             check_out_photo: publicUrl,
-            check_out_location: location
+            check_out_location: currentLocation,
+            observation: newObs
           })
           .eq('id', attendanceToday.id);
         if (updateError) throw updateError;
@@ -176,20 +258,19 @@ const WorkerAttendance = () => {
     navigate('/worker/dashboard');
   };
 
+  // --- RENDER ---
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
       
-      {/* Fondo Azul Curvo Superior */}
       <div className="absolute top-0 left-0 w-full h-[45vh] bg-[#003366] rounded-b-[4rem] z-0"></div>
       
-      {/* Logo Header */}
       <div className="absolute top-12 z-10 w-full flex justify-center">
          <img src={logoFull} alt="L&K" className="h-20 brightness-0 invert opacity-90 drop-shadow-sm" />
       </div>
 
       <AnimatePresence mode="wait">
         
-        {/* PASO 1: CONFIRMACIÓN Y SELECCIÓN DE ACCIÓN */}
+        {/* PASO 1: DASHBOARD DE ACCIÓN */}
         {step === 'confirm' && worker && (
           <motion.div 
             key="confirm"
@@ -208,13 +289,21 @@ const WorkerAttendance = () => {
             <div className="text-center mt-6">
               <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Registro Diario</h2>
               <p className="text-slate-500 text-sm mt-1">Selecciona tu acción para hoy</p>
-              {/* Mostramos el proyecto actual para confirmación visual */}
+              
               <div className="mt-2 inline-block px-3 py-1 bg-blue-50 text-[#003366] text-xs font-bold rounded-full border border-blue-100">
                 Obra: {worker.project_assigned || 'Sin Asignar'}
               </div>
             </div>
 
-            <div className="mt-8 space-y-5">
+            {/* AVISO DE VALIDACIÓN */}
+            {attendanceToday?.validation_status === 'VALIDADO' && (
+               <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3 text-blue-800 text-xs font-bold">
+                  <Lock size={16} />
+                  <span>Día cerrado y validado por supervisión.</span>
+               </div>
+            )}
+
+            <div className="mt-6 space-y-5">
               {!attendanceToday ? (
                 <button 
                   onClick={() => startProcess('CHECK_IN')} 
@@ -228,7 +317,13 @@ const WorkerAttendance = () => {
               ) : !attendanceToday.check_out_time ? (
                 <button 
                   onClick={() => startProcess('CHECK_OUT')} 
-                  className="w-full py-6 bg-orange-50 rounded-3xl border border-orange-100 flex flex-col items-center gap-3 hover:bg-orange-100 active:scale-95 transition-all group"
+                  // Si ya está validado, deshabilitamos visualmente (la lógica igual protege)
+                  disabled={attendanceToday?.validation_status === 'VALIDADO'}
+                  className={`w-full py-6 rounded-3xl border flex flex-col items-center gap-3 transition-all group
+                    ${attendanceToday?.validation_status === 'VALIDADO' 
+                        ? 'bg-slate-50 border-slate-200 opacity-50 cursor-not-allowed grayscale' 
+                        : 'bg-orange-50 border-orange-100 hover:bg-orange-100 active:scale-95'
+                    }`}
                 >
                   <div className="p-3 bg-white rounded-full text-orange-600 shadow-sm">
                     <LogOut size={26} strokeWidth={2.5} />
@@ -271,6 +366,19 @@ const WorkerAttendance = () => {
             exit={{ scale: 0.95, opacity: 0 }}
             className="w-full max-w-sm bg-black h-[65vh] rounded-[2.5rem] overflow-hidden relative flex flex-col z-20 shadow-xl"
           >
+            {/* Indicador de Ubicación / Advertencia */}
+            <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-center pointer-events-none">
+                {isOutOfRange ? (
+                    <div className="bg-red-500/90 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 backdrop-blur-sm animate-pulse">
+                        <AlertTriangle size={14} /> Distancia: {distanceToProject}m (Lejos)
+                    </div>
+                ) : distanceToProject ? (
+                    <div className="bg-green-500/80 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 backdrop-blur-sm">
+                        <MapPin size={14} /> En obra ({distanceToProject}m)
+                    </div>
+                ) : null}
+            </div>
+
             {!photoBlob ? (
               <>
                 <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -292,7 +400,7 @@ const WorkerAttendance = () => {
                           videoRef.current.srcObject.getTracks().forEach(t => t.stop());
                       }
                   }} 
-                  className="absolute top-6 left-6 p-3 bg-black/40 text-white rounded-full backdrop-blur-md"
+                  className="absolute top-6 left-6 p-3 bg-black/40 text-white rounded-full backdrop-blur-md z-20"
                 >
                   <ArrowLeft size={24} />
                 </button>
@@ -310,9 +418,10 @@ const WorkerAttendance = () => {
                   <button 
                     onClick={submitAttendance} 
                     disabled={loading} 
-                    className="flex-1 py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg active:scale-95 transition-transform"
+                    className={`flex-1 py-4 text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg active:scale-95 transition-transform
+                        ${isOutOfRange ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#003366]'}`}
                   >
-                     {loading ? <RefreshCw className="animate-spin" size={20} /> : 'Confirmar'}
+                     {loading ? <RefreshCw className="animate-spin" size={20} /> : (isOutOfRange ? 'Enviar con Obs.' : 'Confirmar')}
                   </button>
                 </div>
               </div>
@@ -329,13 +438,15 @@ const WorkerAttendance = () => {
             animate={{ scale: 1, opacity: 1 }}
             className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20 shadow-xl"
           >
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
-              <CheckCircle size={40} strokeWidth={3} />
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${isOutOfRange ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'}`}>
+              {isOutOfRange ? <AlertTriangle size={40} strokeWidth={3} /> : <CheckCircle size={40} strokeWidth={3} />}
             </div>
             
-            <h2 className="text-2xl font-bold text-slate-800">¡Registrado!</h2>
+            <h2 className="text-2xl font-bold text-slate-800">{isOutOfRange ? 'Registrado con Alerta' : '¡Registrado!'}</h2>
             <p className="text-slate-500 text-sm mt-2 mb-8">
-              Tu asistencia se ha guardado correctamente.
+              {isOutOfRange 
+                ? 'Tu asistencia se guardó, pero se notificó que estabas fuera del rango permitido.' 
+                : 'Tu asistencia se ha guardado correctamente.'}
             </p>
             
             <button 

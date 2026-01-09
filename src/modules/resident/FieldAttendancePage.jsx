@@ -3,26 +3,26 @@ import { supabase } from '../../services/supabase';
 import { 
   Calendar, Save, MapPin, CheckCircle, XCircle, 
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
-  Building2, ArrowLeft, Clock
+  Building2, ArrowLeft, Smartphone
 } from 'lucide-react';
 
 const FieldAttendancePage = () => {
   // Estados
   const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState(null); // Ahora guarda el objeto completo del proyecto o null
+  const [selectedProject, setSelectedProject] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // 1. Cargar Proyectos Activos (Con todos los detalles para las tarjetas)
+  // 1. Cargar Proyectos Activos
   useEffect(() => {
     const loadProjects = async () => {
       try {
         const { data, error } = await supabase
           .from('projects')
-          .select('*') // Traemos todo para mostrar código, ubicación, etc.
+          .select('*') //
           .eq('status', 'En Ejecución')
           .order('name');
         
@@ -35,34 +35,61 @@ const FieldAttendancePage = () => {
     loadProjects();
   }, []);
 
-  // 2. Cargar Trabajadores cuando se selecciona un proyecto
+  // 2. LOGICA DEL "PASO A": Cargar Trabajadores y CRUZAR con Asistencia de Hoy
   useEffect(() => {
     if (!selectedProject) {
       setWorkers([]);
       return;
     }
     
-    const loadTeam = async () => {
+    const loadTeamAndAttendance = async () => {
       setLoading(true);
       try {
-        // Buscamos trabajadores asignados a este proyecto
-        const { data, error } = await supabase
+        // A. Traer trabajadores asignados al proyecto
+        const { data: workersData, error: workersError } = await supabase
           .from('workers')
           .select('*')
           .eq('project_assigned', selectedProject.name) 
           .eq('status', 'Activo')
           .order('full_name');
 
-        if (error) throw error;
+        if (workersError) throw workersError;
 
-        const initialList = data.map(w => ({
-          ...w,
-          attendanceStatus: 'Presente', // Estado inicial
-          observation: '',
-          saved: false
-        }));
+        // B. Traer asistencias DE HOY para este proyecto (Lo que marcaron los obreros)
+        const { data: attendanceData, error: attendanceError } = await supabase
+          .from('attendance')
+          .select('*')
+          .eq('project_name', selectedProject.name)
+          .eq('date', date); // Filtramos por la fecha seleccionada en pantalla
         
-        setWorkers(initialList || []);
+        if (attendanceError) throw attendanceError;
+
+        // C. REALIZAR EL "JOIN" MANUAL (Merge de datos)
+        const mergedList = workersData.map(w => {
+          // Buscamos si este trabajador ya tiene un registro creado (por la App o previamente)
+          const existingRecord = attendanceData.find(a => a.worker_id === w.id);
+
+          return {
+            ...w,
+            // Guardamos el ID de la asistencia para usarlo en el UPSERT (Paso B)
+            attendanceId: existingRecord ? existingRecord.id : null, 
+            
+            // Si existe registro, usamos su estado. Si no, asumimos 'Presente' para agilizar el llenado.
+            attendanceStatus: existingRecord ? (existingRecord.status || 'Presente') : 'Presente',
+            
+            // Si vino de la App, conservamos la hora real. Si no, estará null.
+            checkInTime: existingRecord ? existingRecord.check_in_time : null,
+            checkOutTime: existingRecord ? existingRecord.check_out_time : null,
+            
+            // Bandera para mostrar ícono de celular si vino de la App
+            origin: existingRecord && existingRecord.check_in_photo ? 'APP' : 'MANUAL',
+            
+            observation: existingRecord ? (existingRecord.observation || '') : '',
+            saved: !!existingRecord // Marca visual si ya está guardado
+          };
+        });
+        
+        setWorkers(mergedList || []);
       } catch (err) {
         console.error("Error cargando personal:", err);
         alert("Error al cargar la cuadrilla.");
@@ -70,15 +97,16 @@ const FieldAttendancePage = () => {
         setLoading(false);
       }
     };
-    loadTeam();
-  }, [selectedProject]); // Dependencia: objeto selectedProject
+    loadTeamAndAttendance();
+  }, [selectedProject, date]); // Se recarga si cambias de proyecto o de fecha
 
-  // --- LÓGICA DE ASISTENCIA ---
+  // --- LÓGICA DE INTERACCIÓN (Cambio de estados en la tabla) ---
 
   const toggleStatus = (index) => {
     const newWorkers = [...workers];
     const current = newWorkers[index].attendanceStatus;
     
+    // Ciclo de estados: Presente -> Falta -> Permiso -> Bajada -> Presente...
     if (current === 'Presente') newWorkers[index].attendanceStatus = 'Falta';
     else if (current === 'Falta') newWorkers[index].attendanceStatus = 'Permiso';
     else if (current === 'Permiso') newWorkers[index].attendanceStatus = 'Bajada';
@@ -93,31 +121,75 @@ const FieldAttendancePage = () => {
     setWorkers(newWorkers);
   };
 
+  // --- LOGICA DEL "PASO B": GUARDADO CON UPSERT Y VALIDACIÓN ---
   const handleSaveTareo = async () => {
     if (!selectedProject || workers.length === 0) return;
     
-    const confirm = window.confirm(`¿Estás seguro de enviar el tareo del ${date} para ${workers.length} trabajadores?`);
+    const confirm = window.confirm(`¿Confirmar tareo del ${date}? Se validará la asistencia de ${workers.length} trabajadores.`);
     if (!confirm) return;
 
     setSaving(true);
     try {
-      const recordsToInsert = workers.map(w => ({
-        worker_id: w.id,
-        project_name: selectedProject.name,
-        date: date,
-        status: w.attendanceStatus,
-        check_in_time: w.attendanceStatus === 'Presente' ? `${date} 07:00:00` : null,
-        check_out_time: w.attendanceStatus === 'Presente' ? `${date} 17:00:00` : null,
-        check_in_location: 'Validado por Residente',
-        observation: w.observation || ''
-      }));
+      const recordsToUpsert = workers.map(w => {
+        // Lógica de horas: 
+        // 1. Si ya tenía hora (de la app), la respetamos.
+        // 2. Si no tenía y está Presente, ponemos hora default (07:00).
+        // 3. Si no está Presente (ej. Falta), las horas van en null.
+        
+        let finalCheckIn = null;
+        let finalCheckOut = null;
 
-      const { error } = await supabase.from('attendance').insert(recordsToInsert);
+        if (w.attendanceStatus === 'Presente') {
+            finalCheckIn = w.checkInTime || `${date} 07:00:00`;
+            finalCheckOut = w.checkOutTime || `${date} 17:00:00`;
+        }
+
+        return {
+          // ID: Si existe (porque vino de la App o se guardó antes), se usa para ACTUALIZAR.
+          // Si es null, Supabase creará una fila nueva.
+          id: w.attendanceId, 
+          
+          worker_id: w.id,
+          project_name: selectedProject.name,
+          date: date,
+          status: w.attendanceStatus,
+          
+          check_in_time: finalCheckIn,
+          check_out_time: finalCheckOut,
+          
+          // Indicamos si la ubicación fue GPS (App) o Validación manual
+          check_in_location: w.origin === 'APP' ? 'Registrado por App' : 'Validado por Residente',
+          
+          observation: w.observation || '',
+          
+          // [NUEVO] Columna clave para que RRHH sepa que esto ya fue revisado
+          validation_status: 'VALIDADO' 
+        };
+      });
+
+      // EJECUCIÓN DEL UPSERT
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(recordsToUpsert, { onConflict: 'id' }); 
       
       if (error) throw error;
 
-      alert('✅ Tareo enviado correctamente a Oficina Central.');
-      setWorkers(prev => prev.map(w => ({...w, saved: true})));
+      alert('✅ Tareo sincronizado y validado correctamente.');
+      
+      // Recargar datos para asegurar que tenemos los IDs actualizados y evitar duplicados si se guarda de nuevo
+      // Esto simula un "refresh" rápido
+      const { data: refreshedData } = await supabase
+          .from('attendance')
+          .select('id, worker_id')
+          .eq('project_name', selectedProject.name)
+          .eq('date', date);
+
+      if (refreshedData) {
+          setWorkers(prev => prev.map(w => {
+              const match = refreshedData.find(r => r.worker_id === w.id);
+              return match ? { ...w, attendanceId: match.id, saved: true } : w;
+          }));
+      }
 
     } catch (e) {
       console.error(e);
@@ -132,7 +204,7 @@ const FieldAttendancePage = () => {
     w.document_number.includes(searchTerm)
   );
 
-  // --- VISTA 1: SELECCIÓN DE PROYECTOS (TARJETAS) ---
+  // --- VISTA 1: TARJETAS DE PROYECTO (Igual que antes) ---
   if (!selectedProject) {
     return (
       <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8">
@@ -141,12 +213,10 @@ const FieldAttendancePage = () => {
             <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
               <ClipboardCheck className="text-[#f0c419]" size={32} /> Supervisión de Campo
             </h1>
-            <p className="text-slate-500 mt-2">Seleccione un proyecto para registrar la asistencia diaria.</p>
+            <p className="text-slate-500 mt-2">Seleccione un proyecto para validar la asistencia diaria.</p>
           </div>
-          
-          {/* Selector de Fecha Global */}
           <div className="bg-white p-2 px-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
-             <span className="text-xs font-bold text-slate-400 uppercase">Fecha de Registro:</span>
+             <span className="text-xs font-bold text-slate-400 uppercase">Fecha:</span>
              <input 
                 type="date" 
                 value={date} 
@@ -160,7 +230,7 @@ const FieldAttendancePage = () => {
           {projects.length === 0 ? (
              <div className="col-span-full py-20 text-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
                 <Building2 size={48} className="mx-auto mb-4 opacity-20"/>
-                <p>No hay proyectos en ejecución asignados actualmente.</p>
+                <p>No hay proyectos en ejecución.</p>
              </div>
           ) : (
             projects.map(proj => (
@@ -169,9 +239,7 @@ const FieldAttendancePage = () => {
                 onClick={() => setSelectedProject(proj)}
                 className="group bg-white rounded-2xl border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-[#003366]/20 transition-all cursor-pointer relative overflow-hidden"
               >
-                {/* Decoración Hover */}
                 <div className="absolute top-0 left-0 w-1 h-full bg-[#003366] opacity-0 group-hover:opacity-100 transition-opacity"/>
-                
                 <div className="flex justify-between items-start mb-4">
                    <div className="p-3 bg-blue-50 text-[#003366] rounded-xl group-hover:bg-[#003366] group-hover:text-white transition-colors">
                       <Building2 size={24} />
@@ -180,27 +248,9 @@ const FieldAttendancePage = () => {
                       {proj.project_code || 'S/C'}
                    </span>
                 </div>
-
                 <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-[#003366] transition-colors">{proj.name}</h3>
-                
                 <div className="space-y-2 text-sm text-slate-500">
-                   <p className="flex items-center gap-2">
-                      <MapPin size={14} className="text-[#f0c419]"/> 
-                      {proj.location || 'Sin ubicación'}
-                   </p>
-                   <p className="flex items-center gap-2">
-                      <Clock size={14} className="text-slate-400"/> 
-                      Inicio: {new Date(proj.start_date).toLocaleDateString()}
-                   </p>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-50 flex justify-between items-center">
-                   <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full">
-                      En Ejecución
-                   </span>
-                   <span className="text-xs font-bold text-[#003366] group-hover:underline">
-                      Ingresar al Tareo →
-                   </span>
+                   <p className="flex items-center gap-2"><MapPin size={14} className="text-[#f0c419]"/> {proj.location || 'Sin ubicación'}</p>
                 </div>
               </div>
             ))
@@ -210,15 +260,15 @@ const FieldAttendancePage = () => {
     );
   }
 
-  // --- VISTA 2: LISTA DE ASISTENCIA (TAREO) ---
+  // --- VISTA 2: LISTA DE TAREO (Con Iconos APP) ---
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
       
-      {/* HEADER CON BOTÓN VOLVER */}
+      {/* HEADER DE PROYECTO */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <button 
-            onClick={() => setSelectedProject(null)} // Volver a la lista
+            onClick={() => setSelectedProject(null)} 
             className="flex items-center gap-2 text-slate-400 hover:text-[#003366] text-xs font-bold uppercase mb-2 transition-colors"
           >
             <ArrowLeft size={14}/> Volver a Proyectos
@@ -226,10 +276,6 @@ const FieldAttendancePage = () => {
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <span className="text-[#003366]">{selectedProject.name}</span>
           </h1>
-          <div className="flex items-center gap-4 mt-1 text-sm text-slate-500">
-             <span className="flex items-center gap-1"><Building2 size={14}/> C.C: {selectedProject.project_code || '---'}</span>
-             <span className="flex items-center gap-1"><MapPin size={14}/> {selectedProject.location}</span>
-          </div>
         </div>
         
         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200">
@@ -243,14 +289,13 @@ const FieldAttendancePage = () => {
         </div>
       </div>
 
-      {/* CUERPO PRINCIPAL */}
+      {/* CUERPO DE LA TABLA */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden min-h-[400px] flex flex-col">
         
-        {/* Barra de Búsqueda Interna */}
+        {/* Buscador */}
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Users size={16}/> 
-            <span className="font-bold">{workers.length}</span> Trabajadores asignados
+            <Users size={16}/> <span className="font-bold">{workers.length}</span> Trabajadores en lista
           </div>
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
@@ -264,22 +309,23 @@ const FieldAttendancePage = () => {
           </div>
         </div>
 
-        {/* LISTA DE TRABAJADORES */}
+        {/* Tabla Scrollable */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
               <Loader2 className="animate-spin text-[#003366]" size={32}/>
-              <p>Cargando cuadrilla...</p>
+              <p>Sincronizando con registros de la App...</p>
             </div>
           ) : filteredWorkers.length === 0 ? (
-            <div className="p-10 text-center text-slate-400">No se encontraron trabajadores activos en este proyecto.</div>
+            <div className="p-10 text-center text-slate-400">No se encontraron trabajadores activos.</div>
           ) : (
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase sticky top-0 z-10 shadow-sm">
                 <tr>
                   <th className="px-6 py-4">Trabajador</th>
+                  <th className="px-6 py-4 text-center">Origen</th>
                   <th className="px-6 py-4 text-center">Estado (Clic para cambiar)</th>
-                  <th className="px-6 py-4">Observaciones del Día</th>
+                  <th className="px-6 py-4">Observaciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -297,6 +343,23 @@ const FieldAttendancePage = () => {
                         </div>
                       </td>
                       
+                      {/* COLUMNA ORIGEN: Muestra si vino de la App */}
+                      <td className="px-6 py-4 text-center">
+                        {worker.origin === 'APP' ? (
+                            <div className="flex flex-col items-center justify-center text-blue-600 animate-pulse" title="Registrado desde App Móvil">
+                                <Smartphone size={20} />
+                                <span className="text-[10px] font-bold mt-1">APP</span>
+                                {worker.checkInTime && (
+                                   <span className="text-[9px] text-slate-400">
+                                      {new Date(worker.checkInTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                   </span>
+                                )}
+                            </div>
+                        ) : (
+                            <span className="text-xs text-slate-300 font-medium">-</span>
+                        )}
+                      </td>
+
                       <td className="px-6 py-4 text-center">
                         <button 
                           onClick={() => toggleStatus(realIndex)}
@@ -334,11 +397,11 @@ const FieldAttendancePage = () => {
           )}
         </div>
 
-        {/* FOOTER DE ACCIONES */}
+        {/* FOOTER DE GUARDADO */}
         {workers.length > 0 && (
           <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
             <div className="text-xs text-slate-400">
-              * Verifique la fecha ({date}) antes de enviar.
+              * Se marcarán como <strong>VALIDADOS</strong> para RRHH.
             </div>
             <button 
               onClick={handleSaveTareo}
@@ -346,7 +409,7 @@ const FieldAttendancePage = () => {
               className="bg-[#003366] text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-900 transition flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
-              {saving ? 'ENVIANDO...' : 'CERRAR Y ENVIAR TAREO'}
+              {saving ? 'GUARDANDO...' : 'VALIDAR Y GUARDAR TAREO'}
             </button>
           </div>
         )}

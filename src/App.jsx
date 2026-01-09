@@ -1,6 +1,6 @@
 import React, { Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { WorkerAuthProvider } from './context/WorkerAuthContext';
+// SE ELIMINÓ: WorkerAuthProvider (ya está en main.jsx)
 import { CompanyProvider } from './context/CompanyContext';
 
 // Layouts
@@ -39,76 +39,76 @@ const LoadingSpinner = () => (
 
 function App() {
   return (
-    <WorkerAuthProvider>
-      <Suspense fallback={<LoadingSpinner />}>
-        <Routes>
-          {/* RUTA BASE */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          
-          {/* LOGIN */}
-          <Route path="/login" element={<LoginPage />} />
+    // SE ELIMINÓ EL WRAPPER: <WorkerAuthProvider>
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        {/* RUTA BASE */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        
+        {/* LOGIN */}
+        <Route path="/login" element={<LoginPage />} />
 
-          {/* =========================================================
-              RUTAS ADMINISTRATIVAS (Protegidas por Roles)
-             ========================================================= */}
-          
-          {/* GRUPO 1: ACCESO GENERAL (Todos ven Dashboard y Perfil) */}
-          <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica']} />}>
-            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-               <Route path="/dashboard" element={<DashboardPage />} />
-               <Route path="/profile" element={<UserProfilePage />} />
-            </Route>
+        {/* =========================================================
+            RUTAS ADMINISTRATIVAS (Protegidas por Roles)
+           ========================================================= */}
+        
+        {/* GRUPO 1: ACCESO GENERAL (Todos ven Dashboard y Perfil) */}
+        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica']} />}>
+          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+             <Route path="/dashboard" element={<DashboardPage />} />
+             <Route path="/profile" element={<UserProfilePage />} />
           </Route>
+        </Route>
 
-          {/* GRUPO 2: GESTIÓN DE OBRAS (Solo Admin) */}
-          <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
-            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-               <Route path="/proyectos" element={<ProjectsPage />} />
-               <Route path="/licitaciones" element={<TendersPage />} />
-               <Route path="/licitaciones/:id" element={<TenderDetail />} />
-            </Route>
+        {/* GRUPO 2: GESTIÓN DE OBRAS (Solo Admin) */}
+        <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
+          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+             <Route path="/proyectos" element={<ProjectsPage />} />
+             <Route path="/licitaciones" element={<TendersPage />} />
+             <Route path="/licitaciones/:id" element={<TenderDetail />} />
           </Route>
+        </Route>
 
-          {/* GRUPO 3: SUPERVISIÓN DE CAMPO (Admin + Residentes) */}
-          <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer']} />}>
-             <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-                <Route path="/campo/tareo" element={<FieldAttendancePage />} />
-             </Route>
+        {/* GRUPO 3: SUPERVISIÓN DE CAMPO (Admin + Residentes) */}
+        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer']} />}>
+           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+              <Route path="/campo/tareo" element={<FieldAttendancePage />} />
+           </Route>
+        </Route>
+
+        {/* GRUPO 4: RECURSOS HUMANOS (RRHH + Admin) */}
+        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh']} />}>
+          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+             <Route path="/users" element={<HumanResourcesPage />} />
+             <Route path="/planillas" element={<PayrollPage />} />
+             <Route path="/documentacion" element={<DocumentationPage />} />
           </Route>
+        </Route>
 
-          {/* GRUPO 4: RECURSOS HUMANOS (RRHH + Admin) */}
-          <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh']} />}>
-            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-               <Route path="/users" element={<HumanResourcesPage />} />
-               <Route path="/planillas" element={<PayrollPage />} />
-               <Route path="/documentacion" element={<DocumentationPage />} />
-            </Route>
+        {/* GRUPO 5: SUPER ADMIN */}
+        <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
+          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+             <Route path="/reportes" element={<ReportsPage />} />
+             <Route path="/configuracion" element={<ConfigurationPage />} />
           </Route>
+        </Route>
 
-          {/* GRUPO 5: SUPER ADMIN */}
-          <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
-            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-               <Route path="/reportes" element={<ReportsPage />} />
-               <Route path="/configuracion" element={<ConfigurationPage />} />
-            </Route>
-          </Route>
+        {/* =========================================================
+            RUTAS DE OBREROS
+           ========================================================= */}
+        <Route path="/worker" element={<WorkerLayout />}>
+          <Route path="dashboard" element={<WorkerDashboard />} />
+          <Route path="asistencia" element={<WorkerAttendance />} />
+          <Route path="bitacora" element={<WorkerProjectLog />} />
+          <Route path="proyecto" element={<WorkerProjectView />} />
+        </Route>
 
-          {/* =========================================================
-              RUTAS DE OBREROS
-             ========================================================= */}
-          <Route path="/worker" element={<WorkerLayout />}>
-            <Route path="dashboard" element={<WorkerDashboard />} />
-            <Route path="asistencia" element={<WorkerAttendance />} />
-            <Route path="bitacora" element={<WorkerProjectLog />} />
-            <Route path="proyecto" element={<WorkerProjectView />} />
-          </Route>
+        {/* 404 */}
+        <Route path="*" element={<div className="p-10 text-center">Página no encontrada</div>} />
 
-          {/* 404 */}
-          <Route path="*" element={<div className="p-10 text-center">Página no encontrada</div>} />
-
-        </Routes>
-      </Suspense>
-    </WorkerAuthProvider>
+      </Routes>
+    </Suspense>
+    // SE ELIMINÓ EL WRAPPER: </WorkerAuthProvider>
   );
 }
 

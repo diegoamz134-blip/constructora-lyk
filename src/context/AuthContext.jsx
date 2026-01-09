@@ -8,130 +8,106 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Función auxiliar para limpiar todo si hay error
-  const forceLogout = async () => {
-    console.warn("Forzando cierre de sesión por token inválido...");
-    await supabase.auth.signOut();
-    localStorage.clear(); // Limpieza agresiva del storage
-    setUser(null);
-    setRole(null);
-    setLoading(false);
+  // Función segura para buscar rol
+  const fetchUserRole = async (email) => {
+    if (!email) return null;
+    try {
+      const { data: emp } = await supabase.from('employees').select('role').eq('email', email).maybeSingle();
+      if (emp) return emp.role;
+      const { data: wor } = await supabase.from('workers').select('role').eq('email', email).maybeSingle();
+      if (wor) return wor.role;
+    } catch (e) {
+      console.error("Error buscando rol:", e);
+    }
+    return null;
   };
 
   useEffect(() => {
-    const checkSession = async () => {
+    let mounted = true;
+
+    // Timeout de seguridad para evitar pantalla blanca eterna
+    const forceStopLoading = setTimeout(() => {
+      if (mounted && loading) {
+        setLoading(false);
+      }
+    }, 2000);
+
+    const initSession = async () => {
       try {
-        // Obtenemos sesión actual
         const { data: { session }, error } = await supabase.auth.getSession();
         
-        // Si hay error de token inválido al arrancar, limpiamos inmediatamente
         if (error) {
-           console.error("Error crítico de sesión:", error.message);
-           if (error.message.includes("Refresh Token") || error.message.includes("invalid_grant")) {
-             await forceLogout();
-             return;
-           }
+            if (error.message.includes("invalid_grant")) await supabase.auth.signOut();
+            throw error;
         }
 
-        if (session?.user) {
+        if (session?.user && mounted) {
           setUser(session.user);
-          await fetchUserRole(session.user.email);
+          const r = await fetchUserRole(session.user.email);
+          if (mounted) setRole(r);
         }
-      } catch (error) {
-        console.error("Excepción en checkSession:", error);
-        await forceLogout();
+      } catch (err) {
+        console.log("Sesión no activa o error de red.");
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
-    checkSession();
+    initSession();
 
-    // Escuchamos cambios en la autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Evento Auth:", event);
+      if (!mounted) return;
       
-      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-        setUser(null);
-        setRole(null);
-        setLoading(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        setUser(session?.user || null);
-        if (session?.user && !role) await fetchUserRole(session.user.email);
-        setLoading(false);
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+         setUser(session?.user ?? null);
+         if (session?.user) {
+             const r = await fetchUserRole(session.user.email);
+             if (mounted) setRole(r);
+         }
+         setLoading(false);
+      } else if (event === 'SIGNED_OUT') {
+         // Limpieza redundante por seguridad
+         setUser(null);
+         setRole(null);
+         setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      clearTimeout(forceStopLoading);
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const fetchUserRole = async (email) => {
-    if (!email) return;
-    try {
-      const { data: emp } = await supabase.from('employees').select('role').eq('email', email).maybeSingle();
-      if (emp) { setRole(emp.role); return; }
-      
-      const { data: wor } = await supabase.from('workers').select('role').eq('email', email).maybeSingle();
-      if (wor) { setRole(wor.role); return; }
-
-    } catch (e) {
-      console.error("Error obteniendo roles:", e);
-    }
-  };
-
   const login = async (email, password) => {
-    // 1. Intento Login Normal
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    
-    if (!error && data.user) {
-        await fetchUserRole(data.user.email);
-        return data;
+    if (error) throw error;
+    if (data.user) {
+       const r = await fetchUserRole(data.user.email);
+       setRole(r);
     }
-
-    // 2. Intento Migración (Solo si es necesario)
-    if (error) {
-      // Ignoramos errores de red o servidor, nos enfocamos en credenciales
-      try {
-        const { data: dbUser, error: dbError } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('email', email)
-          .maybeSingle();
-
-        // Si RLS bloquea, abortamos migración
-        if (dbError) throw error; 
-
-        if (dbUser && dbUser.password === password) {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { full_name: dbUser.full_name, role: dbUser.role } }
-          });
-
-          if (signUpError) {
-             if (signUpError.message.includes("already registered")) {
-                throw new Error("Credenciales incorrectas.");
-             }
-             throw signUpError;
-          }
-          
-          if (signUpData.user) {
-             await fetchUserRole(signUpData.user.email);
-             return signUpData;
-          }
-        }
-      } catch (migError) {
-         // Silencioso, devolvemos el error original
-      }
-    }
-    
-    throw error;
+    return data;
   };
 
+  // --- LOGOUT MEJORADO (SALIDA INMEDIATA) ---
   const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setRole(null);
+    try {
+        // 1. ¡PRIMERO LIMPIAMOS LA UI! (Salida visual instantánea)
+        setUser(null);
+        setRole(null);
+        setLoading(false);
+
+        // 2. Limpiamos almacenamiento local para evitar conflictos al volver
+        localStorage.clear(); 
+
+        // 3. Le avisamos a Supabase (ya no nos importa si tarda)
+        await supabase.auth.signOut();
+        
+    } catch (e) {
+        console.warn("Error no crítico al cerrar sesión:", e);
+        // Incluso si falla, el usuario ya está fuera visualmente.
+    }
   };
 
   return (
