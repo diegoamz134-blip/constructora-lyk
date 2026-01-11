@@ -165,7 +165,7 @@ const ReportsPage = () => {
     return { name: 'Desconocido', role: '-', doc: '-', type: '?' };
   };
 
-  // --- ESTADÍSTICAS ---
+  // --- ESTADÍSTICAS CORREGIDAS (LÓGICA ESTRICTA 8.5h / 5.5h) ---
   const stats = useMemo(() => {
     const dataToAnalyze = attendanceData; 
     const grouped = {};
@@ -175,8 +175,38 @@ const ReportsPage = () => {
       const dateKey = new Date(item.date).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
       if (!grouped[dateKey]) grouped[dateKey] = { name: dateKey, Obrero: 0, Staff: 0 };
       const u = getUserData(item);
-      if (u.type === 'OBRERO') { grouped[dateKey].Obrero++; obreros++; }
-      else { grouped[dateKey].Staff++; staff++; }
+      
+      // LÓGICA DE JORNADA
+      let dayValue = 0;
+      if (item.check_in_time && item.check_out_time) {
+          const diffMs = new Date(item.check_out_time) - new Date(item.check_in_time);
+          const hours = diffMs / (1000 * 60 * 60);
+          
+          // Corrección segura de fecha para detectar sábado
+          const recordDate = new Date(item.date.split('-').join('/'));
+          const isSaturday = recordDate.getDay() === 6;
+
+          if (isSaturday) {
+             if (hours >= 5.5) dayValue = 1; // Sábado estricto: >= 5.5h
+             else if (hours >= 1) dayValue = 0.5;
+             else dayValue = 0;
+          } else {
+             if (hours >= 8.5) dayValue = 1; // Lunes-Viernes estricto: >= 8.5h
+             else if (hours >= 1) dayValue = 0.5;
+             else dayValue = 0;
+          }
+          
+      } else if (!item.check_out_time) {
+          dayValue = 0; 
+      }
+
+      if (u.type === 'OBRERO') { 
+          grouped[dateKey].Obrero += dayValue; 
+          if(dayValue > 0) obreros++; 
+      } else { 
+          grouped[dateKey].Staff += dayValue; 
+          if(dayValue > 0) staff++; 
+      }
     });
 
     return { 
@@ -298,7 +328,7 @@ const ReportsPage = () => {
              firma_in: pIn, 
              hs: `${hsTime}\n${hsLoc}`, 
              firma_out: pOut, 
-             obs: ''
+             obs: item.observation || ''
           });
         }
 
@@ -379,7 +409,7 @@ const ReportsPage = () => {
           allStaff || [], 
           dateRange, 
           selectedProject,
-          projectsList || [] // NUEVO: Pasamos la lista de proyectos para crear las hojas
+          projectsList || [] 
       );
 
     } catch (e) {
@@ -503,7 +533,7 @@ const ReportsPage = () => {
            {attendanceData.length > 0 && !filterText && (
              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <div className="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm min-h-[300px]">
-                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Asistencia Total (Rango Seleccionado)</h4>
+                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Asistencia Total (Jornales)</h4>
                    <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={stats.barData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false}/>

@@ -17,6 +17,13 @@ const isSunday = (dateString) => {
     return date.getDay() === 0;
 };
 
+// Helper para saber si es sábado
+const isSaturday = (dateString) => {
+    const [y, m, d] = dateString.split('-').map(Number);
+    const date = new Date(y, m - 1, d); 
+    return date.getDay() === 6;
+};
+
 // Helper para obtener el Lunes
 const getMondayOfWeek = (dateString) => {
     const [y, m, d] = dateString.split('-').map(Number);
@@ -29,25 +36,13 @@ const getMondayOfWeek = (dateString) => {
 
 // --- FUNCIÓN PARA GENERAR UNA HOJA ESPECÍFICA ---
 const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, attendanceData, projectFilter) => {
-    // Sanitizar nombre de hoja (Excel no permite > 31 chars ni caracteres especiales)
     const safeSheetName = sheetName.replace(/[\\/?*\[\]]/g, '').substring(0, 30) || 'Hoja';
     const sheet = workbook.addWorksheet(safeSheetName);
 
     // --- PROCESAMIENTO DE DATOS ---
     const workersMap = {};
 
-    // 1. Agregar Personal (Filtrado si es hoja de proyecto, o TODOS si es Master)
     const addToMap = (person, type) => {
-        // Lógica de filtrado para hoja de proyecto:
-        // Si hay 'projectFilter', tratamos de ver si esta persona pertenece a ese proyecto.
-        // Como no tenemos project_id confiable en 'person', confiaremos más en la asistencia para filtrar
-        // las hojas de proyectos individuales.
-        // PERO para el MASTER (projectFilter null), metemos a todos.
-        
-        // Estrategia: Meter a todos inicialmente al mapa base.
-        // Luego, si hay filtro de proyecto, solo renderizamos los que tengan asistencia en ese proyecto
-        // O si queremos ser estrictos, solo metemos al mapa los que cumplan.
-        
         workersMap[person.id] = {
             id: person.id,
             dni: person.document_number,
@@ -55,27 +50,33 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             category: type === 'worker' ? person.category : person.position,
             entryDate: person.start_date || person.entry_date || '',
             days: {},
+            observations: [],
             hasAttendanceInThisProject: false 
         };
     };
 
+    // Agregamos solo lo que nos pasen (si allStaff viene vacío, no se agregan administrativos)
     allWorkers.forEach(w => addToMap(w, 'worker'));
     allStaff.forEach(s => addToMap(s, 'staff'));
 
-    // 2. Rellenar Asistencias
     attendanceData.forEach(record => {
         if (!dateList.includes(record.date)) return;
-
-        // FILTRO DE PROYECTO PARA ASISTENCIA
-        // Si estamos en la hoja "PROYECTO A", solo contamos asistencias de "PROYECTO A"
         if (projectFilter && record.project_name !== projectFilter.name) return;
 
+        // Detectar si es Obrero o Staff
         const person = record.workers || record.employees;
         if (!person) return;
         const id = person.id;
 
-        // Asegurar que exista en el mapa (por si vino alguien inactivo o no listado)
+        // Si el registro no está en el mapa inicial (ej. un staff en hoja de solo obreros),
+        // lo agregamos solo si corresponde al tipo permitido en esta hoja.
+        // Como 'addTareoSheet' recibe listas filtradas, si un staff llega aquí
+        // pero no estaba en 'allStaff', significa que estamos forzando su exclusión,
+        // así que verificamos:
         if (!workersMap[id]) {
+             // Si es una hoja exclusiva de obreros (allStaff vacío) y llega un empleado, lo ignoramos.
+             if (allStaff.length === 0 && record.employees) return;
+
              const role = record.workers ? record.workers.category : record.employees.position;
              const entryDate = person.start_date || person.entry_date || ''; 
              workersMap[id] = {
@@ -85,30 +86,48 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
                 category: role,
                 entryDate: entryDate,
                 days: {},
+                observations: [],
                 hasAttendanceInThisProject: false
             };
         }
 
-        // Marcar que sí trabajó en este proyecto
         workersMap[id].hasAttendanceInThisProject = true;
+        if (record.observation) {
+            workersMap[id].observations.push(`[${record.date.slice(5)}]: ${record.observation}`);
+        }
 
-        // Cálculos
+        // --- CÁLCULO DE HORAS (LÓGICA ESTRICTA: 8.5h / 5.5h) ---
         const totalHours = getHoursDiff(record.check_in_time, record.check_out_time);
         let n = 0, he60 = 0, he100 = 0;
         
+        let standardHours = 8.5; // Lunes a Viernes
+        if (isSaturday(record.date)) standardHours = 5.5; // Sábado
+        
         if (totalHours > 0) {
-            if (totalHours >= 5) n = 1; else n = 0.5;
-            const THRESHOLD = 9; 
-            const hoursForCalc = totalHours; 
-            if (record.overtime_hours && parseFloat(record.overtime_hours) > 0) {
-                const extra = parseFloat(record.overtime_hours);
-                if (extra <= 2) he60 = extra; else { he60 = 2; he100 = extra - 2; }
-            } else if (hoursForCalc > THRESHOLD && !isSunday(record.date)) {
-                const extra = hoursForCalc - THRESHOLD;
-                if (extra <= 2) he60 = extra; else { he60 = 2; he100 = extra - 2; }
+            // 1. CÁLCULO DE JORNAL (N) - ESTRICTO
+            if (isSaturday(record.date)) {
+                if (totalHours >= 5.5) n = 1;
+                else if (totalHours >= 1) n = 0.5;
+                else n = 0; 
+            } else {
+                if (totalHours >= 8.5) n = 1;
+                else if (totalHours >= 1) n = 0.5;
+                else n = 0;
             }
+
+            // 2. CÁLCULO DE EXTRAS
             if (isSunday(record.date)) {
-                n = 1; if (hoursForCalc > 0 && !he100) he100 = 8; 
+                n = 1; 
+                he100 = totalHours; 
+            } 
+            else if (totalHours > standardHours) {
+                const extra = totalHours - standardHours;
+                if (extra <= 2) {
+                    he60 = extra;
+                } else {
+                    he60 = 2;
+                    he100 = extra - 2;
+                }
             }
         }
 
@@ -119,21 +138,16 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         };
     });
 
-    // 3. Filtrar Lista Final para esta Hoja
     let finalWorkersArray = Object.values(workersMap);
-    
+    // En master global queremos ver a todos (incluso si no vinieron), 
+    // pero en proyectos específicos solo los que asistieron.
     if (projectFilter) {
-        // Si es una hoja de proyecto específico, solo mostramos:
-        // a) Quienes tuvieron asistencia en ese proyecto.
-        // b) (Opcional) Quienes pertenecen al proyecto por DB (si tuviéramos project_id).
-        // Por ahora filtramos por 'hasAttendanceInThisProject' para no llenar hojas con gente de otros lados.
         finalWorkersArray = finalWorkersArray.filter(w => w.hasAttendanceInThisProject);
     }
     
-    // Ordenar
     finalWorkersArray.sort((a, b) => a.name.localeCompare(b.name));
 
-    // --- DISEÑO (Igual que antes) ---
+    // --- DISEÑO DEL EXCEL ---
     const borderStyle = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
     const centerAlign = { vertical: 'middle', horizontal: 'center' };
 
@@ -142,7 +156,7 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
 
     sheet.mergeCells('A1:AC1');
     const title = sheet.getCell('A1');
-    title.value = projectFilter ? `TAREO SEMANAL - ${projectFilter.name}` : 'TAREO SEMANAL - MASTER GLOBAL';
+    title.value = projectFilter ? `TAREO SEMANAL - ${projectFilter.name}` : 'TAREO SEMANAL - MASTER GLOBAL (OBREROS)';
     title.font = { size: 14, bold: true };
     title.alignment = centerAlign;
 
@@ -151,7 +165,6 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     sheet.getCell('B8').value = 'PERIODO:';
     sheet.getCell('C8').value = `DEL ${dateList[0]} AL ${dateList[6]}`;
 
-    // Cabeceras Tabla
     const headerRowIdx = 10;
     const subHeaderRowIdx = 11;
     sheet.getCell(`A${headerRowIdx}`).value = 'ITEM';
@@ -204,8 +217,8 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     sheet.mergeCells(headerRowIdx, obsCol, subHeaderRowIdx, obsCol);
     sheet.getCell(headerRowIdx, obsCol).value='OBSERVACION';
     sheet.getCell(headerRowIdx, obsCol).border=borderStyle;
+    sheet.getColumn(obsCol).width = 40;
 
-    // DATA
     let currentRow = 12;
     const startDataRow = currentRow;
 
@@ -232,6 +245,12 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         const cT60=sheet.getCell(currentRow, totalStartCol+1); cT60.value=sum60>0?sum60:'';
         const cT100=sheet.getCell(currentRow, totalStartCol+2); cT100.value=sum100>0?sum100:'';
         
+        const cObs = sheet.getCell(currentRow, obsCol);
+        cObs.value = worker.observations.join('; ');
+        cObs.border = borderStyle;
+        cObs.font = {size:8, color: {argb: 'FF555555'}};
+        cObs.alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
+        
         ['A','B','C','D','E'].forEach(col=>{
             const c=sheet.getCell(`${col}${currentRow}`); c.border=borderStyle; c.font={size:8};
             c.alignment = col==='C'?{vertical:'middle',horizontal:'left'}:centerAlign;
@@ -240,16 +259,15 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             c.border=borderStyle;c.alignment=centerAlign;c.font={size:8,bold:true};
             c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF2CC'}};
         });
-        sheet.getCell(currentRow, obsCol).border=borderStyle;
+        
         currentRow++;
     });
 
-    // PIE DE PAGINA (Totales con separación)
     const lastDataRow = currentRow - 1;
     const rowSum = currentRow + 3;
     const rowCount = currentRow + 4;
 
-    sheet.getCell(`C${rowSum}`).value = "TOTAL HORAS";
+    sheet.getCell(`C${rowSum}`).value = "TOTAL JORNALES";
     sheet.getCell(`C${rowSum}`).alignment={horizontal:'right'}; sheet.getCell(`C${rowSum}`).font={bold:true,size:8};
     sheet.getCell(`C${rowCount}`).value = "TOTAL PERSONAL";
     sheet.getCell(`C${rowCount}`).alignment={horizontal:'right'}; sheet.getCell(`C${rowCount}`).font={bold:true,size:8};
@@ -281,11 +299,9 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     });
 };
 
-// --- FUNCIÓN PRINCIPAL EXPORTADA ---
 export const generateTareoExcel = async (attendanceData, allWorkers, allStaff, dateRange, selectedProject, projectsList = []) => {
     const workbook = new ExcelJS.Workbook();
 
-    // 1. Calcular Fechas
     let referenceDate = dateRange.start;
     if (attendanceData && attendanceData.length > 0) {
         const sortedData = [...attendanceData].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -299,28 +315,24 @@ export const generateTareoExcel = async (attendanceData, allWorkers, allStaff, d
         dateList.push(d.toISOString().split('T')[0]);
     }
 
-    // 2. Generar Hojas
     if (selectedProject) {
-        // CASO A: Proyecto Específico Seleccionado (Solo 1 hoja)
         addTareoSheet(workbook, selectedProject.name, dateList, allWorkers, allStaff, attendanceData, selectedProject);
     } else {
-        // CASO B: Vista Global (Multi-hoja)
+        // --- MASTER GLOBAL: SOLO OBREROS (CORRECCIÓN) ---
+        // 1. Filtramos las asistencias para obtener solo las que tienen 'workers' (ignora 'employees')
+        const obrerosAttendance = attendanceData ? attendanceData.filter(r => r.workers) : [];
         
-        // Hoja 1: MASTER (Todos)
-        addTareoSheet(workbook, "MASTER GLOBAL", dateList, allWorkers, allStaff, attendanceData, null);
-
-        // Hojas Siguientes: Una por cada proyecto en la lista
+        // 2. Pasamos array vacío [] para allStaff, así no se agregan a la lista de personal
+        addTareoSheet(workbook, "MASTER GLOBAL", dateList, allWorkers, [], obrerosAttendance, null);
+        
         if (projectsList && projectsList.length > 0) {
             projectsList.forEach(proj => {
-                // Filtramos si hay asistencia en este proyecto para no crear hojas vacías inútiles,
-                // O creamos todas. El usuario pidió "adentro de ese excel tenga cada proyecto".
-                // Crearemos todas.
+                // En las hojas por proyecto mantenemos a todos por si quieres ver residentes
                 addTareoSheet(workbook, proj.name, dateList, allWorkers, allStaff, attendanceData, proj);
             });
         }
     }
 
-    // 3. Exportar
     const buffer = await workbook.xlsx.writeBuffer();
     const fileName = `TAREO_SEMANAL_${dateList[0]}_${selectedProject ? selectedProject.name : 'MASTER_GLOBAL'}.xlsx`;
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

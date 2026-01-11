@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
-import { Eye, EyeOff, Loader2, HardHat, Briefcase } from 'lucide-react';
+import { Eye, EyeOff, Loader2, HardHat, Briefcase, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import logoLyk from '../../assets/images/logo-lk-full.png'; 
 import bgImage from '../../assets/images/fondo-login.jpg';
@@ -18,17 +18,35 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // --- NUEVOS ESTADOS PARA BIENVENIDA ---
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const [welcomeName, setWelcomeName] = useState('');
+
   // --- REDIRECCIÓN AUTOMÁTICA ---
   useEffect(() => {
-    if (user) {
-      console.log("🚀 Usuario detectado, redirigiendo a Dashboard...");
-      navigate('/dashboard', { replace: true });
+    // Solo redirigir automáticamente si NO estamos en proceso de login manual (loading)
+    // y NO estamos mostrando la animación de éxito (loginSuccess).
+    if (!loading && !loginSuccess) {
+      if (user) {
+        console.log("🚀 Usuario detectado, redirigiendo a Dashboard...");
+        navigate('/dashboard', { replace: true });
+      }
+      if (worker) {
+        console.log("🚀 Obrero detectado, redirigiendo a Portal...");
+        navigate('/worker/dashboard', { replace: true });
+      }
     }
-    if (worker) {
-      console.log("🚀 Obrero detectado, redirigiendo a Portal...");
-      navigate('/worker/dashboard', { replace: true });
-    }
-  }, [user, worker, navigate]);
+  }, [user, worker, navigate, loading, loginSuccess]);
+
+  // --- FUNCIÓN PARA ACTIVAR ANIMACIÓN DE ÉXITO ---
+  const triggerSuccess = (path, name) => {
+    setWelcomeName(name);
+    setLoginSuccess(true);
+    // Mantenemos loading en true para evitar parpadeos del formulario
+    setTimeout(() => {
+        navigate(path, { replace: true });
+    }, 2000); // 2 segundos para disfrutar el mensaje
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -37,12 +55,17 @@ const LoginPage = () => {
 
     try {
       if (activeTab === 'staff') {
-        await login(formData.identifier, formData.password);
+        const response = await login(formData.identifier, formData.password);
+        if (response && response.user) {
+            triggerSuccess('/dashboard', response.user.first_name || 'Colaborador');
+        }
       } else {
         const res = await loginWorker(formData.identifier, formData.password);
         if (!res.success) {
           setError(res.error);
           setLoading(false);
+        } else {
+          triggerSuccess('/worker/dashboard', res.data.first_name || 'Compañero');
         }
       }
     } catch (err) {
@@ -60,8 +83,30 @@ const LoginPage = () => {
 
   return (
     // CONTENEDOR PRINCIPAL
-    <div className={`min-h-screen flex flex-col lg:flex-row ${activeTab === 'obrero' ? 'lg:flex-row-reverse' : 'lg:flex-row'} bg-slate-50 overflow-hidden`}>
+    <div className={`min-h-screen flex flex-col lg:flex-row ${activeTab === 'obrero' ? 'lg:flex-row-reverse' : 'lg:flex-row'} bg-slate-50 overflow-hidden relative`}>
       
+      {/* === OVERLAY DE BIENVENIDA (NUEVO) === */}
+      <AnimatePresence>
+        {loginSuccess && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className={`fixed inset-0 z-50 flex flex-col items-center justify-center text-white ${activeTab === 'staff' ? 'bg-[#003366]' : 'bg-orange-600'}`}
+          >
+             <motion.div 
+               initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }}
+               className="flex flex-col items-center p-6 text-center"
+             >
+              <div className="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center mb-6 backdrop-blur-md border border-white/20 shadow-2xl">
+                 <CheckCircle size={48} className="text-white" strokeWidth={3} />
+              </div>
+              <h2 className="text-4xl font-bold mb-2 tracking-tight">¡Bienvenido!</h2>
+              <p className="text-white/80 text-xl mb-8 font-medium">Hola, {welcomeName}</p>
+              <Loader2 className="animate-spin text-white/50" size={32} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* === SECCIÓN IMAGEN (ANIMADA) === */}
       <motion.div 
         layout 
@@ -161,7 +206,7 @@ const LoginPage = () => {
           <form onSubmit={handleSubmit} className="space-y-6" autoComplete="on">
             <AnimatePresence mode='wait'>
                 <motion.div
-                    key={activeTab} // IMPORTANTE: Esto le dice a React que es un formulario nuevo
+                    key={activeTab} 
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -20 }}
@@ -174,10 +219,8 @@ const LoginPage = () => {
                         </label>
                         <input
                             id="identifier"
-                            /* CAMBIO CLAVE AQUÍ: name y autoComplete */
                             name={activeTab === 'staff' ? 'email' : 'username'} 
                             autoComplete={activeTab === 'staff' ? 'email' : 'username'}
-                            
                             type={activeTab === 'staff' ? 'email' : 'text'}
                             value={formData.identifier}
                             onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
@@ -192,10 +235,8 @@ const LoginPage = () => {
                         <div className="relative">
                             <input
                                 id="password"
-                                /* CAMBIO CLAVE AQUÍ: name y autoComplete para contraseña */
                                 name="password"
                                 autoComplete="current-password"
-
                                 type={showPassword ? 'text' : 'password'}
                                 value={formData.password}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -225,10 +266,10 @@ const LoginPage = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               type="submit"
-              disabled={loading}
+              disabled={loading || loginSuccess}
               className={`w-full py-4 rounded-2xl font-bold text-white shadow-xl transition-all flex justify-center items-center gap-2 text-base mt-2
                 ${themeColor} ${themeHover} shadow-${activeTab === 'staff' ? 'blue' : 'orange'}-900/20
-                ${loading ? 'opacity-70 cursor-not-allowed' : ''}
+                ${(loading || loginSuccess) ? 'opacity-70 cursor-not-allowed' : ''}
               `}
             >
               {loading ? <Loader2 className="animate-spin" /> : (activeTab === 'staff' ? 'Iniciar Sesión' : 'Acceder al Portal')}
