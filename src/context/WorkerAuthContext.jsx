@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { supabase } from '../services/supabase';
-import bcrypt from 'bcryptjs'; // Importante: Necesitamos bcrypt aquí también
+import bcrypt from 'bcryptjs';
 
 const WorkerAuthContext = createContext();
 
@@ -9,80 +9,108 @@ export const WorkerAuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const initWorker = () => {
-        const stored = localStorage.getItem('lyk_worker_session');
-        if (stored) {
-          try {
-            setWorker(JSON.parse(stored));
-          } catch (e) {
-            console.error("Error recuperando sesión obrero", e);
-            localStorage.removeItem('lyk_worker_session');
+    const initSession = async () => {
+      // 1. Intentamos recuperar la sesión guardada
+      const storedSession = localStorage.getItem('lyk_worker_session');
+      
+      if (storedSession) {
+        try {
+          const parsedWorker = JSON.parse(storedSession);
+          
+          // Cargamos los datos visualmente rápido
+          setWorker(parsedWorker);
+
+          // 2. REFRESCAMOS LOS DATOS DESDE LA BASE DE DATOS (SOLUCIÓN)
+          // Esto busca si le asignaron una obra nueva o cambiaron su estado
+          const { data: freshData, error } = await supabase
+            .from('workers')
+            .select('*')
+            .eq('id', parsedWorker.id)
+            .single();
+
+          if (!error && freshData) {
+             // Verificamos si sigue activo
+             if (freshData.status !== 'Activo') {
+                alert("Tu cuenta ha sido desactivada. Contacta a RRHH.");
+                logoutWorker();
+             } else {
+                // Actualizamos el estado y el localStorage con los DATOS NUEVOS
+                setWorker(freshData);
+                localStorage.setItem('lyk_worker_session', JSON.stringify(freshData));
+                console.log("Datos de obrero actualizados:", freshData.project_assigned);
+             }
+          } else if (error) {
+             // Si el usuario fue borrado de la BD, cerramos sesión
+             console.warn("Usuario no encontrado en BD, cerrando sesión.");
+             logoutWorker();
           }
+
+        } catch (error) {
+          console.error("Error al recuperar sesión de obrero:", error);
+          localStorage.removeItem('lyk_worker_session');
         }
-        setLoading(false);
+      }
+      setLoading(false);
     };
-    initWorker();
+
+    initSession();
   }, []);
 
   const loginWorker = async (documentNumber, password) => {
     try {
-      console.log("👷 Intentando login obrero:", documentNumber);
+      console.log("Intentando login obrero:", documentNumber);
 
-      // 1. Buscar usuario en Supabase
-      const { data, error } = await supabase
+      // 1. Buscar al obrero por DNI
+      const { data: workerData, error } = await supabase
         .from('workers')
         .select('*')
         .eq('document_number', documentNumber)
-        .eq('status', 'Activo')
-        .maybeSingle();
+        .single();
 
-      if (error) {
-          console.error("Error DB Obrero:", error);
-          return { success: false, error: 'Error de conexión con la base de datos.' };
+      if (error || !workerData) {
+        return { success: false, error: 'DNI no encontrado en el sistema.' };
       }
 
-      if (!data) {
-        return { success: false, error: 'DNI no encontrado o inactivo.' };
+      if (workerData.status !== 'Activo') {
+        return { success: false, error: 'Cuenta inactiva.' };
       }
 
-      // 2. Verificar Contraseña (Soporte Híbrido: Hash o Texto Plano)
-      let isValid = false;
-
-      // Caso A: La contraseña en DB es un hash de bcrypt (empieza con $2a$ o $2b$)
-      if (data.password && (data.password.startsWith('$2a$') || data.password.startsWith('$2b$'))) {
-          // Usamos compareSync para validar el hash
-          isValid = bcrypt.compareSync(password, data.password);
-      } 
-      // Caso B: La contraseña es texto plano (Legacy o migraciones antiguas)
-      else {
-          isValid = (data.password === password);
+      // 2. Verificar Contraseña
+      let isValidPassword = false;
+      
+      try {
+         // Intento 1: Comparar como hash (bcrypt)
+         isValidPassword = await bcrypt.compare(password, workerData.password);
+      } catch (e) {
+         console.warn("No es un hash válido, probando texto plano...");
       }
 
-      if (!isValid) {
-          return { success: false, error: 'Contraseña incorrecta.' };
+      // Intento 2: Comparar como texto plano (Legacy)
+      if (!isValidPassword && workerData.password === password) {
+          isValidPassword = true;
+      }
+
+      if (!isValidPassword) {
+        return { success: false, error: 'Contraseña incorrecta.' };
       }
 
       // 3. Login Exitoso
-      console.log("✅ Login obrero exitoso:", data.full_name);
+      setWorker(workerData);
+      localStorage.setItem('lyk_worker_session', JSON.stringify(workerData));
       
-      // Sanitizamos el objeto antes de guardarlo (quitamos el password por seguridad)
-      const sessionData = { ...data };
-      delete sessionData.password;
-      
-      setWorker(sessionData);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(sessionData));
-      
-      return { success: true };
+      return { success: true, data: workerData };
 
     } catch (err) {
-      console.error("Error crítico login worker:", err);
-      return { success: false, error: 'Error inesperado.' };
+      console.error("Error login worker:", err);
+      return { success: false, error: 'Error de conexión.' };
     }
   };
 
   const logoutWorker = () => {
     setWorker(null);
     localStorage.removeItem('lyk_worker_session');
+    // Opcional: Redirigir al login si fuera necesario
+    // window.location.href = '/login'; 
   };
 
   return (
