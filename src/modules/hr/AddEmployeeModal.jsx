@@ -15,8 +15,6 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
-
-// ACTUALIZADO: Roles alineados con la base de datos
 const ROLES = [
   { label: 'Staff (Básico)', value: 'staff' },
   { label: 'Administrador', value: 'admin' },
@@ -125,29 +123,44 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     try {
       const fullName = `${formData.first_name} ${formData.paternal_surname} ${formData.maternal_surname}`.trim();
       
+      // 1. Encriptar contraseña (LOGICA AUTÓNOMA)
+      let hashedPassword = null;
+      if (formData.password) {
+          const salt = await bcrypt.genSalt(10);
+          hashedPassword = await bcrypt.hash(formData.password, salt);
+      } else if (!userToEdit) {
+          const salt = await bcrypt.genSalt(10);
+          hashedPassword = await bcrypt.hash(formData.document_number, salt);
+      }
+
       const payload = {
         full_name: fullName,
-        first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
-        birth_date: formData.birth_date || null, bank_account: formData.bank_account,
-        document_type: formData.document_type, document_number: formData.document_number,
-        has_children: formData.has_children, children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
+        first_name: formData.first_name, 
+        paternal_surname: formData.paternal_surname, 
+        maternal_surname: formData.maternal_surname,
+        birth_date: formData.birth_date || null, 
+        bank_account: formData.bank_account,
+        document_type: formData.document_type, 
+        document_number: formData.document_number,
+        has_children: formData.has_children, 
+        children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
         status: userToEdit ? userToEdit.status : 'Activo',
         entry_date: formData.start_date,
         position: formData.position,
         salary: parseFloat(formData.salary || 0),
         contract_end_date: formData.contract_end_date || null,
         email: formData.email,
-        role: formData.role, // Aquí guardamos 'admin', 'staff', etc.
+        role: formData.role,
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
         cuspp: formData.cuspp 
       };
 
-      if (formData.password || !userToEdit) {
-        const plainPass = formData.password || formData.document_number;
-        payload.password = await bcrypt.hash(plainPass, await bcrypt.genSalt(10));
+      if (hashedPassword) {
+          payload.password = hashedPassword;
       }
 
+      // 3. Insertar o Actualizar en Base de Datos
       if (userToEdit) {
         const { error } = await supabase.from('employees').update(payload).eq('id', userToEdit.id);
         if (error) throw error;
@@ -156,19 +169,25 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         if (error) throw error;
       }
 
-      // Actualizar tabla Profiles (para coherencia)
+      // 4. (Opcional) Sincronizar tabla Profiles - CORREGIDO AQUÍ
       if (formData.email) {
-          const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
           const profileData = { 
             full_name: fullName, first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
             email: formData.email, role: formData.role, status: 'Activo', bank_account: formData.bank_account, birth_date: formData.birth_date || null
           };
           
-          if (existing) await supabase.from('profiles').update(profileData).eq('id', existing.id);
-          else {
-             // Nota: Si no existe el ID en auth.users, el insert en profiles podría fallar si hay FK estricta
-             // Pero lo mantenemos como estaba en tu código original.
-             await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]).catch(console.warn);
+          const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
+          
+          if (existing) {
+             await supabase.from('profiles').update(profileData).eq('id', existing.id);
+          } else {
+             // CORRECCIÓN: Usamos destructuración para manejar el error, NO .catch()
+             const { error: profileError } = await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]);
+             
+             if (profileError) {
+               console.warn("Error secundario al crear perfil:", profileError.message);
+               // No lanzamos error aquí para no bloquear el flujo principal si el empleado ya se creó
+             }
           }
       }
 
@@ -192,7 +211,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     </button>
   );
 
-  // Helper para obtener el nombre legible del rol seleccionado
   const getRoleLabel = (roleValue) => {
     const role = ROLES.find(r => r.value === roleValue);
     return role ? role.label : roleValue;
@@ -213,14 +231,12 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
 
               <div className="overflow-y-auto p-6 scrollbar-thin">
                 <form onSubmit={handleSubmit} className="space-y-5">
-                  {/* NOMBRES */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Nombres</label><input name="first_name" required value={formData.first_name} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Paterno</label><input name="paternal_surname" required value={formData.paternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Materno</label><input name="maternal_surname" required value={formData.maternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                   </div>
 
-                  {/* DOC E IDENTIDAD */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1 z-30"><label className="text-xs font-bold text-slate-500 uppercase">Documento</label>
                         <div ref={docTypeRef} className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl h-[48px]">
@@ -232,13 +248,11 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Nacimiento</label><div className="relative h-[48px]"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div></div>
                   </div>
 
-                  {/* FINANZAS */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Salario Mensual</label><div className="relative h-[48px]"><DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="number" name="salary" value={formData.salary} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="0.00"/></div></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cuenta Bancaria</label><div className="relative h-[48px]"><CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="0011-..."/></div></div>
                   </div>
 
-                  {/* FECHAS */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Fin Contrato</label><input type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
@@ -246,19 +260,15 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
 
                   <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cargo</label><div className="relative h-[48px]"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input name="position" required value={formData.position} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Ej. Administrador"/></div></div>
 
-                  {/* INFO ADICIONAL: AFP Y COMISIÓN */}
                   <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
                     
-                    {/* AFP, COMISIÓN Y CUSPP */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                      {/* SELECTOR AFP */}
                       <div className="space-y-1 relative" ref={afpRef}>
                         <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
                         <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between">{formData.afp || 'Seleccione'} <ChevronDown size={16}/></button>
                         <AnimatePresence>{showAfpMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">{AFPS.map(a => <DropdownOption key={a} label={a} isSelected={formData.afp === a} onClick={() => {setFormData({...formData, afp: a}); setShowAfpMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
                       </div>
 
-                      {/* SELECTOR COMISIÓN (SOLO SI ES AFP) */}
                       {formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen' && (
                         <div className="space-y-1 relative" ref={commissionRef}>
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
@@ -275,7 +285,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                         </div>
                       )}
 
-                      {/* CAMPO CUSPP (NUEVO) */}
                       {formData.afp && formData.afp !== 'Sin Régimen' && (
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
@@ -291,21 +300,18 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                       )}
                     </div>
 
-                    {/* HIJOS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div onClick={() => setFormData(p => ({ ...p, has_children: !p.has_children }))} className={`flex items-center justify-between px-3 rounded-xl border cursor-pointer h-[48px] ${formData.has_children ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}><span className="text-sm font-bold text-slate-700 flex gap-2"><Baby size={18}/> ¿Tiene Hijos?</span><div className={`w-10 h-5 rounded-full relative transition-colors ${formData.has_children ? 'bg-[#003366]' : 'bg-slate-300'}`}><div className={`absolute top-0.5 left-0.5 bg-white w-4 h-4 rounded-full transition-transform ${formData.has_children ? 'translate-x-5' : ''}`}></div></div></div>
                         {formData.has_children && <div><label className="text-xs font-bold text-slate-500 uppercase">N° Hijos</label><input type="number" name="children_count" value={formData.children_count} onChange={handleChange} className="w-full h-[48px] px-3 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold text-[#003366] outline-none"/></div>}
                     </div>
                   </div>
 
-                  {/* CREDENCIALES Y ROL */}
                   <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><KeyRound size={16}/> Credenciales y Permisos</h4>
                     <div className="space-y-2">
                         <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="email" name="email" required value={formData.email} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Email"/></div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder={userToEdit ? "******" : "Pass"}/></div>
+                            <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder={userToEdit ? "******" : "Pass (Opcional)"}/></div>
                             
-                            {/* SELECTOR DE ROL (ACTUALIZADO) */}
                             <div className="relative" ref={roleRef}>
                                 <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/>
                                 <button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
@@ -327,6 +333,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                                 </AnimatePresence>
                             </div>
                         </div>
+                        {!userToEdit && <p className="text-[10px] text-slate-400 pl-2">* Si no ingresa contraseña, se usará el DNI como contraseña por defecto.</p>}
                     </div>
                   </div>
 

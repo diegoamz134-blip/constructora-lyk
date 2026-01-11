@@ -5,44 +5,45 @@ import {
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
-  DollarSign, 
-  ClipboardCheck 
+  DollarSign, ClipboardCheck 
 } from 'lucide-react';
 import { Avatar } from "@heroui/react";
 import logoFull from '../../assets/images/logo-lk-full.png';
 
-// IMPORTANTE: Traemos la info del usuario desde el contexto global
-import { useAuth } from '../../context/AuthContext';
+// Importamos el hook unificado de autenticación
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
-// DEFINICIÓN DE MENÚ
+// CONFIGURACIÓN DE MENÚ (Aquí definimos qué ve cada rol)
 const navItems = [
   { 
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica']
+    // RRHH está permitido aquí
+    allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero']
   },
   { 
     path: '/proyectos', 
     icon: Building2, 
     label: 'Proyectos',
-    allowed: ['admin'] 
+    allowed: ['admin'] // RRHH NO verá esto
   },
   { 
     path: '/campo/tareo', 
     icon: ClipboardCheck, 
     label: 'Supervisión Campo',
-    allowed: ['admin', 'resident_engineer'] 
+    allowed: ['admin', 'resident_engineer'] // RRHH NO verá esto
   },
   { 
     path: '/licitaciones', 
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
-    allowed: ['admin']
+    allowed: ['admin'] // RRHH NO verá esto
   },
   { 
     label: 'Recursos Humanos', 
     icon: Users,
+    // RRHH está permitido aquí
     allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -55,7 +56,7 @@ const navItems = [
     path: '/finanzas', 
     icon: Briefcase, 
     label: 'Contabilidad',
-    allowed: ['admin'] 
+    allowed: ['admin'] // RRHH NO verá esto
   },
 ];
 
@@ -63,22 +64,24 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // 1. USAMOS EL CONTEXTO EN LUGAR DE CONSULTAR LA BD OTRA VEZ
-  const { user, role, logout } = useAuth();
+  // Obtenemos el rol desde el sistema de autenticación
+  const { currentUser, role, logout, isLoading } = useUnifiedAuth();
   
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Determinar nombre y rol para mostrar en UI
-  // Intentamos sacar el nombre de la metadata (guardada al migrar) o usamos el email
-  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuario';
-  const currentRole = role || 'staff'; // Rol por defecto si carga lento
+  // Fallback: Si no hay rol, asumimos 'staff' (el de menos permisos)
+  const currentRole = role && role !== 'undefined' ? role : 'staff';
+  
+  // Nombre para mostrar en el avatar
+  const displayName = currentUser?.user_metadata?.full_name || 
+                      currentUser?.full_name || 
+                      currentUser?.email?.split('@')[0] || 
+                      'Usuario';
 
+  // Estado de submenús
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': location.pathname.includes('/users') || 
-                        location.pathname.includes('/documentacion') || 
-                        location.pathname.includes('/reportes') ||
-                        location.pathname.includes('/planillas')
+    'Recursos Humanos': true // Abierto por defecto para facilitar
   });
 
   const toggleMenu = (label) => {
@@ -91,26 +94,30 @@ const MainLayout = () => {
 
   const handleLogout = () => {
     setIsLoggingOut(true);
-    // Usamos el logout del contexto para limpiar todo correctamente
     setTimeout(async () => { 
         await logout(); 
         navigate('/login'); 
     }, 1000);
   };
 
+  // --- CONTENIDO DEL SIDEBAR ---
   const SidebarContent = () => (
     <>
-      <div className="p-6 flex justify-center items-center h-20 border-b border-white/5">
-        <img src={logoFull} alt="L&K Logo" className="h-10 object-contain brightness-0 invert" />
+      <div className="p-6 flex justify-center items-center h-20 border-b border-white/5 bg-[#0b1120]">
+        <img src={logoFull} alt="L&K Logo" className="h-9 object-contain brightness-0 invert" />
       </div>
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
-          // FILTRO DE SEGURIDAD VISUAL
-          if (item.allowed && !item.allowed.includes(currentRole)) {
+          // LÓGICA DE FILTRADO
+          const allowedRoles = item.allowed || [];
+          
+          // Si el rol actual NO está en la lista permitida, no renderizamos nada
+          if (!allowedRoles.includes(currentRole)) {
              return null;
           }
 
+          // Renderizar Submenú (con hijos)
           if (item.children) {
             const isOpen = openMenus[item.label];
             const isActiveParent = item.children.some(child => child.path === location.pathname);
@@ -162,6 +169,7 @@ const MainLayout = () => {
             );
           }
 
+          // Renderizar Item Simple
           const isActive = location.pathname === item.path;
           return (
             <NavLink key={item.path} to={item.path} className="block relative group mb-1">
@@ -177,7 +185,9 @@ const MainLayout = () => {
         })}
       </nav>
 
+      {/* Botones inferiores */}
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
+         {/* Configuración SOLO para Admin */}
          {['admin'].includes(currentRole) && (
              <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
                 <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
@@ -191,22 +201,29 @@ const MainLayout = () => {
   );
 
   const getPageTitle = () => {
-    if (location.pathname === '/documentacion') return 'Gestión Documental';
-    if (location.pathname.includes('/licitaciones')) return 'Gestión de Licitaciones';
-    if (location.pathname.includes('/planillas')) return 'Planillas y Boletas de Pago';
-    if (location.pathname.includes('/campo/tareo')) return 'Supervisión de Campo';
-    
-    const foundItem = navItems.find(item => item.path === location.pathname);
-    if(foundItem) return foundItem.label;
-
-    const foundChild = navItems.find(i => i.children)?.children.find(c => c.path === location.pathname);
-    if(foundChild) return foundChild.label;
-
-    return 'Panel de Control';
+    // Lógica simple para el título
+    if (location.pathname.includes('/dashboard')) return 'Dashboard General';
+    if (location.pathname.includes('/users')) return 'Gestión de Personal';
+    if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
+    if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
+    return 'Constructora L&K';
   };
+
+  // Pantalla de carga mientras verificamos el rol
+  if (isLoading) {
+      return (
+        <div className="h-screen w-full flex items-center justify-center bg-[#F1F5F9]">
+          <div className="flex flex-col items-center gap-4 animate-pulse">
+              <div className="h-16 w-16 bg-slate-200 rounded-full"></div>
+              <div className="h-4 w-48 bg-slate-200 rounded"></div>
+          </div>
+        </div>
+      );
+  }
 
   return (
     <div className="flex h-screen bg-[#F1F5F9] md:p-3 font-sans overflow-hidden">
+      {/* Sidebar Escritorio */}
       <motion.aside 
         initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.4 }}
         className="hidden md:flex w-72 bg-[#0F172A] rounded-2xl flex-col shadow-xl z-20 relative overflow-hidden"
@@ -214,6 +231,7 @@ const MainLayout = () => {
         <SidebarContent />
       </motion.aside>
 
+      {/* Sidebar Móvil */}
       <AnimatePresence>
         {isMobileMenuOpen && (
           <>
@@ -236,6 +254,7 @@ const MainLayout = () => {
         )}
       </AnimatePresence>
 
+      {/* Área Principal */}
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
         <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-10">
            <div className="flex items-center gap-3">
@@ -249,7 +268,6 @@ const MainLayout = () => {
            
            <div className="flex items-center gap-2 md:gap-4">
               <button className="relative p-2 bg-slate-50 md:bg-white rounded-xl text-slate-500 hover:text-[#0F172A] shadow-sm transition-all">
-                <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white"></span>
                 <Bell size={20} />
               </button>
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
@@ -268,6 +286,7 @@ const MainLayout = () => {
         </div>
       </main>
 
+      {/* Overlay de Logout */}
       {isLoggingOut && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-[60] flex items-center justify-center">
            <div className="text-center">

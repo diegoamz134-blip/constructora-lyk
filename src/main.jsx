@@ -5,17 +5,16 @@ import { HeroUIProvider } from '@heroui/react'
 import App from './App.jsx'
 import './index.css'
 
-// Providers
-// Verifica que estas rutas sean correctas según tus carpetas
+// Importaciones de Contexto
 import { WorkerAuthProvider } from './context/WorkerAuthContext';
 import { CompanyProvider } from './context/CompanyContext';
-import { AuthProvider } from './context/AuthContext'; // <--- ESTE ES EL QUE FALTA O FALLA
+import { AuthProvider } from './context/AuthContext'; // <--- ESTO DEBE ESTAR ASÍ
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
       <HeroUIProvider>
-        {/* 1. AuthProvider debe envolver todo lo demás */}
+        {/* EL ORDEN ES IMPORTANTE: AuthProvider primero */}
         <AuthProvider>
           <WorkerAuthProvider>
             <CompanyProvider>

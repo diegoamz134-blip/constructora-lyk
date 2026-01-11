@@ -1,113 +1,101 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { supabase } from '../services/supabase';
+import bcrypt from 'bcryptjs';
 
-const AuthContext = createContext();
+// 1. Creamos el contexto con un valor por defecto para evitar el error "undefined"
+const AuthContext = createContext({
+  user: null,
+  role: null,
+  login: async () => {},
+  logout: async () => {},
+  loading: false
+});
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Función segura para buscar rol
-  const fetchUserRole = async (email) => {
-    if (!email) return null;
-    try {
-      const { data: emp } = await supabase.from('employees').select('role').eq('email', email).maybeSingle();
-      if (emp) return emp.role;
-      const { data: wor } = await supabase.from('workers').select('role').eq('email', email).maybeSingle();
-      if (wor) return wor.role;
-    } catch (e) {
-      console.error("Error buscando rol:", e);
-    }
-    return null;
-  };
-
   useEffect(() => {
-    let mounted = true;
-
-    // Timeout de seguridad para evitar pantalla blanca eterna
-    const forceStopLoading = setTimeout(() => {
-      if (mounted && loading) {
-        setLoading(false);
-      }
-    }, 2000);
-
-    const initSession = async () => {
+    // Al cargar, verificamos si hay sesión en localStorage (Login Autónomo)
+    const initSession = () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-            if (error.message.includes("invalid_grant")) await supabase.auth.signOut();
-            throw error;
+        const storedSession = localStorage.getItem('lyk_session');
+        if (storedSession) {
+          const parsedSession = JSON.parse(storedSession);
+          if (parsedSession.user && parsedSession.role) {
+            setUser(parsedSession.user);
+            setRole(parsedSession.role);
+          }
         }
-
-        if (session?.user && mounted) {
-          setUser(session.user);
-          const r = await fetchUserRole(session.user.email);
-          if (mounted) setRole(r);
-        }
-      } catch (err) {
-        console.log("Sesión no activa o error de red.");
+      } catch (error) {
+        console.error("Error recuperando sesión:", error);
+        localStorage.removeItem('lyk_session');
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
     };
 
     initSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-      
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-         setUser(session?.user ?? null);
-         if (session?.user) {
-             const r = await fetchUserRole(session.user.email);
-             if (mounted) setRole(r);
-         }
-         setLoading(false);
-      } else if (event === 'SIGNED_OUT') {
-         // Limpieza redundante por seguridad
-         setUser(null);
-         setRole(null);
-         setLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      clearTimeout(forceStopLoading);
-      subscription.unsubscribe();
-    };
   }, []);
 
-  const login = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    if (data.user) {
-       const r = await fetchUserRole(data.user.email);
-       setRole(r);
+  const login = async (identifier, password) => {
+    console.log("Intentando login autónomo para:", identifier);
+    
+    // 1. Buscamos en 'employees'
+    let { data: emp, error } = await supabase
+      .from('employees')
+      .select('*')
+      .or(`email.eq.${identifier},document_number.eq.${identifier}`)
+      .maybeSingle();
+
+    if (error) throw new Error('Error de conexión al buscar usuario.');
+
+    // 2. Si no es empleado, buscamos en 'workers'
+    let isWorker = false;
+    if (!emp) {
+        const { data: wor } = await supabase
+            .from('workers')
+            .select('*')
+            .or(`document_number.eq.${identifier}`)
+            .maybeSingle();
+        
+        if (wor) {
+            emp = wor;
+            isWorker = true;
+        }
     }
-    return data;
+
+    if (!emp) throw new Error('Usuario no encontrado.');
+
+    // 3. Verificamos contraseña
+    if (!emp.password) {
+        // Backdoor temporal: DNI como contraseña si no tiene una establecida
+        if (password !== emp.document_number) {
+           throw new Error('Contraseña no establecida. Intente con su DNI.');
+        }
+    } else {
+        const isValid = await bcrypt.compare(password, emp.password);
+        if (!isValid) throw new Error('Contraseña incorrecta.');
+    }
+
+    // 4. Guardar sesión
+    const userRole = isWorker ? 'worker' : (emp.role || 'staff');
+    const sessionData = { user: emp, role: userRole };
+
+    setUser(sessionData.user);
+    setRole(sessionData.role);
+    localStorage.setItem('lyk_session', JSON.stringify(sessionData));
+
+    return { user: sessionData.user, role: sessionData.role };
   };
 
-  // --- LOGOUT MEJORADO (SALIDA INMEDIATA) ---
   const logout = async () => {
-    try {
-        // 1. ¡PRIMERO LIMPIAMOS LA UI! (Salida visual instantánea)
-        setUser(null);
-        setRole(null);
-        setLoading(false);
-
-        // 2. Limpiamos almacenamiento local para evitar conflictos al volver
-        localStorage.clear(); 
-
-        // 3. Le avisamos a Supabase (ya no nos importa si tarda)
-        await supabase.auth.signOut();
-        
-    } catch (e) {
-        console.warn("Error no crítico al cerrar sesión:", e);
-        // Incluso si falla, el usuario ya está fuera visualmente.
-    }
+    setUser(null);
+    setRole(null);
+    localStorage.removeItem('lyk_session');
+    // Limpieza opcional de supabase auth por si acaso
+    await supabase.auth.signOut().catch(() => {}); 
   };
 
   return (
@@ -117,4 +105,14 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+// Hook personalizado
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
+  }
+  return context;
+};
+
+// Exportación por defecto para asegurar compatibilidad
+export default AuthProvider;
