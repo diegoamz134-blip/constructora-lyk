@@ -1,130 +1,130 @@
-import React, { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, MapPin, LogOut, Loader2, User } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useWorkerAuth } from '../../context/WorkerAuthContext';
-import logoFull from '../../assets/images/logo-lk-full.png';
+import React, { useState } from 'react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { 
+  LayoutDashboard, 
+  CalendarCheck, 
+  ClipboardList, 
+  HardHat, 
+  UserCircle, 
+  LogOut, 
+  Building2
+} from 'lucide-react';
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
 const WorkerLayout = () => {
+  const { logout } = useUnifiedAuth();
   const navigate = useNavigate();
-  const { worker, logoutWorker, loading } = useWorkerAuth();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const location = useLocation();
 
-  useEffect(() => {
-    if (!loading && !worker) {
-      navigate('/', { replace: true });
-    }
-  }, [worker, loading, navigate]);
+  // Configuración del Menú
+  const navItems = [
+    { path: '/worker/dashboard', label: 'Inicio', icon: LayoutDashboard },
+    { path: '/worker/asistencia', label: 'Asistencia', icon: CalendarCheck },
+    { path: '/worker/bitacora', label: 'Bitácora', icon: ClipboardList },
+    { path: '/worker/proyecto', label: 'Mi Obra', icon: Building2 },
+    { path: '/worker/profile', label: 'Perfil', icon: UserCircle },
+  ];
 
   const handleLogout = () => {
-    // Vibración suave en móviles si es compatible
-    if (navigator.vibrate) navigator.vibrate(50);
-    
-    setIsLoggingOut(true);
-    setTimeout(() => {
-      logoutWorker();
-      navigate('/', { replace: true });
-    }, 1500); 
+    logout();
+    navigate('/login');
   };
 
-  if (loading) return <div className="h-[100dvh] flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-[#003366]"/></div>;
-  if (!worker) return null;
-
   return (
-    // Usamos 100dvh para mejor soporte en móviles (evita problemas con la barra de URL)
-    <div className="flex flex-col h-[100dvh] bg-[#F8FAFC] font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden border-x border-slate-200">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       
-      {/* --- OVERLAY DE DESPEDIDA (ANIMADO) --- */}
-      <AnimatePresence>
-        {isLoggingOut && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#003366] text-white"
-          >
-             <motion.div 
-               initial={{ scale: 0.8 }} animate={{ scale: 1 }} 
-               className="flex flex-col items-center p-6 text-center"
-             >
-              <img src={logoFull} alt="Logo" className="h-28 brightness-0 invert mb-8 opacity-90 drop-shadow-lg" />
-              <h2 className="text-3xl font-bold mb-2 tracking-tight">¡Hasta pronto!</h2>
-              <p className="text-blue-200 text-sm mb-8">Cerrando sesión segura...</p>
-              <Loader2 className="animate-spin text-[#f0c419]" size={40} />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* === 1. SIDEBAR (Solo visible en Computadora) === */}
+      <aside className="hidden md:flex flex-col w-64 bg-[#003366] text-white min-h-screen fixed left-0 top-0 z-50">
+        <div className="p-6 flex items-center gap-3 border-b border-blue-900">
+          <div className="bg-white/10 p-2 rounded-lg">
+            <HardHat size={24} className="text-[#f0c419]" />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg leading-tight">Constructora LYK</h1>
+            <p className="text-xs text-slate-300">Portal de Obreros</p>
+          </div>
+        </div>
 
-      {/* --- ÁREA PRINCIPAL --- */}
-      {/* pb-32 asegura que el contenido final no quede tapado por la barra flotante */}
-      <main className="flex-1 overflow-y-auto pb-32 scrollbar-hide bg-gradient-to-b from-slate-50 to-[#eff6ff]">
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          {navItems.map((item) => {
+            // SOLUCIÓN DEL ERROR: Asignamos el ícono a una variable con Mayúscula
+            const Icon = item.icon; 
+            
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
+                    isActive
+                      ? 'bg-[#f0c419] text-[#003366] font-bold shadow-lg'
+                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                  }`
+                }
+              >
+                {/* Renderizamos el ícono como componente XML, NO como variable */}
+                <Icon size={20} />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+
+        <div className="p-4 border-t border-blue-900">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-200 hover:bg-red-900/30 hover:text-red-100 transition-all text-sm font-bold"
+          >
+            <LogOut size={20} />
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* === 2. HEADER MOVIL (Solo visible en Celular) === */}
+      <header className="md:hidden bg-[#003366] text-white p-4 sticky top-0 z-40 shadow-md flex justify-between items-center">
+        <div className="flex items-center gap-2">
+           <HardHat size={24} className="text-[#f0c419]" />
+           <span className="font-bold text-lg">LYK Obreros</span>
+        </div>
+        <button onClick={handleLogout} className="p-2 text-slate-300">
+           <LogOut size={20} />
+        </button>
+      </header>
+
+      {/* === 3. CONTENIDO PRINCIPAL === */}
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pb-24 md:pb-8 animate-fade-in">
         <Outlet />
       </main>
 
-      {/* --- BARRA DE NAVEGACIÓN (PREMIUM) --- */}
-      <div className="absolute bottom-0 w-full max-w-md z-50">
-        
-        {/* Contenedor con efecto Glassmorphism */}
-        <div className="bg-white/90 backdrop-blur-lg border-t border-slate-200/60 px-8 py-4 flex justify-between items-end rounded-t-[2.5rem] shadow-[0_-10px_40px_-15px_rgba(0,51,102,0.15)]">
+      {/* === 4. MENÚ INFERIOR (Solo visible en Celular) === */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 flex justify-around items-center px-2 py-2 pb-safe">
+        {navItems.map((item) => {
+          // SOLUCIÓN DEL ERROR AQUÍ TAMBIÉN
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
           
-          {/* 1. BOTÓN INICIO */}
-          <NavLink 
-              to="/worker/dashboard" 
-              className={({ isActive }) => 
-                  `group flex flex-col items-center gap-1.5 transition-all duration-300`
-              }
-          >
-            {({ isActive }) => (
-              <>
-                <div className={`p-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-blue-50 text-[#003366]' : 'text-slate-400 group-hover:text-slate-600'}`}>
-                   <Home size={26} strokeWidth={isActive ? 2.5 : 2} />
-                </div>
-                <span className={`text-[10px] font-bold transition-all ${isActive ? 'text-[#003366] opacity-100' : 'text-slate-300 opacity-0 group-hover:opacity-100'}`}>
-                  Inicio
-                </span>
-              </>
-            )}
-          </NavLink>
-
-          {/* 2. BOTÓN CENTRAL (ASISTENCIA) - FLOTANTE */}
-          <div className="absolute left-1/2 -translate-x-1/2 -top-10">
-            <NavLink 
-              to="/worker/asistencia" 
-              className={({ isActive }) => 
-                  `relative w-20 h-20 rounded-full flex items-center justify-center text-white shadow-2xl shadow-blue-900/30 
-                   border-[6px] border-[#F8FAFC] transform transition-all duration-300 active:scale-90
-                   ${isActive ? 'bg-[#f0c419] text-[#003366] scale-110' : 'bg-[#003366] hover:bg-[#004488]'}`
-              }
+          return (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all w-16 ${
+                isActive ? 'text-[#003366]' : 'text-slate-400'
+              }`}
             >
-              <MapPin size={32} strokeWidth={2.5} />
-              {/* Efecto de pulso si está activo */}
-              {({ isActive }) => isActive && (
-                 <span className="absolute inset-0 rounded-full bg-[#f0c419] opacity-30 animate-ping"></span>
-              )}
+              <div className={`p-1.5 rounded-full mb-1 transition-all ${
+                 isActive ? 'bg-blue-50 transform -translate-y-1' : ''
+              }`}>
+                 <Icon size={isActive ? 22 : 20} strokeWidth={isActive ? 2.5 : 2} />
+              </div>
+              <span className={`text-[10px] font-bold ${isActive ? 'scale-110' : ''}`}>
+                {item.label}
+              </span>
             </NavLink>
-            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-[#003366] opacity-80">
-              Asistencia
-            </span>
-          </div>
+          );
+        })}
+      </nav>
 
-          {/* 3. BOTÓN SALIR (ROJO AL INTERACTUAR) */}
-          <button 
-              onClick={handleLogout} 
-              className="group flex flex-col items-center gap-1.5 transition-all duration-300"
-          >
-            {/* El contenedor cambia a rojo suave al pasar el mouse/tocar */}
-            <div className="p-2 rounded-xl transition-colors duration-300 group-hover:bg-red-50">
-              <LogOut 
-                size={26} 
-                className="text-slate-400 transition-colors duration-300 group-hover:text-red-500" 
-              />
-            </div>
-            <span className="text-[10px] font-bold text-slate-300 transition-opacity duration-300 opacity-0 group-hover:opacity-100 group-hover:text-red-400">
-              Salir
-            </span>
-          </button>
-
-        </div>
-      </div>
     </div>
   );
 };
