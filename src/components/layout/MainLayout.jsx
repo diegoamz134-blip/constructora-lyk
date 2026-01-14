@@ -7,43 +7,40 @@ import {
   FileSpreadsheet, Menu, X, 
   DollarSign, ClipboardCheck 
 } from 'lucide-react';
-import { Avatar } from "@heroui/react";
+// Eliminamos la dependencia de Avatar de heroui para tener control total con img
 import logoFull from '../../assets/images/logo-lk-full.png';
 
-// Importamos el hook unificado de autenticación
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
-// CONFIGURACIÓN DE MENÚ (Aquí definimos qué ve cada rol)
+// CONFIGURACIÓN DE MENÚ
 const navItems = [
   { 
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    // RRHH está permitido aquí
     allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero']
   },
   { 
     path: '/proyectos', 
     icon: Building2, 
     label: 'Proyectos',
-    allowed: ['admin'] // RRHH NO verá esto
+    allowed: ['admin']
   },
   { 
     path: '/campo/tareo', 
     icon: ClipboardCheck, 
     label: 'Supervisión Campo',
-    allowed: ['admin', 'resident_engineer'] // RRHH NO verá esto
+    allowed: ['admin', 'resident_engineer']
   },
   { 
     path: '/licitaciones', 
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
-    allowed: ['admin'] // RRHH NO verá esto
+    allowed: ['admin']
   },
   { 
     label: 'Recursos Humanos', 
     icon: Users,
-    // RRHH está permitido aquí
     allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -56,7 +53,7 @@ const navItems = [
     path: '/finanzas', 
     icon: Briefcase, 
     label: 'Contabilidad',
-    allowed: ['admin'] // RRHH NO verá esto
+    allowed: ['admin']
   },
 ];
 
@@ -64,24 +61,32 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Obtenemos el rol desde el sistema de autenticación
   const { currentUser, role, logout, isLoading } = useUnifiedAuth();
   
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Fallback: Si no hay rol, asumimos 'staff' (el de menos permisos)
   const currentRole = role && role !== 'undefined' ? role : 'staff';
   
-  // Nombre para mostrar en el avatar
+  // Datos del Usuario
   const displayName = currentUser?.user_metadata?.full_name || 
                       currentUser?.full_name || 
                       currentUser?.email?.split('@')[0] || 
                       'Usuario';
+  
+  // URL de la foto (prioridad a photo_url de la BD, luego avatar_url de Google/Supabase)
+  const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
 
-  // Estado de submenús
+  // Iniciales para el fallback
+  const initials = displayName
+    .split(' ')
+    .map(n => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': true // Abierto por defecto para facilitar
+    'Recursos Humanos': true 
   });
 
   const toggleMenu = (label) => {
@@ -100,7 +105,6 @@ const MainLayout = () => {
     }, 1000);
   };
 
-  // --- CONTENIDO DEL SIDEBAR ---
   const SidebarContent = () => (
     <>
       <div className="p-6 flex justify-center items-center h-20 border-b border-white/5 bg-[#0b1120]">
@@ -109,15 +113,9 @@ const MainLayout = () => {
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
-          // LÓGICA DE FILTRADO
           const allowedRoles = item.allowed || [];
-          
-          // Si el rol actual NO está en la lista permitida, no renderizamos nada
-          if (!allowedRoles.includes(currentRole)) {
-             return null;
-          }
+          if (!allowedRoles.includes(currentRole)) return null;
 
-          // Renderizar Submenú (con hijos)
           if (item.children) {
             const isOpen = openMenus[item.label];
             const isActiveParent = item.children.some(child => child.path === location.pathname);
@@ -169,7 +167,6 @@ const MainLayout = () => {
             );
           }
 
-          // Renderizar Item Simple
           const isActive = location.pathname === item.path;
           return (
             <NavLink key={item.path} to={item.path} className="block relative group mb-1">
@@ -185,9 +182,7 @@ const MainLayout = () => {
         })}
       </nav>
 
-      {/* Botones inferiores */}
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         {/* Configuración SOLO para Admin */}
          {['admin'].includes(currentRole) && (
              <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
                 <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
@@ -201,7 +196,6 @@ const MainLayout = () => {
   );
 
   const getPageTitle = () => {
-    // Lógica simple para el título
     if (location.pathname.includes('/dashboard')) return 'Dashboard General';
     if (location.pathname.includes('/users')) return 'Gestión de Personal';
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
@@ -209,7 +203,6 @@ const MainLayout = () => {
     return 'Constructora L&K';
   };
 
-  // Pantalla de carga mientras verificamos el rol
   if (isLoading) {
       return (
         <div className="h-screen w-full flex items-center justify-center bg-[#F1F5F9]">
@@ -223,7 +216,6 @@ const MainLayout = () => {
 
   return (
     <div className="flex h-screen bg-[#F1F5F9] md:p-3 font-sans overflow-hidden">
-      {/* Sidebar Escritorio */}
       <motion.aside 
         initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.4 }}
         className="hidden md:flex w-72 bg-[#0F172A] rounded-2xl flex-col shadow-xl z-20 relative overflow-hidden"
@@ -231,7 +223,6 @@ const MainLayout = () => {
         <SidebarContent />
       </motion.aside>
 
-      {/* Sidebar Móvil */}
       <AnimatePresence>
         {isMobileMenuOpen && (
           <>
@@ -254,7 +245,6 @@ const MainLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* Área Principal */}
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
         <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-10">
            <div className="flex items-center gap-3">
@@ -271,7 +261,21 @@ const MainLayout = () => {
                 <Bell size={20} />
               </button>
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
-                <Avatar name={displayName} className="w-8 h-8 md:w-9 md:h-9 ring-2 ring-transparent group-hover:ring-[#0F172A]/10 transition-all" />
+                
+                {/* --- SECCIÓN DE FOTO CORREGIDA --- */}
+                <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
+                  {displayPhoto ? (
+                    <img 
+                      src={displayPhoto} 
+                      alt="Perfil" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }} // Si falla la imagen, no muestra icono roto
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-slate-500">{initials}</span>
+                  )}
+                </div>
+
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
                   <p className="text-[11px] text-slate-400 font-medium capitalize">{currentRole.replace('_', ' ')}</p>
@@ -286,7 +290,6 @@ const MainLayout = () => {
         </div>
       </main>
 
-      {/* Overlay de Logout */}
       {isLoggingOut && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-[60] flex items-center justify-center">
            <div className="text-center">

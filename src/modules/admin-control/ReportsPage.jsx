@@ -96,6 +96,7 @@ const ReportsPage = () => {
         `, { count: 'exact' })
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
+        .eq('validation_status', 'VALIDADO') // <--- ACTUALIZADO: FILTRO DE VALIDACIÓN AGREGADO
         .order('date', { ascending: true })
         .order('check_in_time', { ascending: true });
 

@@ -68,13 +68,16 @@ export const getPaginatedActivePersonnel = async (table, page, pageSize) => {
 
 /**
  * Obtiene los registros de asistencia dentro de un rango de fechas.
+ * ACTUALIZADO: Solo trae asistencias con validation_status = 'VALIDADO'
  */
 export const getAttendanceByRange = async (start, end) => {
   const { data, error } = await supabase
     .from('attendance')
     .select('*')
     .gte('date', start)
-    .lte('date', end);
+    .lte('date', end)
+    .eq('validation_status', 'VALIDADO'); // <--- FILTRO AGREGADO
+
   if (error) throw error;
   return data || [];
 };

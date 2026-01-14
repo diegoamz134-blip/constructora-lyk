@@ -4,9 +4,12 @@ import {
   Calendar, Save, MapPin, CheckCircle, XCircle, 
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
   Building2, ArrowLeft, Image as ImageIcon,
-  ExternalLink, Eye, X, ChevronDown, Coffee
+  ExternalLink, Eye, X, ChevronDown, Coffee, Send 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// IMPORTAMOS EL MODAL PERSONALIZADO
+import StatusModal from '../../components/common/StatusModal';
 
 const FieldAttendancePage = () => {
   // Estados
@@ -21,8 +24,18 @@ const FieldAttendancePage = () => {
   // Estado para el Modal de Fotos
   const [photoModal, setPhotoModal] = useState({ isOpen: false, worker: null });
   
-  // NUEVO: Estado para el Modal de Confirmación
+  // Estado para Modal de Confirmación (Pregunta antes de guardar)
+  const [confirmActionType, setConfirmActionType] = useState(null); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // NUEVO: Estado para el StatusModal (Feedback de Éxito/Error)
+  const [statusModal, setStatusModal] = useState({ 
+    isOpen: false, 
+    type: 'success', 
+    title: '', 
+    message: '',
+    onCloseAction: null // Acción a ejecutar al cerrar (ej. recargar)
+  });
 
   // 1. Cargar Proyectos Activos
   useEffect(() => {
@@ -100,7 +113,13 @@ const FieldAttendancePage = () => {
         setWorkers(mergedList || []);
       } catch (err) {
         console.error("Error cargando personal:", err);
-        alert("Error al cargar la cuadrilla.");
+        // Usamos el modal de error si falla la carga
+        setStatusModal({
+            isOpen: true,
+            type: 'error',
+            title: 'Error de Carga',
+            message: 'No se pudo cargar la lista de trabajadores. Revisa tu conexión.'
+        });
       } finally {
         setLoading(false);
       }
@@ -127,20 +146,24 @@ const FieldAttendancePage = () => {
     setWorkers(newWorkers);
   };
 
-  // --- GUARDADO (NUEVA LÓGICA CON MODAL) ---
+  // --- GUARDADO ---
   
-  // 1. Botón "Validar" solo abre el modal
-  const handleSaveClick = () => {
+  // 1. Click en botones abre el modal configurando la acción
+  const handleSaveClick = (type) => {
     if (!selectedProject || workers.length === 0) return;
+    setConfirmActionType(type); // 'BORRADOR' o 'VALIDADO'
     setShowConfirmModal(true);
   };
 
   // 2. Ejecución real del guardado
   const executeSaveTareo = async () => {
-    setShowConfirmModal(false); // Cerrar modal
+    setShowConfirmModal(false); // Cerrar modal de pregunta
     setSaving(true);
     
     try {
+      // Definimos el estado según el botón presionado
+      const statusToSave = confirmActionType === 'VALIDADO' ? 'VALIDADO' : 'BORRADOR';
+
       const recordsToUpsert = workers.map(w => {
         let finalCheckIn = w.checkInTime;
         let finalCheckOut = w.checkOutTime;
@@ -166,7 +189,7 @@ const FieldAttendancePage = () => {
           check_out_time: finalCheckOut,
           check_in_location: w.checkInLocation || 'Validado por Residente',
           observation: w.observation || '',
-          validation_status: 'VALIDADO' 
+          validation_status: statusToSave 
         };
       });
 
@@ -176,28 +199,37 @@ const FieldAttendancePage = () => {
       
       if (error) throw error;
 
-      alert('✅ Asistencia validada correctamente.');
+      // --- AQUÍ REEMPLAZAMOS EL ALERT POR EL STATUS MODAL ---
+      const isValidation = statusToSave === 'VALIDADO';
       
-      // Recargar IDs para evitar duplicados
-      const { data: refreshedData } = await supabase
-          .from('attendance')
-          .select('id, worker_id')
-          .eq('project_name', selectedProject.name)
-          .eq('date', date);
-
-      if (refreshedData) {
-          setWorkers(prev => prev.map(w => {
-              const match = refreshedData.find(r => r.worker_id === w.id);
-              return match ? { ...w, attendanceId: match.id, saved: true } : w;
-          }));
-      }
+      setStatusModal({
+        isOpen: true,
+        type: 'success',
+        title: isValidation ? '¡Enviado a RRHH!' : 'Borrador Guardado',
+        message: isValidation 
+          ? `Se ha enviado la asistencia de ${workers.length} trabajadores a Recursos Humanos correctamente.`
+          : 'El avance se ha guardado localmente. Recuerda enviar la validación final al terminar el día.',
+        onCloseAction: () => window.location.reload() // Recargar al cerrar el modal
+      });
 
     } catch (e) {
       console.error(e);
-      alert('Error: ' + e.message);
+      setStatusModal({
+        isOpen: true,
+        type: 'error',
+        title: 'Error al Guardar',
+        message: e.message || 'No se pudo guardar la asistencia. Inténtalo de nuevo.'
+      });
     } finally {
       setSaving(false);
     }
+  };
+
+  // Helper para cerrar el StatusModal y ejecutar acción si existe
+  const handleCloseStatusModal = () => {
+      const action = statusModal.onCloseAction;
+      setStatusModal({ ...statusModal, isOpen: false });
+      if (action) action();
   };
 
   // --- HELPERS ---
@@ -455,15 +487,26 @@ const FieldAttendancePage = () => {
           </table>
         </div>
 
-        {/* FOOTER - Botón para VALIDAR */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+        {/* FOOTER - ACCIONES DE GUARDADO */}
+        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-4">
+            {/* BOTÓN 1: GUARDAR BORRADOR */}
             <button 
-              onClick={handleSaveClick}
+              onClick={() => handleSaveClick('BORRADOR')}
+              disabled={saving || filteredWorkers.length === 0}
+              className="bg-white text-slate-600 border border-slate-300 px-6 py-3 rounded-xl font-bold hover:bg-slate-100 transition flex items-center gap-2 disabled:opacity-70 active:scale-95 shadow-sm"
+            >
+              {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
+              <span>Guardar Borrador</span>
+            </button>
+
+            {/* BOTÓN 2: ENVIAR A RRHH */}
+            <button 
+              onClick={() => handleSaveClick('VALIDADO')}
               disabled={saving || filteredWorkers.length === 0}
               className="bg-[#003366] text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-900 transition flex items-center gap-2 disabled:opacity-70 active:scale-95"
             >
-              {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
-              {saving ? 'Validando...' : 'VALIDAR ASISTENCIA'}
+              <Send size={20}/>
+              <span>ENVIAR A RRHH</span>
             </button>
         </div>
       </div>
@@ -535,7 +578,7 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* --- NUEVO MODAL DE CONFIRMACIÓN (ESTILO PROFESIONAL) --- */}
+      {/* --- MODAL DE CONFIRMACIÓN (PREGUNTA) --- */}
       <AnimatePresence>
         {showConfirmModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -550,16 +593,20 @@ const FieldAttendancePage = () => {
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm relative z-10 overflow-hidden text-center p-8"
             >
-              <div className="mx-auto w-20 h-20 bg-blue-50 text-[#003366] rounded-full flex items-center justify-center mb-6">
-                <ClipboardCheck size={40} strokeWidth={1.5} />
+              <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 
+                ${confirmActionType === 'VALIDADO' ? 'bg-blue-50 text-[#003366]' : 'bg-slate-100 text-slate-500'}`}>
+                {confirmActionType === 'VALIDADO' ? <ClipboardCheck size={40} strokeWidth={1.5} /> : <Save size={40} strokeWidth={1.5} />}
               </div>
               
               <h3 className="text-2xl font-bold text-slate-800 mb-2">
-                ¿Validar Asistencia?
+                {confirmActionType === 'VALIDADO' ? '¿Enviar a Recursos Humanos?' : '¿Guardar Borrador?'}
               </h3>
               
               <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                Estás a punto de validar el tareo del <strong>{date}</strong> para <strong>{workers.length} trabajadores</strong>. Esta acción sincronizará los datos con RRHH.
+                {confirmActionType === 'VALIDADO' 
+                  ? <span>Estás a punto de <strong>VALIDAR Y ENVIAR</strong> el tareo del {date}. RRHH podrá ver estos datos inmediatamente para el cálculo de planilla.</span>
+                  : <span>Se guardará el avance actual de <strong>{workers.length} trabajadores</strong>. RRHH NO verá estos datos hasta que decidas enviarlos.</span>
+                }
               </p>
 
               <div className="flex gap-3">
@@ -571,15 +618,27 @@ const FieldAttendancePage = () => {
                 </button>
                 <button 
                   onClick={executeSaveTareo}
-                  className="flex-1 py-3.5 bg-[#003366] text-white font-bold text-sm rounded-xl hover:bg-blue-900 shadow-lg shadow-blue-900/30 transition-all active:scale-95"
+                  className={`flex-1 py-3.5 text-white font-bold text-sm rounded-xl shadow-lg transition-all active:scale-95
+                    ${confirmActionType === 'VALIDADO' 
+                      ? 'bg-[#003366] hover:bg-blue-900 shadow-blue-900/30' 
+                      : 'bg-slate-600 hover:bg-slate-700 shadow-slate-600/30'}`}
                 >
-                  Confirmar
+                  {confirmActionType === 'VALIDADO' ? 'Confirmar Envío' : 'Guardar'}
                 </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* --- NUEVO: STATUS MODAL (FEEDBACK) --- */}
+      <StatusModal 
+        isOpen={statusModal.isOpen}
+        onClose={handleCloseStatusModal}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+      />
 
     </div>
   );

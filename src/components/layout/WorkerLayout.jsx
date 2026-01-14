@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -12,44 +12,120 @@ import {
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
 const WorkerLayout = () => {
-  const { logout } = useUnifiedAuth();
+  // Extraemos currentUser y loading
+  const { logout, currentUser, isLoading } = useUnifiedAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Datos del obrero
+  const displayName = currentUser?.full_name || 'Obrero';
+  const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
+  const displayRole = currentUser?.category || 'Construcción Civil';
+  
+  // Normalizamos la categoría (todo a minúsculas para comparar fácil)
+  const userCategory = (currentUser?.category || '').toLowerCase().trim();
+
+  // DEFINIMOS QUIÉN TIENE "CONTROL TOTAL"
+  // Si es 'operario' O 'capataz', tiene permisos VIP.
+  const hasFullAccess = userCategory === 'operario' || userCategory === 'capataz';
+
   // Configuración del Menú
   const navItems = [
-    { path: '/worker/dashboard', label: 'Inicio', icon: LayoutDashboard },
-    { path: '/worker/asistencia', label: 'Asistencia', icon: CalendarCheck },
-    { path: '/worker/bitacora', label: 'Bitácora', icon: ClipboardList },
-    { path: '/worker/proyecto', label: 'Mi Obra', icon: Building2 },
-    { path: '/worker/profile', label: 'Perfil', icon: UserCircle },
+    { 
+      path: '/worker/dashboard', 
+      label: 'Inicio', 
+      icon: LayoutDashboard,
+      restricted: false // <--- CAMBIO: AHORA VISIBLE PARA TODOS
+    },
+    { 
+      path: '/worker/asistencia', 
+      label: 'Asistencia', 
+      icon: CalendarCheck, 
+      restricted: false // VISIBLE PARA TODOS
+    },
+    { 
+      path: '/worker/bitacora', 
+      label: 'Bitácora', 
+      icon: ClipboardList, 
+      restricted: true // SOLO OPERARIO
+    },
+    { 
+      path: '/worker/proyecto', 
+      label: 'Mi Obra', 
+      icon: Building2, 
+      restricted: true // SOLO OPERARIO
+    },
+    { 
+      path: '/worker/profile', 
+      label: 'Perfil', 
+      icon: UserCircle, 
+      restricted: false // VISIBLE PARA TODOS
+    },
   ];
+
+  // Filtramos los items según el rol
+  const visibleNavItems = navItems.filter(item => {
+    if (item.restricted) {
+      // Si es restringido, solo lo mostramos si tiene Full Access
+      return hasFullAccess;
+    }
+    return true;
+  });
+
+  // --- PROTECCIÓN DE RUTAS (SEGURIDAD) ---
+  useEffect(() => {
+    if (!isLoading && currentUser) {
+      // Si el usuario NO tiene acceso total...
+      if (!hasFullAccess) {
+        // ... y está intentando entrar a una ruta PROHIBIDA
+        // NOTA: Ya no incluimos dashboard aquí, porque ahora sí pueden verlo.
+        const restrictedPaths = ['/worker/bitacora', '/worker/proyecto'];
+        const currentPath = location.pathname;
+
+        // Si intenta entrar a bitácora u obra a la fuerza:
+        if (restrictedPaths.some(path => currentPath.includes(path))) {
+           navigate('/worker/asistencia'); // Lo mandamos a asistencia
+        }
+      }
+    }
+  }, [isLoading, currentUser, hasFullAccess, location.pathname, navigate]);
+
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
+  if (isLoading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center">Cargando...</div>;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       
       {/* === 1. SIDEBAR (Solo visible en Computadora) === */}
       <aside className="hidden md:flex flex-col w-64 bg-[#003366] text-white min-h-screen fixed left-0 top-0 z-50">
-        <div className="p-6 flex items-center gap-3 border-b border-blue-900">
-          <div className="bg-white/10 p-2 rounded-lg">
-            <HardHat size={24} className="text-[#f0c419]" />
+        
+        {/* HEADER DEL SIDEBAR CON FOTO */}
+        <div className="p-6 flex items-center gap-3 border-b border-blue-900 bg-[#002855]">
+          <div className="shrink-0">
+             {displayPhoto ? (
+               <img src={displayPhoto} alt="Perfil" className="w-12 h-12 rounded-full object-cover border-2 border-[#f0c419]" />
+             ) : (
+               <div className="bg-white/10 p-2 rounded-full border-2 border-[#f0c419]">
+                 <HardHat size={24} className="text-[#f0c419]" />
+               </div>
+             )}
           </div>
-          <div>
-            <h1 className="font-bold text-lg leading-tight">Constructora LYK</h1>
-            <p className="text-xs text-slate-300">Portal de Obreros</p>
+          <div className="overflow-hidden">
+            <h1 className="font-bold text-sm leading-tight truncate" title={displayName}>
+              {displayName.split(' ')[0]} {displayName.split(' ')[2] || ''}
+            </h1>
+            <p className="text-[10px] text-slate-300 uppercase tracking-wide truncate">{displayRole}</p>
           </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navItems.map((item) => {
-            // SOLUCIÓN DEL ERROR: Asignamos el ícono a una variable con Mayúscula
+          {visibleNavItems.map((item) => {
             const Icon = item.icon; 
-            
             return (
               <NavLink
                 key={item.path}
@@ -62,7 +138,6 @@ const WorkerLayout = () => {
                   }`
                 }
               >
-                {/* Renderizamos el ícono como componente XML, NO como variable */}
                 <Icon size={20} />
                 <span>{item.label}</span>
               </NavLink>
@@ -87,7 +162,7 @@ const WorkerLayout = () => {
            <HardHat size={24} className="text-[#f0c419]" />
            <span className="font-bold text-lg">LYK Obreros</span>
         </div>
-        <button onClick={handleLogout} className="p-2 text-slate-300">
+        <button onClick={handleLogout} className="p-2 text-slate-300 active:text-white">
            <LogOut size={20} />
         </button>
       </header>
@@ -99,11 +174,9 @@ const WorkerLayout = () => {
 
       {/* === 4. MENÚ INFERIOR (Solo visible en Celular) === */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 flex justify-around items-center px-2 py-2 pb-safe">
-        {navItems.map((item) => {
-          // SOLUCIÓN DEL ERROR AQUÍ TAMBIÉN
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
-          
           return (
             <NavLink
               key={item.path}

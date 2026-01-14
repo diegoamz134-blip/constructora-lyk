@@ -216,10 +216,11 @@ const ProjectsPage = () => {
       )}
 
       {/* Modal de Creación / Edición */}
+      {/* CORRECCIÓN AQUÍ: Se cambió onSuccess por onProjectCreated */}
       <CreateProjectModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        onSuccess={fetchProjects}
+        onProjectCreated={fetchProjects} 
         projectToEdit={projectToEdit}
       />
 
