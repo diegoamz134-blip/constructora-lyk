@@ -3,115 +3,106 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
   Edit2, Save, Camera, Lock, Loader2, 
-  Briefcase, CheckCircle2
+  Briefcase, CheckCircle2, User, Eye, EyeOff, Shield
 } from 'lucide-react';
-import { Avatar } from "@heroui/react";
 import { supabase } from '../../services/supabase';
+import { useAuth } from '../../context/AuthContext';
+import bcrypt from 'bcryptjs'; // Asegúrate de tener instalado: npm install bcryptjs
 
 // --- MODALES PERSONALIZADOS ---
+// Ajusta las rutas si tus componentes están en otra carpeta
 import StatusModal from '../../components/common/StatusModal';
-import ConfirmDeleteModal from '../projects/components/ConfirmDeleteModal';
-// IMPORTAMOS EL NUEVO MODAL DE RECORTE
 import ImageCropperModal from '../../components/common/ImageCropperModal';
-
-const ADMIN_SESSION_KEY = 'lyk_admin_session'; // CLAVE DE SESIÓN LOCAL
 
 const UserProfilePage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  
+  // --- ESTADOS DE CARGA ---
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   
-  // Estados de edición
+  // --- ESTADOS DE EDICIÓN ---
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
-  const [isEditingWork, setIsEditingWork] = useState(false);
   
-  // Estados para contadores
+  // --- ESTADOS DE CONTRASEÑA ---
+  const [passwordForm, setPasswordForm] = useState({ newPassword: '' });
+  const [showPassword, setShowPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  
+  // --- ESTADOS DE MÉTRICAS ---
   const [projectStats, setProjectStats] = useState({ active: 0, historical: 0, loading: true });
 
-  // Estados para Modales y Notificaciones
+  // --- NOTIFICACIONES Y MODALES ---
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
-  const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
 
-  // --- NUEVOS ESTADOS PARA EL CROPPER ---
+  // --- ESTADOS PARA FOTO DE PERFIL (CROPPER) ---
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [tempImageSrc, setTempImageSrc] = useState(null);
-  // --------------------------------------
-
+  const [imageError, setImageError] = useState(false);
+  const [cacheBuster, setCacheBuster] = useState(Date.now()); // Para romper caché del navegador
   const fileInputRef = useRef(null);
 
+  // --- DATOS DEL PERFIL ---
   const [profile, setProfile] = useState({
+    id: '',
     full_name: '',
     email: '',
     role: 'Administrador',
     entry_date: '',
     birth_date: '',
-    district: '',
     phone: '',
-    notifications: true,
     area: '',
-    team_size: 0,
-    experience_years: 0,
-    headquarters: '',
     status: 'Activo',
     avatar_url: '' 
   });
 
-  // --- FUNCIÓN AUXILIAR PARA OBTENER USUARIO (CON FALLBACK) ---
-  const getCurrentUserWithFallback = async () => {
-    // 1. Intentar con Supabase Auth (Servidor)
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) return user;
-
-    // 2. Si falla, intentar con LocalStorage (Sesión persistida)
-    const localSession = localStorage.getItem(ADMIN_SESSION_KEY);
-    if (localSession) {
-      try {
-        const parsed = JSON.parse(localSession);
-        // Normalizamos para devolver algo con estructura { id, email }
-        return {
-          id: parsed.id || parsed.user?.id,
-          email: parsed.email || parsed.user?.email,
-          ...parsed
-        };
-      } catch (e) {
-        console.error("Error leyendo sesión local", e);
-      }
-    }
-    return null;
-  };
-
-  // --- 1. CARGA DE PERFIL ---
+  // ========================================================================
+  // 1. CARGA INICIAL DE DATOS
+  // ========================================================================
   const fetchProfile = async () => {
     try {
-      const user = await getCurrentUserWithFallback();
-      
-      // Si después de intentar ambos métodos no hay usuario, entonces sí redirigimos
-      if (!user || !user.id) {
-        navigate('/'); 
-        return;
+      // Recuperar usuario del contexto o localStorage
+      let currentUser = user;
+      if (!currentUser || !currentUser.id) {
+        const stored = localStorage.getItem('lyk_session');
+        if (!stored) { navigate('/'); return; }
+        currentUser = JSON.parse(stored).user;
       }
 
-      const { data } = await supabase
-        .from('profiles')
+      if (!currentUser?.id) return;
+
+      // Consulta a la tabla 'employees'
+      const { data, error } = await supabase
+        .from('employees')
         .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+        .eq('id', currentUser.id)
+        .single();
+
+      if (error) throw error;
 
       if (data) {
-        setProfile(data);
-      } else {
-        setProfile(prev => ({
-          ...prev,
-          email: user.email || '',
-          full_name: user.user_metadata?.full_name || user.full_name || ''
-        }));
+        setProfile({
+            ...data,
+            id: data.id,
+            full_name: data.full_name || '',
+            email: data.email || '',
+            role: data.role || 'Staff',
+            avatar_url: data.avatar_url || '',
+            phone: data.phone || '',
+            area: data.area || data.position || '',
+            birth_date: data.birth_date || ''
+        });
+        setCacheBuster(Date.now()); // Actualizamos timestamp
       }
-
+      
+      // Cargar métricas de proyectos
       fetchProjectStats();
 
     } catch (error) {
-      console.error('Error general cargando perfil:', error);
+      console.error('Error cargando perfil:', error);
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo cargar la información del usuario.' });
     } finally {
       setLoading(false);
     }
@@ -119,186 +110,151 @@ const UserProfilePage = () => {
 
   const fetchProjectStats = async () => {
     try {
-        const { count: activeCount } = await supabase
-            .from('projects')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'En Ejecución');
-
-        const { count: historyCount } = await supabase
-            .from('projects')
-            .select('*', { count: 'exact', head: true })
-            .in('status', ['Completado', 'Entregado', 'Cancelado']);
-
-        setProjectStats({
-            active: activeCount || 0,
-            historical: historyCount || 0,
-            loading: false
-        });
+        const { count: activeCount } = await supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'En Ejecución');
+        const { count: historyCount } = await supabase.from('projects').select('*', { count: 'exact', head: true }).in('status', ['Completado', 'Entregado', 'Cancelado']);
+        setProjectStats({ active: activeCount || 0, historical: historyCount || 0, loading: false });
     } catch (e) {
-        console.error("Error cargando stats", e);
         setProjectStats(prev => ({ ...prev, loading: false }));
     }
   };
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
+  useEffect(() => { fetchProfile(); }, [user]);
 
-  // --- 2. MANEJO DE FOTO (INICIO) ---
-  const handleAvatarClick = () => {
-    fileInputRef.current.click();
-  };
+  // ========================================================================
+  // 2. LÓGICA DE FOTO DE PERFIL (Recorte y Subida)
+  // ========================================================================
+  const handleAvatarClick = () => fileInputRef.current.click();
 
-  // Este paso solo lee el archivo y abre el modal de recorte
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
-    // Limpiamos el input para que permita seleccionar el mismo archivo otra vez si se cancela
-    event.target.value = '';
-
-    // Creamos una URL temporal para mostrar la imagen en el cropper
+    event.target.value = ''; // Limpiar input
+    
+    // Leer archivo para pasar al Cropper
     const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      setTempImageSrc(reader.result); // Guardamos la imagen cruda
-      setIsCropperOpen(true); // Abrimos el modal
+    reader.addEventListener('load', () => { 
+        setTempImageSrc(reader.result); 
+        setIsCropperOpen(true); 
     });
     reader.readAsDataURL(file);
   };
 
-  // --- 3. MANEJO DE FOTO (FINAL: RECORTADA Y COMPRIMIDA) ---
-  // Esta función la llama el ImageCropperModal cuando termina
   const handleCropComplete = async (croppedBlob) => {
     setUploading(true);
-    setIsCropperOpen(false); // Cerramos el modal
+    setImageError(false);
+    setIsCropperOpen(false);
 
     try {
-      const user = await getCurrentUserWithFallback();
-      if (!user || !user.id) throw new Error("Sesión expirada o inválida");
+      const userId = profile.id;
+      if (!userId) throw new Error("ID de usuario no encontrado");
 
-      // Usamos un timestamp para hacer el nombre de archivo ÚNICO cada vez.
-      const timestamp = new Date().getTime();
-      const fileName = `avatar_${user.id}_${timestamp}.jpg`; 
-
-      // Subimos la imagen ya recortada y comprimida (es un Blob)
+      // Nombre consistente para sobreescribir la imagen anterior
+      const fileName = `avatar_employee_${userId}.jpg`; 
+      
+      // 1. Subir al Storage (Upsert = true para reemplazar)
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(fileName, croppedBlob, {
-           contentType: 'image/jpeg',
-           cacheControl: '3600', 
-           upsert: false 
-        });
+        .upload(fileName, croppedBlob, { contentType: 'image/jpeg', upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Obtenemos la URL pública
+      // 2. Obtener URL Pública
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(fileName);
 
-      // Actualizamos el perfil en la base de datos con la nueva URL
+      // 3. Guardar URL en Base de Datos
       const { error: updateError } = await supabase
-        .from('profiles')
-        .upsert({ 
-            id: user.id, 
-            avatar_url: publicUrl, 
-            updated_at: new Date()
-        });
+        .from('employees')
+        .update({ avatar_url: publicUrl })
+        .eq('id', userId);
 
       if (updateError) throw updateError;
 
-      // Actualizamos el estado local para que se vea inmediatamente
+      // 4. Actualizar estado local
       setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
+      setCacheBuster(Date.now()); // Forzar recarga de imagen en UI
       
-      // Disparamos evento global por si el sidebar necesita actualizarse
-      window.dispatchEvent(new Event('profileUpdated'));
+      // 5. Actualizar sesión local (LocalStorage) para persistencia
+      const currentSession = JSON.parse(localStorage.getItem('lyk_session') || '{}');
+      if (currentSession.user) {
+          currentSession.user.avatar_url = publicUrl;
+          localStorage.setItem('lyk_session', JSON.stringify(currentSession));
+      }
       
-      setNotification({ 
-          isOpen: true, type: 'success', 
-          title: 'Foto Actualizada', 
-          message: 'Tu foto de perfil se ha recortado y subido correctamente.' 
-      });
+      setNotification({ isOpen: true, type: 'success', title: 'Foto Actualizada', message: 'Tu nueva foto se ve genial.' });
 
     } catch (error) {
-      console.error('Error subiendo foto recortada:', error);
-      setNotification({ 
-          isOpen: true, type: 'error', 
-          title: 'Error de Subida', 
-          message: error.message || 'No se pudo subir la imagen.' 
-      });
+      console.error(error);
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo subir la imagen.' });
     } finally {
       setUploading(false);
-      setTempImageSrc(null); // Limpiamos la imagen temporal
+      setTempImageSrc(null);
     }
   };
 
-
-  // --- 4. FUNCIONES DE ACTUALIZACIÓN DE DATOS ---
-  const handleUpdate = async (section) => {
+  // ========================================================================
+  // 3. ACTUALIZAR DATOS PERSONALES
+  // ========================================================================
+  const handleUpdate = async () => {
     setSaving(true);
     try {
-      const user = await getCurrentUserWithFallback();
-      if (!user || !user.id) throw new Error("No se pudo identificar al usuario");
-      
-      const cleanProfile = {
-        ...profile,
-        id: user.id,
-        updated_at: new Date()
+      const updates = {
+        full_name: profile.full_name,
+        email: profile.email,
+        birth_date: profile.birth_date || null,
+        phone: profile.phone
       };
 
-      const { error } = await supabase.from('profiles').upsert(cleanProfile);
+      const { error } = await supabase
+        .from('employees')
+        .update(updates)
+        .eq('id', profile.id);
+
       if (error) throw error;
       
-      if (section === 'personal') setIsEditingPersonal(false);
-      if (section === 'work') setIsEditingWork(false);
-      
-      setProfile(cleanProfile);
-      window.dispatchEvent(new Event('profileUpdated'));
-      
-      setNotification({ 
-          isOpen: true, type: 'success', 
-          title: 'Perfil Guardado', 
-          message: 'La información ha sido actualizada exitosamente.' 
-      });
+      setIsEditingPersonal(false);
+      setNotification({ isOpen: true, type: 'success', title: 'Perfil Guardado', message: 'Tus datos han sido actualizados.' });
 
     } catch (error) {
-      console.error('Error:', error);
-      setNotification({ 
-          isOpen: true, type: 'error', 
-          title: 'Error al Guardar', 
-          message: error.message 
-      });
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message });
     } finally {
       setSaving(false);
     }
   };
 
-  // --- 5. LÓGICA DE CONTRASEÑA ---
-  const handlePasswordResetClick = () => {
-      setIsConfirmResetOpen(true);
-  };
+  // ========================================================================
+  // 4. CAMBIAR CONTRASEÑA
+  // ========================================================================
+  const handlePasswordUpdate = async (e) => {
+    e.preventDefault();
+    if (!passwordForm.newPassword) {
+        setNotification({ isOpen: true, type: 'warning', title: 'Campo vacío', message: 'Ingresa una contraseña válida.' });
+        return;
+    }
+    setSavingPassword(true);
 
-  const executePasswordReset = async () => {
-      try {
-          const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
-              redirectTo: window.location.origin + '/reset-password',
-          });
-          if (error) throw error;
-          
-          setNotification({ 
-              isOpen: true, type: 'success', 
-              title: 'Correo Enviado', 
-              message: `Se ha enviado un enlace de recuperación a ${profile.email}.` 
-          });
-      } catch (e) {
-          setNotification({ 
-              isOpen: true, type: 'error', 
-              title: 'Error de Envío', 
-              message: e.message 
-          });
-      } finally {
-          setIsConfirmResetOpen(false);
-      }
+    try {
+        // Encriptar contraseña
+        const salt = bcrypt.genSaltSync(10);
+        const hashedPassword = bcrypt.hashSync(passwordForm.newPassword, salt);
+
+        const { error } = await supabase
+            .from('employees')
+            .update({ password: hashedPassword })
+            .eq('id', profile.id);
+
+        if (error) throw error;
+
+        setPasswordForm({ newPassword: '' });
+        setNotification({ isOpen: true, type: 'success', title: 'Contraseña Actualizada', message: 'Tu acceso ahora es más seguro.' });
+
+    } catch (error) {
+        console.error(error);
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo cambiar la contraseña.' });
+    } finally {
+        setSavingPassword(false);
+    }
   };
 
   const handleChange = (e) => {
@@ -306,234 +262,180 @@ const UserProfilePage = () => {
     setProfile(prev => ({ ...prev, [name]: value }));
   };
 
-  if (loading) return <div className="flex justify-center items-center h-full"><Loader2 className="w-8 h-8 animate-spin text-slate-400"/></div>;
+  // ========================================================================
+  // RENDERIZADO
+  // ========================================================================
+
+  if (loading) return <div className="flex justify-center items-center h-full pt-20"><Loader2 className="w-10 h-10 animate-spin text-slate-400"/></div>;
+  
+  // URL con timestamp para evitar caché
+  const avatarSrc = profile.avatar_url ? `${profile.avatar_url}?t=${cacheBuster}` : null;
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="max-w-7xl mx-auto space-y-6 pb-10"
+      initial={{ opacity: 0, y: 10 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      className="max-w-7xl mx-auto space-y-6 pb-20 p-6"
     >
       <h1 className="text-2xl font-bold text-slate-800 mb-2">Mi Perfil</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* === COLUMNA IZQUIERDA: RESUMEN === */}
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center h-fit">
+        {/* === COLUMNA IZQUIERDA: RESUMEN Y FOTO === */}
+        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center h-fit sticky top-6">
           
-          {/* Avatar con Indicador de Carga */}
           <div className="relative mb-4 group cursor-pointer" onClick={handleAvatarClick}>
-            <div className={`p-1 rounded-full border-4 border-slate-50 relative overflow-hidden ${uploading ? 'opacity-50' : ''}`}>
-               {/* Usamos la URL como key para forzar re-render si cambia */}
-               <Avatar 
-                 key={profile.avatar_url} 
-                 src={profile.avatar_url} 
-                 className="w-32 h-32 text-large" 
-                 showFallback
-                 name={profile.full_name}
-                 imgProps={{ 
-                    referrerPolicy: "no-referrer",
-                    onError: (e) => { e.target.src = 'https://via.placeholder.com/150?text=IMG'; }
-                 }} 
-               />
-               
-               {uploading && (
-                 <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded-full">
-                    <Loader2 className="text-white animate-spin" size={24}/>
-                 </div>
+            <div className={`w-32 h-32 rounded-full border-4 border-slate-50 relative overflow-hidden bg-slate-100 ${uploading ? 'opacity-50' : ''}`}>
+               {!imageError && avatarSrc ? (
+                    <img src={avatarSrc} alt="Perfil" className="w-full h-full object-cover" onError={() => setImageError(true)} />
+               ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-400 text-4xl font-bold">
+                        {profile.full_name ? profile.full_name.charAt(0) : <User size={40}/>}
+                    </div>
                )}
+               {uploading && <div className="absolute inset-0 bg-black/30 flex items-center justify-center"><Loader2 className="text-white animate-spin" size={24}/></div>}
             </div>
             
-            <div className="absolute bottom-2 right-2 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-600 hover:text-[#0F172A] transition-colors z-10">
-               <Camera size={18} />
+            {/* Botón flotante de cámara */}
+            <div className="absolute bottom-2 right-2 bg-white p-2 rounded-full shadow-md border border-slate-100 text-slate-600 hover:text-[#0F172A] z-10 transition-colors">
+                <Camera size={18} />
             </div>
-            
-            {/* Input de archivo oculto */}
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept="image/*"
-              onChange={handleFileChange}
-            />
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
           </div>
 
           <h2 className="text-2xl font-bold text-slate-800 capitalize">{profile.full_name || 'Usuario'}</h2>
           <p className="text-slate-400 text-sm mt-1">{profile.email}</p>
           
           <div className="mt-4 mb-8">
-             <span className="px-5 py-2 bg-blue-50 text-[#003366] rounded-xl text-sm font-bold border border-blue-100">
-               {profile.role}
+             <span className="px-5 py-2 bg-blue-50 text-[#003366] rounded-xl text-sm font-bold border border-blue-100 capitalize">
+                {profile.role}
              </span>
           </div>
 
           <div className="w-full space-y-4 mb-8">
              <div className="flex justify-between items-center px-5 py-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-sm text-slate-500 font-medium">Miembro desde</span>
-                <span className="text-sm font-bold text-slate-800">{profile.entry_date || new Date().toLocaleDateString()}</span>
+                <span className="text-sm text-slate-500 font-medium">Fecha Ingreso</span>
+                <span className="text-sm font-bold text-slate-800">{profile.entry_date || '-'}</span>
              </div>
-          </div>
-
-          <div className="w-full space-y-3">
-             <button 
-                onClick={handlePasswordResetClick}
-                className="w-full py-3.5 px-4 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition flex items-center justify-center gap-2 group hover:border-blue-200"
-             >
-                <Lock size={18} className="group-hover:text-blue-600 transition-colors"/> Restablecer contraseña
-             </button>
           </div>
         </div>
 
         {/* === COLUMNA DERECHA: FORMULARIOS === */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* Tarjeta Personal */}
+          {/* 1. TARJETA DE INFORMACIÓN PERSONAL */}
           <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 relative">
              <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-4">
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  Información personal
-                </h3>
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">Información personal</h3>
                 <button 
-                  onClick={() => isEditingPersonal ? handleUpdate('personal') : setIsEditingPersonal(true)}
+                  onClick={() => isEditingPersonal ? handleUpdate() : setIsEditingPersonal(true)}
                   disabled={saving}
                   className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${isEditingPersonal ? 'bg-[#0F172A] text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                 >
                    {saving && isEditingPersonal ? <Loader2 size={16} className="animate-spin"/> : (isEditingPersonal ? <><Save size={16}/> Guardar</> : <><Edit2 size={16}/> Editar</>)}
                 </button>
              </div>
-
+             
              <div className="grid grid-cols-1 md:grid-cols-2 gap-y-8 gap-x-12">
                 <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditingPersonal} />
                 <Field label="Correo Electrónico" name="email" value={profile.email} onChange={handleChange} isEditing={isEditingPersonal} type="email" />
                 <Field label="Fecha de Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditingPersonal} type="date" />
-                <Field label="Distrito" name="district" value={profile.district} onChange={handleChange} isEditing={isEditingPersonal} />
-                <Field label="Celular" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditingPersonal} />
-                <div className="flex flex-col gap-2">
-                   <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Notificaciones</label>
-                   <div className="h-10 flex items-center">
-                      <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wide ${profile.notifications ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-100 text-slate-500'}`}>
-                         {profile.notifications ? 'Activadas' : 'Desactivadas'}
-                      </span>
-                   </div>
-                </div>
+                <Field label="Celular / Teléfono" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditingPersonal} />
              </div>
           </div>
 
-          {/* Tarjeta Trabajo */}
-          <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 relative">
-             <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-4">
-                <h3 className="text-xl font-bold text-slate-800">Información de trabajo</h3>
-                <button 
-                  onClick={() => isEditingWork ? handleUpdate('work') : setIsEditingWork(true)}
-                  disabled={saving}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${isEditingWork ? 'bg-[#0F172A] text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                >
-                   {saving && isEditingWork ? <Loader2 size={16} className="animate-spin"/> : (isEditingWork ? <><Save size={16}/> Guardar</> : <><Edit2 size={16}/> Editar</>)}
-                </button>
+          {/* 2. TARJETA DE SEGURIDAD (Cambio de Contraseña) */}
+          <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 relative overflow-hidden">
+             {/* Decoración de fondo */}
+             <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+             
+             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4 relative z-10">
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <Shield size={20} className="text-[#003366]"/> Seguridad
+                </h3>
              </div>
+             
+             <form onSubmit={handlePasswordUpdate} className="flex flex-col md:flex-row gap-4 items-end relative z-10">
+                 <div className="w-full relative">
+                    <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-2 block">Nueva Contraseña</label>
+                    <div className="relative">
+                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input 
+                            type={showPassword ? "text" : "password"}
+                            value={passwordForm.newPassword}
+                            onChange={(e) => setPasswordForm({ newPassword: e.target.value })}
+                            className="w-full pl-11 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-bold outline-none focus:border-[#003366] focus:bg-white transition-all"
+                            placeholder="Mínimo 6 caracteres"
+                        />
+                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#003366]">
+                            {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
+                        </button>
+                    </div>
+                 </div>
+                 <button 
+                    type="submit"
+                    disabled={savingPassword || !passwordForm.newPassword}
+                    className="md:w-auto w-full py-3 px-6 bg-[#003366] text-white rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                 >
+                    {savingPassword ? <Loader2 className="animate-spin" size={20}/> : 'Actualizar'}
+                 </button>
+             </form>
+          </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-y-8 gap-x-12">
-                
-                {/* WIDGET DE PROYECTOS */}
-                <div className="col-span-1 md:col-span-2 bg-slate-50 rounded-2xl p-5 border border-slate-100 mb-2">
-                   <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block mb-3">Resumen de Proyectos</label>
-                   
-                   {projectStats.loading ? (
-                       <div className="flex gap-2 items-center text-slate-400 text-sm">
-                           <Loader2 size={16} className="animate-spin"/> Calculando...
-                       </div>
-                   ) : (
-                       <div className="flex gap-8">
-                           <div className="flex items-center gap-3">
-                               <div className="p-2 bg-blue-100 text-[#003366] rounded-lg">
-                                   <Briefcase size={20}/>
-                               </div>
-                               <div>
-                                   <p className="text-2xl font-bold text-slate-800 leading-none">{projectStats.active}</p>
-                                   <p className="text-xs text-slate-500 font-bold mt-1">Activos</p>
-                               </div>
-                           </div>
-                           <div className="w-px bg-slate-200 h-10 self-center"></div>
-                           <div className="flex items-center gap-3">
-                               <div className="p-2 bg-green-100 text-green-700 rounded-lg">
-                                   <CheckCircle2 size={20}/>
-                               </div>
-                               <div>
-                                   <p className="text-2xl font-bold text-slate-800 leading-none">{projectStats.historical}</p>
-                                   <p className="text-xs text-slate-500 font-bold mt-1">Históricos</p>
-                               </div>
-                           </div>
-                       </div>
-                   )}
+          {/* 3. TARJETA DE MÉTRICAS */}
+          <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 relative">
+             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                <h3 className="text-xl font-bold text-slate-800">Métricas y Cargo</h3>
+             </div>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 flex items-center gap-4">
+                    <div className="p-3 bg-blue-100 text-[#003366] rounded-xl"><Briefcase size={24}/></div>
+                    <div>
+                        <p className="text-2xl font-bold text-slate-800">{projectStats.active}</p>
+                        <p className="text-xs text-slate-500 font-bold">Proyectos Activos</p>
+                    </div>
                 </div>
-                
-                <Field label="Área" name="area" value={profile.area} onChange={handleChange} isEditing={isEditingWork} />
-                <Field label="Equipo a cargo" name="team_size" value={profile.team_size} onChange={handleChange} isEditing={isEditingWork} type="number" suffix="profesionales" />
-                <Field label="Experiencia" name="experience_years" value={profile.experience_years} onChange={handleChange} isEditing={isEditingWork} type="number" suffix="años" />
-                <Field label="Sede" name="headquarters" value={profile.headquarters} onChange={handleChange} isEditing={isEditingWork} />
-                
-                <div className="flex flex-col gap-2">
-                   <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Estado de Cuenta</label>
-                   <div className="h-10 flex items-center">
-                      <span className="flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase tracking-wide">
-                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                         {profile.status}
-                      </span>
-                   </div>
-                </div>
+                <Field label="Área / Cargo" name="area" value={profile.area} onChange={handleChange} isEditing={false} />
              </div>
           </div>
 
         </div>
       </div>
 
-      {/* --- MODALES --- */}
+      {/* Componentes Flotantes */}
       <StatusModal 
-        isOpen={notification.isOpen}
-        onClose={() => setNotification({ ...notification, isOpen: false })}
-        type={notification.type}
-        title={notification.title}
-        message={notification.message}
+        isOpen={notification.isOpen} 
+        onClose={() => setNotification({ ...notification, isOpen: false })} 
+        type={notification.type} 
+        title={notification.title} 
+        message={notification.message} 
       />
-
-      <ConfirmDeleteModal
-        isOpen={isConfirmResetOpen}
-        onClose={() => setIsConfirmResetOpen(false)}
-        onConfirm={executePasswordReset}
-        title="¿Restablecer contraseña?"
-        message={`Se enviará un correo a ${profile.email} con las instrucciones para crear una nueva contraseña. ¿Deseas continuar?`}
-        confirmText="Enviar Correo" 
-      />
-
+      
       <ImageCropperModal 
-        isOpen={isCropperOpen}
-        onClose={() => {
-            setIsCropperOpen(false);
-            setTempImageSrc(null); 
-        }}
-        imageSrc={tempImageSrc}
-        onCropComplete={handleCropComplete}
+        isOpen={isCropperOpen} 
+        onClose={() => { setIsCropperOpen(false); setTempImageSrc(null); }} 
+        imageSrc={tempImageSrc} 
+        onCropComplete={handleCropComplete} 
       />
-
     </motion.div>
   );
 };
 
-const Field = ({ label, name, value, onChange, isEditing, type = "text", suffix = "" }) => (
+// Componente auxiliar para campos
+const Field = ({ label, name, value, onChange, isEditing, type = "text" }) => (
   <div className="flex flex-col gap-2">
     <label className="text-[11px] uppercase tracking-wider font-bold text-slate-400">{label}</label>
     {isEditing ? (
       <input 
-        type={type}
-        name={name}
-        value={value || ''}
-        onChange={onChange}
-        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:border-[#0F172A] focus:ring-0 outline-none transition-all"
-        placeholder={`Ingresa ${label.toLowerCase()}`}
+        type={type} 
+        name={name} 
+        value={value || ''} 
+        onChange={onChange} 
+        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:border-[#0F172A] focus:ring-0 outline-none transition-all" 
       />
     ) : (
       <p className="text-slate-800 font-medium text-base py-2.5 border-b border-transparent truncate">
-        {value || '-'} {value && suffix ? ` ${suffix}` : ''}
+        {value || '-'}
       </p>
     )}
   </div>
