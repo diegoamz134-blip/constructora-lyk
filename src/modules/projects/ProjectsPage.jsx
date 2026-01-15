@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-// IMPORTACIÓN NUEVA: Usamos el servicio en lugar de supabase directo
-import { getProjects, deleteProjectCascade } from '../../services/projectsService'; 
+import { getProjectsForUser, deleteProjectCascade } from '../../services/projectsService';
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth'; 
 import { 
   Building2, Image as ImageIcon, MessageSquare, 
   CalendarDays, MapPin, Calendar, Plus, ArrowLeft, 
@@ -17,30 +17,33 @@ import ConfirmDeleteModal from './components/ConfirmDeleteModal';
 import ProjectTeam from './components/ProjectTeam';
 
 const ProjectsPage = () => {
+  const { currentUser } = useUnifiedAuth(); 
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
   
-  // Estados para Modal de Eliminación
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Estado para Tabs y Carga
   const [activeTab, setActiveTab] = useState('gantt');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Cargar lista de proyectos al iniciar
+  // --- CORRECCIÓN DEL BUG DE PANTALLA BLANCA ---
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    if (currentUser?.id) { // Solo ejecutamos si hay un ID válido
+       fetchProjects();
+    }
+    // IMPORTANTE: Dependemos de currentUser.id (texto), NO del objeto currentUser completo.
+    // Esto evita el bucle infinito de renderizados.
+  }, [currentUser?.id, currentUser?.role]); 
 
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      // USO DEL SERVICIO
-      const data = await getProjects();
+      // Usamos getProjectsForUser para respetar los permisos (Admin vs Residente)
+      const data = await getProjectsForUser(currentUser);
       setProjectsList(data);
     } catch (error) {
       console.error('Error cargando proyectos:', error);
@@ -49,36 +52,29 @@ const ProjectsPage = () => {
     }
   };
 
-  // Manejador para abrir modal en modo CREAR
   const handleCreate = () => {
     setProjectToEdit(null);
     setIsModalOpen(true);
   };
 
-  // Manejador para abrir modal en modo EDITAR
   const handleEdit = (e, project) => {
-    e.stopPropagation(); // Evita entrar al detalle del proyecto
+    e.stopPropagation(); 
     setProjectToEdit(project);
     setIsModalOpen(true);
   };
 
-  // Manejador para abrir el Modal de Eliminación
   const handleDeleteClick = (e, project) => {
     e.stopPropagation();
     setProjectToDelete(project);
     setDeleteModalOpen(true);
   };
 
-  // Lógica real de eliminación (se ejecuta al confirmar en el modal)
   const confirmDelete = async () => {
     if (!projectToDelete) return;
     setIsDeleting(true);
 
     try {
-      // USO DEL SERVICIO: Toda la lógica compleja está ahora en projectsService
       await deleteProjectCascade(projectToDelete);
-      
-      // Limpiar y recargar
       setDeleteModalOpen(false);
       setProjectToDelete(null);
       fetchProjects();
@@ -89,11 +85,10 @@ const ProjectsPage = () => {
     }
   };
 
-  // --- VISTA DETALLE DEL PROYECTO ---
+  // --- VISTA DETALLE ---
   if (selectedProject) {
     return (
       <div className="space-y-6 pb-10">
-        {/* Botón Volver */}
         <button 
           onClick={() => setSelectedProject(null)}
           className="flex items-center gap-2 text-slate-500 hover:text-[#003366] font-bold text-sm transition-colors mb-2"
@@ -101,7 +96,6 @@ const ProjectsPage = () => {
           <ArrowLeft size={18} /> Volver a la lista
         </button>
 
-        {/* Header del Proyecto Seleccionado */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -117,7 +111,6 @@ const ProjectsPage = () => {
           </div>
         </div>
 
-        {/* Tabs de Navegación */}
         <div className="flex gap-2 overflow-x-auto pb-2">
           <TabButton active={activeTab === 'gantt'} onClick={() => setActiveTab('gantt')} icon={CalendarDays} label="Cronograma" />
           <TabButton active={activeTab === 'team'} onClick={() => setActiveTab('team')} icon={Users} label="Personal" />
@@ -125,7 +118,6 @@ const ProjectsPage = () => {
           <TabButton active={activeTab === 'gallery'} onClick={() => setActiveTab('gallery')} icon={ImageIcon} label="Galería" />
         </div>
 
-        {/* Contenido Dinámico */}
         <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 10 }}
@@ -141,7 +133,7 @@ const ProjectsPage = () => {
     );
   }
 
-  // --- VISTA LISTA DE PROYECTOS (DEFAULT) ---
+  // --- VISTA LISTA ---
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -149,12 +141,16 @@ const ProjectsPage = () => {
           <h2 className="text-2xl font-bold text-slate-800">Mis Proyectos</h2>
           <p className="text-slate-500 text-sm">Gestiona el avance y recursos de tus obras.</p>
         </div>
-        <button 
-          onClick={handleCreate} 
-          className="flex items-center gap-2 px-6 py-3 bg-[#003366] text-white rounded-xl text-sm font-bold hover:bg-blue-900 shadow-lg active:scale-95 transition-all"
-        >
-          <Plus size={18} /> Nuevo Proyecto
-        </button>
+        
+        {/* Solo Admin puede crear proyectos */}
+        {currentUser?.role === 'admin' && (
+          <button 
+            onClick={handleCreate} 
+            className="flex items-center gap-2 px-6 py-3 bg-[#003366] text-white rounded-xl text-sm font-bold hover:bg-blue-900 shadow-lg active:scale-95 transition-all"
+          >
+            <Plus size={18} /> Nuevo Proyecto
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -162,8 +158,12 @@ const ProjectsPage = () => {
       ) : projectsList.length === 0 ? (
         <div className="bg-white p-12 rounded-3xl border border-slate-100 text-center flex flex-col items-center">
           <Building2 size={48} className="text-slate-200 mb-4" />
-          <h3 className="text-lg font-bold text-slate-700">Aún no tienes proyectos</h3>
-          <p className="text-slate-400 text-sm mt-1 max-w-xs">Registra tu primera obra para comenzar a gestionar el cronograma y personal.</p>
+          <h3 className="text-lg font-bold text-slate-700">Aún no tienes proyectos asignados</h3>
+          <p className="text-slate-400 text-sm mt-1 max-w-xs">
+            {currentUser?.role === 'admin' 
+              ? "Registra tu primera obra para comenzar." 
+              : "Contacta a RRHH para que te asignen obras."}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -180,34 +180,37 @@ const ProjectsPage = () => {
                   <Building2 size={24} className="text-slate-600 group-hover:text-[#003366]" />
                 </div>
                 
-                {/* Botones de Acción */}
-                <div className="flex gap-1">
-                  <button 
-                    onClick={(e) => handleEdit(e, proj)} 
-                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                    title="Editar"
-                  >
-                    <Pencil size={18}/>
-                  </button>
-                  <button 
-                    onClick={(e) => handleDeleteClick(e, proj)} 
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    title="Eliminar"
-                  >
-                    <Trash2 size={18}/>
-                  </button>
-                </div>
+                {currentUser?.role === 'admin' && (
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={(e) => handleEdit(e, proj)} 
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Editar"
+                    >
+                      <Pencil size={18}/>
+                    </button>
+                    <button 
+                      onClick={(e) => handleDeleteClick(e, proj)} 
+                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Eliminar"
+                    >
+                      <Trash2 size={18}/>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <h3 className="text-lg font-bold text-slate-800 mb-1 group-hover:text-[#003366] transition-colors">{proj.name}</h3>
-              <p className="text-sm text-slate-500 flex items-center gap-1 mb-6"><MapPin size={14}/> {proj.location}</p>
+              <p className="text-sm text-slate-500 flex items-center gap-1 mb-6"><MapPin size={14}/> {proj.location || 'Sin ubicación'}</p>
 
               <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                <span className="px-3 py-1 bg-green-50 text-green-700 rounded-lg text-xs font-bold border border-green-100">
+                <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${
+                   proj.status === 'En Ejecución' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-600 border-slate-200'
+                }`}>
                   {proj.status}
                 </span>
                 <span className="text-xs font-bold text-slate-400">
-                  Inicio: {new Date(proj.start_date).toLocaleDateString()}
+                  {proj.start_date ? new Date(proj.start_date).toLocaleDateString() : '-'}
                 </span>
               </div>
             </div>
@@ -215,8 +218,7 @@ const ProjectsPage = () => {
         </div>
       )}
 
-      {/* Modal de Creación / Edición */}
-      {/* CORRECCIÓN AQUÍ: Se cambió onSuccess por onProjectCreated */}
+      {/* MODALES */}
       <CreateProjectModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
@@ -224,7 +226,6 @@ const ProjectsPage = () => {
         projectToEdit={projectToEdit}
       />
 
-      {/* Modal de Eliminación con Estilo */}
       <ConfirmDeleteModal 
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
@@ -236,7 +237,6 @@ const ProjectsPage = () => {
   );
 };
 
-// Componente Helper para los botones de las pestañas
 const TabButton = ({ active, onClick, icon: Icon, label }) => (
   <button 
     onClick={onClick}

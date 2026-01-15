@@ -11,7 +11,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 // IMPORTAMOS EL MODAL PERSONALIZADO
 import StatusModal from '../../components/common/StatusModal';
 
+// --- NUEVAS IMPORTACIONES PARA FILTRAR PROYECTOS ---
+import { getProjectsForUser } from '../../services/projectsService'; 
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
+
 const FieldAttendancePage = () => {
+  // Obtenemos el usuario actual para filtrar sus obras
+  const { currentUser } = useUnifiedAuth();
+
   // Estados
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -28,33 +35,34 @@ const FieldAttendancePage = () => {
   const [confirmActionType, setConfirmActionType] = useState(null); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
-  // NUEVO: Estado para el StatusModal (Feedback de Éxito/Error)
+  // Estado para el StatusModal (Feedback de Éxito/Error)
   const [statusModal, setStatusModal] = useState({ 
     isOpen: false, 
     type: 'success', 
     title: '', 
     message: '',
-    onCloseAction: null // Acción a ejecutar al cerrar (ej. recargar)
+    onCloseAction: null 
   });
 
-  // 1. Cargar Proyectos Activos
+  // 1. Cargar Proyectos Activos (FILTRADO POR USUARIO)
   useEffect(() => {
     const loadProjects = async () => {
+      if (!currentUser) return; // Esperamos a que cargue el usuario
+
       try {
-        const { data, error } = await supabase
-          .from('projects')
-          .select('*')
-          .eq('status', 'En Ejecución')
-          .order('name');
+        // Usamos el servicio que filtra: Admin ve todo, Residente ve solo lo asignado
+        const data = await getProjectsForUser(currentUser);
         
-        if (error) throw error;
-        setProjects(data || []);
+        // Mantenemos el filtro de estado "En Ejecución" que tenías originalmente
+        const activeProjects = data.filter(p => p.status === 'En Ejecución');
+        
+        setProjects(activeProjects || []);
       } catch (err) {
         console.error("Error cargando proyectos:", err);
       }
     };
     loadProjects();
-  }, []);
+  }, [currentUser]); // Se ejecuta cuando detectamos al usuario
 
   // 2. Cargar Cuadrilla y Cruzar con Asistencia
   useEffect(() => {
@@ -113,7 +121,6 @@ const FieldAttendancePage = () => {
         setWorkers(mergedList || []);
       } catch (err) {
         console.error("Error cargando personal:", err);
-        // Usamos el modal de error si falla la carga
         setStatusModal({
             isOpen: true,
             type: 'error',
@@ -148,20 +155,17 @@ const FieldAttendancePage = () => {
 
   // --- GUARDADO ---
   
-  // 1. Click en botones abre el modal configurando la acción
   const handleSaveClick = (type) => {
     if (!selectedProject || workers.length === 0) return;
     setConfirmActionType(type); // 'BORRADOR' o 'VALIDADO'
     setShowConfirmModal(true);
   };
 
-  // 2. Ejecución real del guardado
   const executeSaveTareo = async () => {
-    setShowConfirmModal(false); // Cerrar modal de pregunta
+    setShowConfirmModal(false); 
     setSaving(true);
     
     try {
-      // Definimos el estado según el botón presionado
       const statusToSave = confirmActionType === 'VALIDADO' ? 'VALIDADO' : 'BORRADOR';
 
       const recordsToUpsert = workers.map(w => {
@@ -199,7 +203,6 @@ const FieldAttendancePage = () => {
       
       if (error) throw error;
 
-      // --- AQUÍ REEMPLAZAMOS EL ALERT POR EL STATUS MODAL ---
       const isValidation = statusToSave === 'VALIDADO';
       
       setStatusModal({
@@ -209,7 +212,7 @@ const FieldAttendancePage = () => {
         message: isValidation 
           ? `Se ha enviado la asistencia de ${workers.length} trabajadores a Recursos Humanos correctamente.`
           : 'El avance se ha guardado localmente. Recuerda enviar la validación final al terminar el día.',
-        onCloseAction: () => window.location.reload() // Recargar al cerrar el modal
+        onCloseAction: () => window.location.reload() 
       });
 
     } catch (e) {
@@ -225,7 +228,6 @@ const FieldAttendancePage = () => {
     }
   };
 
-  // Helper para cerrar el StatusModal y ejecutar acción si existe
   const handleCloseStatusModal = () => {
       const action = statusModal.onCloseAction;
       setStatusModal({ ...statusModal, isOpen: false });
@@ -240,7 +242,7 @@ const FieldAttendancePage = () => {
 
   const openMap = (coords) => {
     if (!coords || !coords.includes(',')) return;
-    window.open(`http://googleusercontent.com/maps.google.com/3{coords}`, '_blank');
+    window.open(`https://maps.google.com/?q=${coords}`, '_blank');
   };
 
   const getStats = () => {
@@ -289,27 +291,35 @@ const FieldAttendancePage = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map(proj => (
-            <div 
-              key={proj.id} 
-              onClick={() => setSelectedProject(proj)}
-              className="group bg-white rounded-2xl border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-[#003366]/20 transition-all cursor-pointer relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 w-1 h-full bg-[#003366] opacity-0 group-hover:opacity-100 transition-opacity"/>
-              <div className="flex justify-between items-start mb-4">
-                 <div className="p-3 bg-blue-50 text-[#003366] rounded-xl group-hover:bg-[#003366] group-hover:text-white transition-colors">
-                    <Building2 size={24} />
-                 </div>
-                 <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded border border-slate-200">
-                    {proj.project_code || 'OBRA'}
-                 </span>
+        {projects.length === 0 ? (
+           <div className="text-center py-20 bg-white rounded-2xl border border-slate-100">
+              <Building2 className="mx-auto text-slate-200 mb-4" size={64}/>
+              <h3 className="text-xl font-bold text-slate-400">No tienes obras asignadas</h3>
+              <p className="text-slate-400 text-sm mt-2">Contacta a RRHH para que te asignen a un proyecto.</p>
+           </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {projects.map(proj => (
+              <div 
+                key={proj.id} 
+                onClick={() => setSelectedProject(proj)}
+                className="group bg-white rounded-2xl border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-[#003366]/20 transition-all cursor-pointer relative overflow-hidden"
+              >
+                <div className="absolute top-0 left-0 w-1 h-full bg-[#003366] opacity-0 group-hover:opacity-100 transition-opacity"/>
+                <div className="flex justify-between items-start mb-4">
+                   <div className="p-3 bg-blue-50 text-[#003366] rounded-xl group-hover:bg-[#003366] group-hover:text-white transition-colors">
+                      <Building2 size={24} />
+                   </div>
+                   <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded border border-slate-200">
+                      {proj.project_code || 'OBRA'}
+                   </span>
+                </div>
+                <h3 className="text-lg font-bold text-slate-800 mb-1">{proj.name}</h3>
+                <p className="flex items-center gap-2 text-sm text-slate-500"><MapPin size={14} className="text-[#f0c419]"/> {proj.location || 'Sin ubicación'}</p>
               </div>
-              <h3 className="text-lg font-bold text-slate-800 mb-1">{proj.name}</h3>
-              <p className="flex items-center gap-2 text-sm text-slate-500"><MapPin size={14} className="text-[#f0c419]"/> {proj.location || 'Sin ubicación'}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -363,8 +373,8 @@ const FieldAttendancePage = () => {
             />
           </div>
           <div className="flex items-center gap-2">
-             <span className="text-xs font-bold text-slate-400 uppercase">Fecha:</span>
-             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-slate-700 outline-none"/>
+              <span className="text-xs font-bold text-slate-400 uppercase">Fecha:</span>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-bold text-slate-700 outline-none"/>
           </div>
         </div>
 

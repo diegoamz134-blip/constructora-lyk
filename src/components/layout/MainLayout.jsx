@@ -29,7 +29,7 @@ const navItems = [
   { 
     path: '/campo/tareo', 
     icon: ClipboardCheck, 
-    label: 'Supervisión Campo',
+    label: 'Residente de Campo', // <--- CAMBIO REALIZADO AQUÍ
     allowed: ['admin', 'resident_engineer']
   },
   { 

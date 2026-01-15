@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, Search, Plus, UserCog, HardHat, 
   Briefcase, Filter, Trash2, Pencil, Baby, BookOpen, 
-  Activity, DollarSign,
+  Activity, DollarSign, Building2, // <--- Importado Building2
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
@@ -13,8 +13,8 @@ import AddEmployeeModal from './AddEmployeeModal';
 import AddWorkerModal from './AddWorkerModal';
 import ChangeStatusModal from './components/ChangeStatusModal'; 
 import StatusModal from '../../components/common/StatusModal';
-// Importamos el Modal de Confirmación (Reutilizamos el de proyectos)
 import ConfirmDeleteModal from '../projects/components/ConfirmDeleteModal';
+import AssignProjectsModal from './components/AssignProjectsModal'; // <--- NUEVO MODAL
 
 const HumanResourcesPage = () => {
   const [activeTab, setActiveTab] = useState('staff');
@@ -27,10 +27,14 @@ const HumanResourcesPage = () => {
   const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   
-  // --- ESTADOS PARA ELIMINACIÓN (NUEVO) ---
+  // --- ESTADOS PARA ELIMINACIÓN ---
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // --- ESTADOS PARA ASIGNACIÓN DE OBRAS (NUEVO) ---
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [userToAssign, setUserToAssign] = useState(null);
 
   const [userToEdit, setUserToEdit] = useState(null);
   const [userToChangeStatus, setUserToChangeStatus] = useState(null);
@@ -107,29 +111,30 @@ const HumanResourcesPage = () => {
     setIsStatusModalOpen(true);
   };
 
-  // --- NUEVA LÓGICA DE ELIMINACIÓN CON MODAL ---
-  
-  // 1. Abrir el modal al hacer clic en el basurero
+  // --- MANEJADOR PARA ASIGNAR OBRAS (NUEVO) ---
+  const handleAssignProjects = (user) => {
+    setUserToAssign(user);
+    setIsAssignModalOpen(true);
+  };
+
+  // --- ELIMINACIÓN ---
   const handleDeleteClick = (id) => {
     setItemToDelete(id);
     setIsDeleteModalOpen(true);
   };
 
-  // 2. Ejecutar borrado al confirmar en el modal
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     
     setIsDeleting(true);
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
-      
-      // Intentamos borrar directamente (asumiendo que ya configuraste ON DELETE CASCADE en la BD)
       const { error } = await supabase.from(table).delete().eq('id', itemToDelete);
       
       if (error) throw error;
 
       setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro eliminado correctamente.' });
-      fetchData(); // Recargar lista
+      fetchData(); 
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
 
@@ -139,7 +144,7 @@ const HumanResourcesPage = () => {
         isOpen: true, 
         type: 'error', 
         title: 'Error', 
-        message: 'No se pudo eliminar el registro. Verifica que no tenga datos asociados si no activaste el borrado en cascada.' 
+        message: 'No se pudo eliminar. Verifica dependencias.' 
       });
       setIsDeleteModalOpen(false);
     } finally {
@@ -224,7 +229,7 @@ const HumanResourcesPage = () => {
         {searchTerm && <button onClick={() => setSearchTerm('')} className="text-slate-400 hover:text-slate-600">Limpiar</button>}
       </div>
 
-      {/* Tabla con Animación y Paginación */}
+      {/* Tabla */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
         {loading ? (
           <div className="flex-1 p-12 flex justify-center items-center text-slate-400"><span className="animate-pulse font-bold">Cargando datos...</span></div>
@@ -316,6 +321,17 @@ const HumanResourcesPage = () => {
 
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-1">
+                              {/* BOTÓN ASIGNAR OBRAS - SOLO PARA STAFF */}
+                              {activeTab === 'staff' && (
+                                <button 
+                                  onClick={() => handleAssignProjects(user)}
+                                  className="p-2 text-slate-400 hover:text-[#003366] hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Asignar Obras"
+                                >
+                                  <Building2 size={18}/>
+                                </button>
+                              )}
+
                               <button 
                                 onClick={() => handleStatusChange(user)}
                                 className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
@@ -332,7 +348,6 @@ const HumanResourcesPage = () => {
                                 <Pencil size={18}/>
                               </button>
                               
-                              {/* BOTÓN ELIMINAR ACTUALIZADO */}
                               <button 
                                 onClick={() => handleDeleteClick(user.id)}
                                 className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -358,20 +373,8 @@ const HumanResourcesPage = () => {
                   </div>
                   
                   <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-                      <button 
-                        onClick={() => goToPage(1)} 
-                        disabled={currentPage === 1} 
-                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                      >
-                        <ChevronsLeft size={18}/>
-                      </button>
-                      <button 
-                        onClick={() => goToPage(currentPage - 1)} 
-                        disabled={currentPage === 1} 
-                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                      >
-                        <ChevronLeft size={18}/>
-                      </button>
+                      <button onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsLeft size={18}/></button>
+                      <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronLeft size={18}/></button>
                       
                       <div className="flex items-center gap-1 mx-2">
                           {Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -379,35 +382,14 @@ const HumanResourcesPage = () => {
                               .map((page, i, arr) => (
                                   <React.Fragment key={page}>
                                       {i > 0 && arr[i - 1] !== page - 1 && <span className="text-slate-300 text-xs px-1">...</span>}
-                                      <button 
-                                        onClick={() => goToPage(page)} 
-                                        className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
-                                          currentPage === page 
-                                            ? 'bg-[#003366] text-white shadow-md scale-110' 
-                                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-                                        }`}
-                                      >
-                                          {page}
-                                      </button>
+                                      <button onClick={() => goToPage(page)} className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === page ? 'bg-[#003366] text-white shadow-md scale-110' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}>{page}</button>
                                   </React.Fragment>
                               ))
                           }
                       </div>
 
-                      <button 
-                        onClick={() => goToPage(currentPage + 1)} 
-                        disabled={currentPage === totalPages} 
-                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                      >
-                        <ChevronRight size={18}/>
-                      </button>
-                      <button 
-                        onClick={() => goToPage(totalPages)} 
-                        disabled={currentPage === totalPages} 
-                        className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"
-                      >
-                        <ChevronsRight size={18}/>
-                      </button>
+                      <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronRight size={18}/></button>
+                      <button onClick={() => goToPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent text-slate-500 transition-all"><ChevronsRight size={18}/></button>
                   </div>
               </div>
             )}
@@ -415,7 +397,7 @@ const HumanResourcesPage = () => {
         )}
       </div>
 
-      {/* RENDERIZADO CONDICIONAL DE LOS MODALES */}
+      {/* MODALES */}
       <AddEmployeeModal 
         isOpen={isEmployeeModalOpen}
         onClose={() => setIsEmployeeModalOpen(false)}
@@ -438,19 +420,21 @@ const HumanResourcesPage = () => {
         onSuccess={fetchData}
       />
 
-      {/* MODAL DE CONFIRMACIÓN DE ELIMINACIÓN */}
+      {/* MODAL PARA ASIGNAR OBRAS (NUEVO) */}
+      <AssignProjectsModal 
+        isOpen={isAssignModalOpen}
+        onClose={() => setIsAssignModalOpen(false)}
+        user={userToAssign}
+        onSuccess={() => setNotification({ isOpen: true, type: 'success', title: 'Asignación Correcta', message: 'Se actualizaron las obras del residente.' })}
+      />
+
       <ConfirmDeleteModal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={handleConfirmDelete}
         loading={isDeleting}
         title={activeTab === 'staff' ? "¿Eliminar Personal?" : "¿Eliminar Obrero?"}
-        message={
-          <span>
-            ¿Estás seguro de que deseas eliminar este registro? <br/>
-            Esta acción es irreversible.
-          </span>
-        }
+        message={<span>¿Estás seguro de que deseas eliminar este registro? <br/>Esta acción es irreversible.</span>}
         warning="Se eliminará todo su historial, asistencias y pagos permanentemente."
       />
 
