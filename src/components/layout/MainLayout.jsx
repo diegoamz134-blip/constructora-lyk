@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
-  DollarSign, ClipboardCheck, CalendarDays // <--- NUEVO ICONO IMPORTADO
+  DollarSign, ClipboardCheck 
 } from 'lucide-react';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
@@ -43,7 +43,7 @@ const navItems = [
     allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
-      { path: '/asistencia', label: 'Control Asistencia', icon: CalendarDays }, // <--- NUEVA OPCIÓN DE MENÚ
+      // SE ELIMINÓ LA OPCIÓN DE CONTROL DE ASISTENCIA AQUÍ
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
@@ -200,7 +200,6 @@ const MainLayout = () => {
     if (location.pathname.includes('/users')) return 'Gestión de Personal';
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
     if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
-    if (location.pathname.includes('/asistencia')) return 'Control de Asistencia'; // <--- TÍTULO NUEVO
     return 'Constructora L&K';
   };
 

@@ -17,7 +17,6 @@ const DashboardPage = React.lazy(() => import('./modules/admin-control/Dashboard
 const ProjectsPage = React.lazy(() => import('./modules/projects/ProjectsPage')); 
 const HumanResourcesPage = React.lazy(() => import('./modules/hr/HumanResourcesPage'));
 const PayrollPage = React.lazy(() => import('./modules/hr/PayrollPage'));
-const AttendanceManagementPage = React.lazy(() => import('./modules/hr/AttendanceManagementPage')); // <--- NUEVA PÁGINA
 const ReportsPage = React.lazy(() => import('./modules/admin-control/ReportsPage'));
 const ConfigurationPage = React.lazy(() => import('./modules/admin-control/ConfigurationPage'));
 const UserProfilePage = React.lazy(() => import('./modules/admin-control/UserProfilePage'));
@@ -89,7 +88,7 @@ function App() {
         <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/users" element={<HumanResourcesPage />} />
-             <Route path="/asistencia" element={<AttendanceManagementPage />} /> {/* <--- RUTA NUEVA AGREGADA */}
+             {/* SE ELIMINÓ LA RUTA DE ASISTENCIA AQUÍ */}
              <Route path="/planillas" element={<PayrollPage />} />
              <Route path="/documentacion" element={<DocumentationPage />} />
           </Route>
