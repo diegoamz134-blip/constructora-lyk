@@ -15,11 +15,15 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
+
+// --- AQUÍ ESTÁN LOS CAMBIOS DE ROLES ---
 const ROLES = [
   { label: 'Staff (Básico)', value: 'staff' },
-  { label: 'Administrador', value: 'admin' },
+  { label: 'Admin', value: 'admin' },
   { label: 'RR.HH.', value: 'rrhh' },
-  { label: 'Ingeniero Residente', value: 'resident_engineer' }
+  { label: 'Residente de Obra', value: 'resident_engineer' }, // <--- NOMBRE CAMBIADO
+  { label: 'SSOMA', value: 'ssoma' }, // <--- NUEVO ROL
+  { label: 'Administrativo', value: 'administrativo' } // <--- NUEVO ROL
 ];
 
 const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
@@ -123,7 +127,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     try {
       const fullName = `${formData.first_name} ${formData.paternal_surname} ${formData.maternal_surname}`.trim();
       
-      // 1. Encriptar contraseña (LOGICA AUTÓNOMA)
+      // Encriptar contraseña
       let hashedPassword = null;
       if (formData.password) {
           const salt = await bcrypt.genSalt(10);
@@ -160,7 +164,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
           payload.password = hashedPassword;
       }
 
-      // 3. Insertar o Actualizar en Base de Datos
+      // Insertar o Actualizar en Base de Datos
       if (userToEdit) {
         const { error } = await supabase.from('employees').update(payload).eq('id', userToEdit.id);
         if (error) throw error;
@@ -169,7 +173,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         if (error) throw error;
       }
 
-      // 4. (Opcional) Sincronizar tabla Profiles - CORREGIDO AQUÍ
+      // Sincronizar tabla Profiles
       if (formData.email) {
           const profileData = { 
             full_name: fullName, first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
@@ -181,13 +185,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
           if (existing) {
              await supabase.from('profiles').update(profileData).eq('id', existing.id);
           } else {
-             // CORRECCIÓN: Usamos destructuración para manejar el error, NO .catch()
              const { error: profileError } = await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]);
-             
-             if (profileError) {
-               console.warn("Error secundario al crear perfil:", profileError.message);
-               // No lanzamos error aquí para no bloquear el flujo principal si el empleado ya se creó
-             }
+             if (profileError) console.warn("Error secundario al crear perfil:", profileError.message);
           }
       }
 

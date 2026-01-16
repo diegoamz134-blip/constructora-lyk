@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
-  MapPin, Calendar, Clock, FileText, Filter, 
-  Camera, User, HardHat, UserCog, Loader2, Search, 
-  ArrowLeft, Building2, Users, FileDown, PieChart as PieChartIcon, BarChart3, 
-  X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  MapPin, Calendar, FileText, Filter, 
+  User, HardHat, UserCog, Loader2, Search, 
+  ArrowLeft, Building2, FileDown, 
+  X, ChevronLeft, ChevronRight, ChevronsLeft
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { supabase } from '../../services/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -41,6 +41,7 @@ const ReportsPage = () => {
   const ITEMS_PER_PAGE = 10;
 
   // --- ESTADOS ---
+  const [activeTab, setActiveTab] = useState('workers'); // 'workers' | 'staff'
   const [viewMode, setViewMode] = useState('projects'); 
   const [projectsList, setProjectsList] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -68,13 +69,37 @@ const ReportsPage = () => {
   const [filterText, setFilterText] = useState('');
   const [filterRole, setFilterRole] = useState('Todos');
 
-  const ROLES = ['Todos', 'Operario', 'Oficial', 'Peón', 'Capataz', 'Topógrafo', 'Staff'];
+  // Roles dinámicos según el Tab activo
+  const ROLES = activeTab === 'workers' 
+    ? ['Todos', 'Operario', 'Oficial', 'Peón', 'Capataz', 'Topógrafo'] 
+    : ['Todos', 'Administrador', 'RR.HH.', 'Residente de Obra', 'SSOMA', 'Administrativo de Campo', 'Staff'];
+
   const COLORS = { obrero: '#003366', staff: '#f0c419', late: '#ef4444', ontime: '#22c55e' };
 
   // --- 1. CARGA INICIAL ---
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // --- EFECTO AL CAMBIAR PESTAÑA ---
+  useEffect(() => {
+    // Reiniciar filtros y datos al cambiar de pestaña
+    setFilterText('');
+    setFilterRole('Todos');
+    setAttendanceData([]);
+    setCurrentPage(1);
+
+    if (activeTab === 'staff') {
+        // SI ES STAFF: Cargar datos directamente (sin seleccionar proyecto)
+        setSelectedProject(null);
+        setViewMode('detail'); 
+        fetchAttendance(1, null, 'staff');
+    } else {
+        // SI ES OBREROS: Mostrar lista de proyectos
+        setSelectedProject(null);
+        setViewMode('projects');
+    }
+  }, [activeTab]);
 
   const loadProjects = async () => {
     try {
@@ -83,25 +108,42 @@ const ReportsPage = () => {
     } catch (error) { console.error(error); }
   };
 
-  // --- 2. FETCH DE ASISTENCIA (PARA PANTALLA) ---
-  const fetchAttendance = async (page = 1, project = selectedProject) => {
+  // --- 2. FETCH DE ASISTENCIA ---
+  const fetchAttendance = async (page = 1, project = selectedProject, currentTab = activeTab) => {
     setLoading(true);
     try {
-      let query = supabase
-        .from('attendance')
-        .select(`
+      let query = supabase.from('attendance');
+
+      // A) SELECCIÓN DE COLUMNAS Y TABLA RELACIONADA SEGÚN TAB
+      if (currentTab === 'workers') {
+        query = query.select(`
           *,
-          workers ( id, full_name, category, document_number ),
-          employees ( id, full_name, position, document_number )
-        `, { count: 'exact' })
+          workers!inner ( id, full_name, category, document_number )
+        `, { count: 'exact' });
+      } else {
+        query = query.select(`
+          *,
+          employees!inner ( id, full_name, position, document_number )
+        `, { count: 'exact' });
+      }
+
+      // B) FILTROS DE FECHA
+      query = query
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
-        .eq('validation_status', 'VALIDADO') // <--- ACTUALIZADO: FILTRO DE VALIDACIÓN AGREGADO
         .order('date', { ascending: true })
         .order('check_in_time', { ascending: true });
 
-      if (project) {
-        query = query.eq('project_name', project.name);
+      // C) FILTROS ESPECÍFICOS POR ROL
+      if (currentTab === 'workers') {
+        // OBREROS: Solo validado y filtrado por proyecto si se seleccionó uno
+        query = query.eq('validation_status', 'VALIDADO');
+        if (project) {
+            query = query.eq('project_name', project.name);
+        }
+      } else {
+        // STAFF: NO FILTRAMOS POR 'VALIDADO' para que salgan sus marcaciones automáticas
+        // STAFF: NO FILTRAMOS POR PROYECTO (Vista Global)
       }
 
       const { data, error } = await query;
@@ -112,7 +154,7 @@ const ReportsPage = () => {
       // Filtro de Texto (Local)
       if (filterText) {
          finalData = finalData.filter(item => {
-            const u = getUserData(item);
+            const u = getUserData(item, currentTab);
             return u.name.toLowerCase().includes(filterText.toLowerCase()) || u.doc.includes(filterText);
          });
       }
@@ -120,8 +162,7 @@ const ReportsPage = () => {
       // Filtro de Rol (Local)
       if (filterRole !== 'Todos') {
          finalData = finalData.filter(item => {
-            const u = getUserData(item);
-            if (filterRole === 'Staff') return u.type === 'STAFF';
+            const u = getUserData(item, currentTab);
             return u.role === filterRole;
          });
       }
@@ -137,10 +178,11 @@ const ReportsPage = () => {
     }
   };
 
+  // Recarga automática al cambiar filtros (solo en modo detalle)
   useEffect(() => {
-    if (viewMode === 'detail' || (viewMode === 'projects' && (filterText || filterRole !== 'Todos'))) {
+    if (viewMode === 'detail' || activeTab === 'staff') {
        const timer = setTimeout(() => {
-          fetchAttendance(1, selectedProject);
+          fetchAttendance(1, selectedProject, activeTab);
        }, 500);
        return () => clearTimeout(timer);
     }
@@ -160,22 +202,24 @@ const ReportsPage = () => {
     }
   };
 
-  const getUserData = (item) => {
-    if (item.workers) return { name: item.workers.full_name, role: item.workers.category, doc: item.workers.document_number, type: 'OBRERO' };
-    if (item.employees) return { name: item.employees.full_name, role: item.employees.position, doc: item.employees.document_number, type: 'STAFF' };
+  const getUserData = (item, tab = activeTab) => {
+    if (tab === 'workers' && item.workers) {
+        return { name: item.workers.full_name, role: item.workers.category, doc: item.workers.document_number, type: 'OBRERO' };
+    }
+    if (tab === 'staff' && item.employees) {
+        return { name: item.employees.full_name, role: item.employees.position, doc: item.employees.document_number, type: 'STAFF' };
+    }
     return { name: 'Desconocido', role: '-', doc: '-', type: '?' };
   };
 
-  // --- ESTADÍSTICAS CORREGIDAS (LÓGICA ESTRICTA 8.5h / 5.5h) ---
+  // --- ESTADÍSTICAS ---
   const stats = useMemo(() => {
-    const dataToAnalyze = attendanceData; 
     const grouped = {};
-    let obreros = 0, staff = 0;
+    let presentCount = 0;
 
-    dataToAnalyze.forEach(item => {
+    attendanceData.forEach(item => {
       const dateKey = new Date(item.date).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
-      if (!grouped[dateKey]) grouped[dateKey] = { name: dateKey, Obrero: 0, Staff: 0 };
-      const u = getUserData(item);
+      if (!grouped[dateKey]) grouped[dateKey] = { name: dateKey, Asistencia: 0 };
       
       // LÓGICA DE JORNADA
       let dayValue = 0;
@@ -183,38 +227,32 @@ const ReportsPage = () => {
           const diffMs = new Date(item.check_out_time) - new Date(item.check_in_time);
           const hours = diffMs / (1000 * 60 * 60);
           
-          // Corrección segura de fecha para detectar sábado
           const recordDate = new Date(item.date.split('-').join('/'));
           const isSaturday = recordDate.getDay() === 6;
 
           if (isSaturday) {
-             if (hours >= 5.5) dayValue = 1; // Sábado estricto: >= 5.5h
+             if (hours >= 5.5) dayValue = 1; 
              else if (hours >= 1) dayValue = 0.5;
-             else dayValue = 0;
           } else {
-             if (hours >= 8.5) dayValue = 1; // Lunes-Viernes estricto: >= 8.5h
+             if (hours >= 8.5) dayValue = 1; 
              else if (hours >= 1) dayValue = 0.5;
-             else dayValue = 0;
           }
-          
       } else if (!item.check_out_time) {
           dayValue = 0; 
       }
 
-      if (u.type === 'OBRERO') { 
-          grouped[dateKey].Obrero += dayValue; 
-          if(dayValue > 0) obreros++; 
-      } else { 
-          grouped[dateKey].Staff += dayValue; 
-          if(dayValue > 0) staff++; 
-      }
+      grouped[dateKey].Asistencia += dayValue; 
+      if(dayValue > 0) presentCount++;
     });
 
     return { 
       total: totalRecords,
-      unique: new Set(dataToAnalyze.map(i => i.worker_id || i.employee_id)).size,
+      unique: new Set(attendanceData.map(i => i.worker_id || i.employee_id)).size,
       barData: Object.values(grouped),
-      pieData: [{ name: 'Obreros', value: obreros }, { name: 'Staff', value: staff }].filter(d => d.value > 0)
+      pieData: [
+          { name: 'Asistencias', value: presentCount }, 
+          { name: 'Observados', value: totalRecords - presentCount } 
+      ].filter(d => d.value > 0)
     };
   }, [attendanceData, totalRecords]);
 
@@ -239,15 +277,22 @@ const ReportsPage = () => {
   const generatePDF = async () => {
     setIsGeneratingPdf(true);
     try {
-      let query = supabase
-        .from('attendance')
-        .select(`*, workers(full_name,category,document_number), employees(full_name,position,document_number)`)
+      // Reutilizamos la lógica de fetch para obtener TODOS los registros
+      let query = supabase.from('attendance');
+      if (activeTab === 'workers') {
+        query = query.select(`*, workers(full_name,category,document_number)`);
+        query = query.eq('validation_status', 'VALIDADO'); // Validado solo para obreros
+      } else {
+        query = query.select(`*, employees(full_name,position,document_number)`);
+      }
+
+      query = query
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date', { ascending: true })
         .range(0, 9999);
         
-      if (selectedProject) query = query.eq('project_name', selectedProject.name);
+      if (selectedProject && activeTab === 'workers') query = query.eq('project_name', selectedProject.name);
       
       const { data: fullData, error } = await query;
       if (error || !fullData || fullData.length === 0) { alert("Sin datos para reportar."); return; }
@@ -284,26 +329,20 @@ const ReportsPage = () => {
         
         doc.addImage(imgLogo, 'PNG', 14, 10, 35, 12);
         doc.setFontSize(16); doc.setTextColor(0, 51, 102); doc.setFont("helvetica", "bold");
-        doc.text("LISTA DE ASISTENCIA DE PERSONAL - L&K", 280, 18, { align: "right" });
+        doc.text(`LISTA DE ASISTENCIA - ${activeTab === 'workers' ? 'OBREROS' : 'STAFF'}`, 280, 18, { align: "right" });
         doc.setDrawColor(0, 51, 102); doc.setLineWidth(0.5); doc.line(14, 25, 283, 25);
 
         doc.setFontSize(9); doc.setTextColor(50); doc.setFont("helvetica", "bold");
         const fechaStr = dateObj.toLocaleDateString('es-PE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }).toUpperCase();
         
-        doc.text("OBRA:", 14, 32); doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
-        doc.text(selectedProject ? selectedProject.name.toUpperCase() : 'REPORTE GLOBAL', 28, 32);
+        doc.text("OBRA/ÁREA:", 14, 32); doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
+        doc.text(selectedProject ? selectedProject.name.toUpperCase() : 'REPORTE GENERAL', 35, 32);
         
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("C.C.:", 150, 32);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(selectedProject?.project_code || '---', 160, 32);
-
         doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("SEMANA:", 240, 32);
         doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(`${getWeekNumber(dateObj)}`, 260, 32);
 
         doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("FECHA:", 14, 38);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(fechaStr, 28, 38);
-        
-        doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("TURNO:", 150, 38);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text("DÍA", 165, 38);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(fechaStr, 35, 38);
 
         const dayRows = reportData.filter(x => x.date === d);
         const tableBody = [];
@@ -324,7 +363,7 @@ const ReportsPage = () => {
              index: idx + 1,
              name: u.name.toUpperCase(),
              doc: u.doc,
-             cat: `${u.role.toUpperCase()}\n${u.role === 'Operario' ? '(Albañil)' : ''}`, 
+             cat: u.role.toUpperCase(), 
              hi: `${hiTime}\n${hiLoc}`, 
              firma_in: pIn, 
              hs: `${hsTime}\n${hsLoc}`, 
@@ -335,11 +374,11 @@ const ReportsPage = () => {
 
         autoTable(doc, {
            startY: 42,
-           head: [['N°', 'APELLIDOS Y NOMBRES', 'DNI / C.E.', 'CATEGORIA\nESPECIALIDAD', 'H.I\n(HORA Y UBICACIÓN)', 'FIRMA (ENTRADA)', 'H.S\n(HORA Y UBICACIÓN)', 'FIRMA (SALIDA)', 'OBSERVACIONES']],
+           head: [['N°', 'APELLIDOS Y NOMBRES', 'DNI / DOC', 'CARGO', 'H.I\n(HORA Y UBICACIÓN)', 'FOTO (ENTRADA)', 'H.S\n(HORA Y UBICACIÓN)', 'FOTO (SALIDA)', 'OBSERVACIONES']],
            body: tableBody.map(r => [ r.index, r.name, r.doc, r.cat, r.hi, '', r.hs, '', r.obs ]),
            theme: 'grid',
            styles: { fontSize: 6, valign: 'middle', halign: 'center', lineColor: [200, 200, 200], lineWidth: 0.1, cellPadding: 1, textColor: [0, 0, 0] },
-           headStyles: { fillColor: [0, 51, 102], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+           headStyles: { fillColor: activeTab === 'workers' ? [0, 51, 102] : [240, 196, 25], textColor: activeTab === 'workers' ? [255, 255, 255] : [50, 50, 50], fontStyle: 'bold', halign: 'center', valign: 'middle' },
            columnStyles: { 0: {cellWidth: 8}, 1: {cellWidth: 50, halign: 'left'}, 2: {cellWidth: 18}, 3: {cellWidth: 20}, 4: {cellWidth: 30}, 5: {cellWidth: 22}, 6: {cellWidth: 30}, 7: {cellWidth: 22}, 8: {cellWidth: 'auto'} },
            bodyStyles: { minCellHeight: 18 },
            didDrawCell: (data) => {
@@ -359,55 +398,40 @@ const ReportsPage = () => {
         doc.setFontSize(7); doc.setTextColor(150);
         doc.text(`Sistema de Gestión L&K - Página ${pageCount}`, 14, 200);
       }
-      doc.save(`TAREO_${selectedProject?.name || 'GLOBAL'}_${dateRange.start}.pdf`);
+      doc.save(`TAREO_${activeTab.toUpperCase()}_${dateRange.start}.pdf`);
     } catch (e) { alert("Error PDF"); console.error(e); }
     finally { setIsGeneratingPdf(false); }
   };
 
-  // --- GENERADOR EXCEL (MULTI-HOJA) ---
+  // --- GENERADOR EXCEL ---
   const handleExportExcel = async () => {
     setIsGeneratingExcel(true);
     try {
-      console.log("Iniciando exportación Excel Completa.");
+      // Cargamos master list solo de lo necesario
+      let masterList = [];
+      const { data } = await supabase.from(activeTab === 'workers' ? 'workers' : 'employees')
+                                     .select('*').eq('status', 'Activo').range(0, 4999);
+      masterList = data || [];
 
-      // 1. CARGAR MASTER LIST (Todos los activos)
-      const { data: allWorkers, error: errWorkers } = await supabase
-          .from('workers')
-          .select('*')
-          .eq('status', 'Activo')
-          .range(0, 4999);
-      
-      const { data: allStaff, error: errStaff } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('status', 'Activo')
-          .range(0, 4999);
+      // Cargamos asistencia
+      let query = supabase.from('attendance');
+      if (activeTab === 'workers') {
+          query = query.select(`*, workers(id, full_name, category, document_number, start_date)`);
+          query = query.eq('validation_status', 'VALIDADO'); // Filtro solo para workers
+      } else {
+          query = query.select(`*, employees(id, full_name, position, document_number, entry_date)`);
+      }
 
-      if (errWorkers || errStaff) throw new Error("Error cargando lista de personal.");
-
-      // 2. CARGAR ASISTENCIAS DEL RANGO
-      let query = supabase
-        .from('attendance')
-        .select(`
-            *, 
-            workers(id, full_name, category, document_number, start_date), 
-            employees(id, full_name, position, document_number, entry_date)
-        `)
-        .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
-        .order('date', { ascending: true })
-        .range(0, 9999); 
-        
-      if (selectedProject) query = query.eq('project_name', selectedProject.name);
+      query = query.gte('date', dateRange.start).lte('date', dateRange.end).order('date', { ascending: true }).range(0, 9999);
+      if (selectedProject && activeTab === 'workers') query = query.eq('project_name', selectedProject.name);
       
       const { data: attendanceData, error } = await query;
       if (error) throw error;
 
-      // 3. GENERAR EXCEL (Pasamos projectsList para generar hojas)
       await generateTareoExcel(
           attendanceData || [], 
-          allWorkers || [], 
-          allStaff || [], 
+          activeTab === 'workers' ? masterList : [], 
+          activeTab === 'staff' ? masterList : [], 
           dateRange, 
           selectedProject,
           projectsList || [] 
@@ -415,7 +439,7 @@ const ReportsPage = () => {
 
     } catch (e) {
       console.error("Error General Excel:", e);
-      alert("Error inesperado al generar Excel. Revisa la consola.");
+      alert("Error inesperado al generar Excel.");
     } finally {
       setIsGeneratingExcel(false);
     }
@@ -428,17 +452,37 @@ const ReportsPage = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
              <FileText className="text-[#003366]"/> 
-             {selectedProject ? `Obra: ${selectedProject.name}` : 'Reportes y KPI Global'}
+             {activeTab === 'staff' ? 'Control de Asistencia Staff' : (selectedProject ? `Obra: ${selectedProject.name}` : 'Reportes de Obra')}
           </h2>
           <p className="text-slate-500 text-sm">
-            {selectedProject ? 'Gestión detallada de asistencia.' : 'Vista general de todas las obras.'}
+            {activeTab === 'staff' ? 'Vista general de asistencia administrativa.' : 'Gestión de tareos y horas en proyectos.'}
           </p>
         </div>
-        {selectedProject && (
+        {selectedProject && activeTab === 'workers' && (
            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-[#003366] bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm font-bold text-sm">
-              <ArrowLeft size={16}/> Volver
+              <ArrowLeft size={16}/> Volver a Obras
            </button>
         )}
+      </div>
+
+      {/* TABS DE NAVEGACIÓN */}
+      <div className="flex p-1 bg-white rounded-2xl border border-slate-200 w-fit shadow-sm">
+        <button
+          onClick={() => setActiveTab('workers')}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${
+            activeTab === 'workers' ? 'bg-blue-50 text-[#003366] shadow-sm ring-1 ring-blue-100' : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <HardHat size={18} /> Obreros
+        </button>
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${
+            activeTab === 'staff' ? 'bg-yellow-50 text-yellow-700 shadow-sm ring-1 ring-yellow-100' : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <UserCog size={18} /> Staff
+        </button>
       </div>
 
       {/* FILTROS */}
@@ -497,8 +541,8 @@ const ReportsPage = () => {
          </div>
       </div>
 
-      {/* VISTA TARJETAS PROYECTO */}
-      {!selectedProject && !isGlobalSearchMode && (
+      {/* VISTA 1: LISTA DE PROYECTOS (SOLO PARA WORKERS) */}
+      {activeTab === 'workers' && !selectedProject && !isGlobalSearchMode && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
            {loading && projectsList.length === 0 ? (
              <div className="col-span-full py-20 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/> Cargando obras...</div>
@@ -512,29 +556,25 @@ const ReportsPage = () => {
                  </div>
                  <h3 className="font-bold text-lg text-slate-800 mb-1">{proj.name}</h3>
                  <p className="text-sm text-slate-500 flex items-center gap-1"><MapPin size={14}/> {proj.location}</p>
+                 <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-xs font-bold text-slate-400">
+                    <span>Ver Reporte</span>
+                    <ArrowLeft className="rotate-180" size={14}/>
+                 </div>
                </motion.div>
              ))
            )}
         </div>
       )}
 
-      {/* VISTA DETALLE Y TABLA PAGINADA */}
-      {(selectedProject || isGlobalSearchMode) && (
+      {/* VISTA 2: DETALLE / TABLA (PARA WORKERS EN PROYECTO O STAFF SIEMPRE) */}
+      {(activeTab === 'staff' || selectedProject || isGlobalSearchMode) && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-           {/* HEADER BÚSQUEDA GLOBAL */}
-           {isGlobalSearchMode && (
-             <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl flex items-center gap-3 text-blue-800 text-sm">
-                <Search size={18}/> 
-                <span>Búsqueda Global: {stats.total} registros encontrados.</span>
-                <button onClick={() => { setFilterText(''); setFilterRole('Todos'); }} className="ml-auto text-xs font-bold underline">Limpiar</button>
-             </div>
-           )}
-
-           {/* GRÁFICOS (VISIBLES CON TODA LA DATA) */}
+           
+           {/* GRÁFICOS */}
            {attendanceData.length > 0 && !filterText && (
              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 <div className="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm min-h-[300px]">
-                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Asistencia Total (Jornales)</h4>
+                   <h4 className="font-bold text-slate-700 mb-4 text-sm uppercase">Evolución de Asistencia ({activeTab === 'workers' ? 'Obreros' : 'Staff'})</h4>
                    <ResponsiveContainer width="100%" height={240}>
                       <BarChart data={stats.barData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false}/>
@@ -542,17 +582,16 @@ const ReportsPage = () => {
                           <YAxis axisLine={false} tickLine={false} tick={{fontSize:11}}/>
                           <Tooltip cursor={{fill: 'transparent'}}/>
                           <Legend />
-                          <Bar dataKey="Obrero" stackId="a" fill={COLORS.obrero} radius={[0,0,4,4]} barSize={30}/>
-                          <Bar dataKey="Staff" stackId="a" fill={COLORS.staff} radius={[4,4,0,0]} barSize={30}/>
+                          <Bar dataKey="Asistencia" fill={COLORS[activeTab === 'workers' ? 'obrero' : 'staff']} radius={[4,4,0,0]} barSize={30}/>
                       </BarChart>
                    </ResponsiveContainer>
                 </div>
                 <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center">
-                   <h4 className="font-bold text-slate-700 mb-2 text-sm uppercase text-center">Distribución Total</h4>
+                   <h4 className="font-bold text-slate-700 mb-2 text-sm uppercase text-center">Resumen del Periodo</h4>
                    <ResponsiveContainer width="100%" height={200}>
                       <PieChart>
                          <Pie data={stats.pieData} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
-                            {stats.pieData.map((e,i)=><Cell key={i} fill={e.name==='Obreros'?COLORS.obrero:COLORS.staff}/>)}
+                            {stats.pieData.map((e,i)=><Cell key={i} fill={i===0 ? COLORS[activeTab === 'workers' ? 'obrero' : 'staff'] : COLORS.late}/>)}
                          </Pie>
                          <Tooltip/>
                       </PieChart>
@@ -565,7 +604,7 @@ const ReportsPage = () => {
              </div>
            )}
 
-           {/* TABLA PAGINADA (LOCALMENTE) */}
+           {/* TABLA */}
            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
               <div className="overflow-x-auto flex-1">
                  {loading ? (
@@ -577,7 +616,8 @@ const ReportsPage = () => {
                        <thead className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase">
                           <tr>
                              <th className="px-6 py-4">Personal</th>
-                             <th className="px-6 py-4">Proyecto</th>
+                             {/* PROYECTO: SOLO PARA OBREROS */}
+                             {activeTab === 'workers' && <th className="px-6 py-4">Proyecto</th>}
                              <th className="px-6 py-4">Fecha</th>
                              <th className="px-6 py-4">Entrada</th>
                              <th className="px-6 py-4">Salida</th>
@@ -607,7 +647,11 @@ const ReportsPage = () => {
                                          <div><p className="font-bold text-slate-700">{u.name}</p><p className="text-xs text-slate-400">{u.role}</p></div>
                                       </div>
                                    </td>
-                                   <td className="px-6 py-4 text-xs font-bold text-slate-600">{item.project_name}</td>
+                                   
+                                   {activeTab === 'workers' && (
+                                      <td className="px-6 py-4 text-xs font-bold text-slate-600">{item.project_name}</td>
+                                   )}
+
                                    <td className="px-6 py-4 font-medium text-slate-600">{new Date(item.date).toLocaleDateString()}</td>
                                    <td className="px-6 py-4">
                                       {item.check_in_time ? (

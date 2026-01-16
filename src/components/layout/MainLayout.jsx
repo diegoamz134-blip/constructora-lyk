@@ -5,9 +5,8 @@ import {
   LayoutDashboard, Building2, Users, FileText, Settings, 
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
-  DollarSign, ClipboardCheck 
+  DollarSign, ClipboardCheck, CalendarDays // <--- NUEVO ICONO IMPORTADO
 } from 'lucide-react';
-// Eliminamos la dependencia de Avatar de heroui para tener control total con img
 import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
@@ -18,19 +17,19 @@ const navItems = [
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero']
+    allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero', 'ssoma', 'administrativo']
   },
   { 
     path: '/proyectos', 
     icon: Building2, 
     label: 'Proyectos',
-    allowed: ['admin']
+    allowed: ['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo']
   },
   { 
     path: '/campo/tareo', 
     icon: ClipboardCheck, 
-    label: 'Residente de Campo', // <--- CAMBIO REALIZADO AQUÍ
-    allowed: ['admin', 'resident_engineer']
+    label: 'Residente de Campo', 
+    allowed: ['admin', 'resident_engineer', 'ssoma', 'administrativo']
   },
   { 
     path: '/licitaciones', 
@@ -44,6 +43,7 @@ const navItems = [
     allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
+      { path: '/asistencia', label: 'Control Asistencia', icon: CalendarDays }, // <--- NUEVA OPCIÓN DE MENÚ
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
@@ -74,10 +74,10 @@ const MainLayout = () => {
                       currentUser?.email?.split('@')[0] || 
                       'Usuario';
   
-  // URL de la foto (prioridad a photo_url de la BD, luego avatar_url de Google/Supabase)
+  // URL de la foto
   const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
 
-  // Iniciales para el fallback
+  // Iniciales
   const initials = displayName
     .split(' ')
     .map(n => n[0])
@@ -200,6 +200,7 @@ const MainLayout = () => {
     if (location.pathname.includes('/users')) return 'Gestión de Personal';
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
     if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
+    if (location.pathname.includes('/asistencia')) return 'Control de Asistencia'; // <--- TÍTULO NUEVO
     return 'Constructora L&K';
   };
 
@@ -262,14 +263,13 @@ const MainLayout = () => {
               </button>
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
                 
-                {/* --- SECCIÓN DE FOTO CORREGIDA --- */}
                 <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
                   {displayPhoto ? (
                     <img 
                       src={displayPhoto} 
                       alt="Perfil" 
                       className="w-full h-full object-cover"
-                      onError={(e) => { e.target.style.display = 'none'; }} // Si falla la imagen, no muestra icono roto
+                      onError={(e) => { e.target.style.display = 'none'; }} 
                     />
                   ) : (
                     <span className="text-xs font-bold text-slate-500">{initials}</span>
@@ -278,7 +278,9 @@ const MainLayout = () => {
 
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
-                  <p className="text-[11px] text-slate-400 font-medium capitalize">{currentRole.replace('_', ' ')}</p>
+                  <p className="text-[11px] text-slate-400 font-medium capitalize">
+                     {currentRole === 'resident_engineer' ? 'Residente de Obra' : currentRole.replace('_', ' ')}
+                  </p>
                 </div>
                 <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors hidden md:block" />
               </div>
