@@ -15,6 +15,9 @@ const ComplaintsBookPage = React.lazy(() => import('./modules/landing/Complaints
 const LoginPage = React.lazy(() => import('./modules/auth/LoginPage'));
 const DashboardPage = React.lazy(() => import('./modules/admin-control/DashboardPage'));
 const ProjectsPage = React.lazy(() => import('./modules/projects/ProjectsPage')); 
+// --- NUEVO IMPORT PARA SEDES ---
+const SedesPage = React.lazy(() => import('./modules/projects/SedesPage'));
+
 const HumanResourcesPage = React.lazy(() => import('./modules/hr/HumanResourcesPage'));
 const PayrollPage = React.lazy(() => import('./modules/hr/PayrollPage'));
 const ReportsPage = React.lazy(() => import('./modules/admin-control/ReportsPage'));
@@ -62,10 +65,12 @@ function App() {
           </Route>
         </Route>
 
-        {/* GRUPO 2: GESTIÓN DE OBRAS */}
+        {/* GRUPO 2: GESTIÓN DE OBRAS (Y SEDES) */}
         <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/proyectos" element={<ProjectsPage />} />
+             {/* --- NUEVA RUTA DE SEDES --- */}
+             <Route path="/proyectos/sedes" element={<SedesPage />} />
           </Route>
         </Route>
 

@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, User, Briefcase, DollarSign, Loader2, 
   Baby, BookOpen, ChevronDown, Check,
-  Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart, Hash
+  Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart, Hash,
+  MapPin // <--- ÍCONO NUEVO
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
+import { getSedes } from '../../services/sedesService'; // <--- IMPORTAMOS EL SERVICIO DE SEDES
 import bcrypt from 'bcryptjs';
 import StatusModal from '../../components/common/StatusModal';
 
@@ -16,49 +18,74 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
 
-// --- AQUÍ ESTÁN LOS CAMBIOS DE ROLES ---
 const ROLES = [
   { label: 'Staff (Básico)', value: 'staff' },
   { label: 'Admin', value: 'admin' },
   { label: 'RR.HH.', value: 'rrhh' },
-  { label: 'Residente de Obra', value: 'resident_engineer' }, // <--- NOMBRE CAMBIADO
-  { label: 'SSOMA', value: 'ssoma' }, // <--- NUEVO ROL
-  { label: 'Administrativo', value: 'administrativo' } // <--- NUEVO ROL
+  { label: 'Residente de Obra', value: 'resident_engineer' },
+  { label: 'SSOMA', value: 'ssoma' },
+  { label: 'Administrativo', value: 'administrativo' }
 ];
 
 const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
   
+  // Estados de menús
   const [showDocTypeMenu, setShowDocTypeMenu] = useState(false);
   const [showAfpMenu, setShowAfpMenu] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false); 
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
+  const [showSedeMenu, setShowSedeMenu] = useState(false); // <--- NUEVO MENÚ SEDE
 
+  // Referencias para clicks fuera
   const docTypeRef = useRef(null);
   const afpRef = useRef(null);
   const roleRef = useRef(null); 
   const commissionRef = useRef(null);
+  const sedeRef = useRef(null); // <--- NUEVA REF
+
+  // Estado para la lista de sedes cargada desde BD
+  const [sedesList, setSedesList] = useState([]); 
 
   const [formData, setFormData] = useState({
     first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
     document_type: 'DNI', document_number: '', position: '', salary: '', 
     start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
     password: '', afp: '', commission_type: 'Flujo', cuspp: '', 
-    has_children: false, children_count: 0, email: '', role: 'staff'
+    has_children: false, children_count: 0, email: '', role: 'staff',
+    sede_id: '' // <--- NUEVO CAMPO
   });
 
+  // Cargar Sedes al abrir el modal
+  useEffect(() => {
+    if (isOpen) {
+      const loadSedes = async () => {
+        try {
+          const data = await getSedes();
+          setSedesList(data);
+        } catch (error) {
+          console.error("Error cargando sedes:", error);
+        }
+      };
+      loadSedes();
+    }
+  }, [isOpen]);
+
+  // Manejador de clicks fuera de los menús
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (docTypeRef.current && !docTypeRef.current.contains(event.target)) setShowDocTypeMenu(false);
       if (afpRef.current && !afpRef.current.contains(event.target)) setShowAfpMenu(false);
       if (roleRef.current && !roleRef.current.contains(event.target)) setShowRoleMenu(false); 
       if (commissionRef.current && !commissionRef.current.contains(event.target)) setShowCommissionMenu(false);
+      if (sedeRef.current && !sedeRef.current.contains(event.target)) setShowSedeMenu(false); // <--- NUEVO
     };
     if (isOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
+  // Cargar datos al editar
   useEffect(() => {
     if (userToEdit) {
       setFormData({
@@ -80,15 +107,18 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         has_children: userToEdit.has_children || false,
         children_count: userToEdit.children_count || 0,
         email: userToEdit.email || '',
-        role: userToEdit.role || 'staff'
+        role: userToEdit.role || 'staff',
+        sede_id: userToEdit.sede_id || '' // <--- CARGAMOS LA SEDE
       });
     } else {
+      // Valores por defecto
       setFormData({
         first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
         document_type: 'DNI', document_number: '', position: '', salary: '', 
         start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
         password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
-        has_children: false, children_count: 0, email: '', role: 'staff'
+        has_children: false, children_count: 0, email: '', role: 'staff',
+        sede_id: ''
       });
     }
   }, [userToEdit, isOpen]);
@@ -157,7 +187,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         role: formData.role,
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
-        cuspp: formData.cuspp 
+        cuspp: formData.cuspp,
+        sede_id: formData.sede_id || null // <--- GUARDAMOS LA SEDE
       };
 
       if (hashedPassword) {
@@ -215,6 +246,12 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     return role ? role.label : roleValue;
   };
 
+  // Helper para mostrar el nombre de la sede seleccionada
+  const getSedeName = () => {
+    const sede = sedesList.find(s => s.id === formData.sede_id);
+    return sede ? sede.name : 'Sin Sede Asignada';
+  };
+
   return (
     <>
       <AnimatePresence>
@@ -257,7 +294,62 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Fin Contrato</label><input type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
                   </div>
 
-                  <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cargo</label><div className="relative h-[48px]"><Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input name="position" required value={formData.position} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Ej. Administrador"/></div></div>
+                  {/* SECCIÓN CARGO Y SEDE */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      
+                      {/* CARGO */}
+                      <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Cargo</label>
+                          <div className="relative h-[48px]">
+                              <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                              <input name="position" required value={formData.position} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Ej. Administrador"/>
+                          </div>
+                      </div>
+
+                      {/* --- NUEVO CAMPO: SEDE --- */}
+                      <div className="space-y-1 relative" ref={sedeRef}>
+                          <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                            <MapPin size={12}/> Sede Asignada
+                          </label>
+                          <button 
+                            type="button" 
+                            onClick={() => setShowSedeMenu(!showSedeMenu)} 
+                            className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] focus:border-[#003366] transition-colors"
+                          >
+                            <span className="truncate">{getSedeName()}</span> 
+                            <ChevronDown size={16}/>
+                          </button>
+                          
+                          <AnimatePresence>
+                              {showSedeMenu && (
+                                  <motion.div 
+                                    variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" 
+                                    className="absolute bottom-full mb-1 left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto"
+                                  >
+                                      <DropdownOption 
+                                        label="Sin Sede Asignada" 
+                                        isSelected={formData.sede_id === '' || formData.sede_id === null} 
+                                        onClick={() => {setFormData({...formData, sede_id: null}); setShowSedeMenu(false);}}
+                                      />
+                                      {sedesList.map(s => (
+                                          <DropdownOption 
+                                              key={s.id} 
+                                              label={s.name} 
+                                              isSelected={formData.sede_id === s.id} 
+                                              onClick={() => {setFormData({...formData, sede_id: s.id}); setShowSedeMenu(false);}}
+                                          />
+                                      ))}
+                                      {sedesList.length === 0 && (
+                                        <div className="px-4 py-3 text-xs text-slate-400 text-center italic">
+                                          No hay sedes registradas.
+                                        </div>
+                                      )}
+                                  </motion.div>
+                              )}
+                          </AnimatePresence>
+                      </div>
+
+                  </div>
 
                   <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
                     

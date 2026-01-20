@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, Search, Plus, UserCog, HardHat, 
   Briefcase, Filter, Trash2, Pencil, Baby, BookOpen, 
-  Activity, DollarSign, Building2, // <--- Importado Building2
+  Activity, DollarSign, Building2, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
@@ -14,7 +14,7 @@ import AddWorkerModal from './AddWorkerModal';
 import ChangeStatusModal from './components/ChangeStatusModal'; 
 import StatusModal from '../../components/common/StatusModal';
 import ConfirmDeleteModal from '../projects/components/ConfirmDeleteModal';
-import AssignProjectsModal from './components/AssignProjectsModal'; // <--- NUEVO MODAL
+import AssignProjectsModal from './components/AssignProjectsModal';
 
 const HumanResourcesPage = () => {
   const [activeTab, setActiveTab] = useState('staff');
@@ -294,7 +294,7 @@ const HumanResourcesPage = () => {
                           
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                               <DollarSign size={16} className="text-emerald-500"/>
+                               {/* SE ELIMINÓ EL ÍCONO DEL DÓLAR AQUÍ */}
                                {displaySalary}
                             </div>
                           </td>

@@ -11,7 +11,7 @@ import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
-// CONFIGURACIÓN DE MENÚ
+// CONFIGURACIÓN DE MENÚ ACTUALIZADA
 const navItems = [
   { 
     path: '/dashboard', 
@@ -19,11 +19,15 @@ const navItems = [
     label: 'Dashboard',
     allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero', 'ssoma', 'administrativo']
   },
+  // --- CAMBIO: Proyectos ahora tiene submenús ---
   { 
-    path: '/proyectos', 
+    label: 'Proyectos', 
     icon: Building2, 
-    label: 'Proyectos',
-    allowed: ['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo']
+    allowed: ['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo'],
+    children: [
+      { path: '/proyectos', label: 'Panel de Obras' },
+      { path: '/proyectos/sedes', label: 'Sedes Corporativas' } // Nueva opción
+    ]
   },
   { 
     path: '/campo/tareo', 
@@ -86,7 +90,8 @@ const MainLayout = () => {
     .toUpperCase();
 
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': true 
+    'Recursos Humanos': true, // Por defecto abierto si se desea
+    'Proyectos': true         // Abrimos Proyectos por defecto para visibilidad
   });
 
   const toggleMenu = (label) => {
@@ -200,6 +205,8 @@ const MainLayout = () => {
     if (location.pathname.includes('/users')) return 'Gestión de Personal';
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
     if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
+    if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes'; // Título para la nueva página
+    if (location.pathname.includes('/proyectos')) return 'Gestión de Proyectos';
     return 'Constructora L&K';
   };
 
