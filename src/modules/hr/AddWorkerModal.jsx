@@ -4,7 +4,7 @@ import {
   X, Save, User, Briefcase, DollarSign, Loader2, 
   Baby, BookOpen, ChevronDown, Check,
   Calendar, CreditCard, Trash2, PieChart, Hash,
-  Lock, Eye, EyeOff
+  Lock, Eye, EyeOff, Landmark 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import bcrypt from 'bcryptjs';
@@ -17,29 +17,37 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 const CATEGORIES = ['Peón', 'Oficial', 'Operario', 'Capataz'];
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
+const BANKS_LIST = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'Banco de la Nación', 'BanBif', 'Pichincha', 'Caja Arequipa', 'Otro'];
 
 const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
   
+  // Estados de menús
   const [showDocTypeMenu, setShowDocTypeMenu] = useState(false);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [showAfpMenu, setShowAfpMenu] = useState(false);
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
+  const [showBankMenu, setShowBankMenu] = useState(false);
   
   const [showPassword, setShowPassword] = useState(false);
 
+  // Referencias
   const docTypeRef = useRef(null);
   const categoryRef = useRef(null);
   const afpRef = useRef(null);
   const commissionRef = useRef(null);
+  const bankRef = useRef(null);
 
   const [formData, setFormData] = useState({
-    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
+    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
     document_type: 'DNI', document_number: '', category: 'Peón', custom_daily_rate: '', 
     start_date: new Date().toISOString().split('T')[0],
     password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '', 
-    has_children: false, children_count: 0
+    has_children: false, children_count: 0,
+    bank_name: '', 
+    bank_account: '',
+    cci: ''
   });
 
   useEffect(() => {
@@ -48,6 +56,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
       if (categoryRef.current && !categoryRef.current.contains(event.target)) setShowCategoryMenu(false);
       if (afpRef.current && !afpRef.current.contains(event.target)) setShowAfpMenu(false);
       if (commissionRef.current && !commissionRef.current.contains(event.target)) setShowCommissionMenu(false);
+      if (bankRef.current && !bankRef.current.contains(event.target)) setShowBankMenu(false);
     };
     if (isOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -60,7 +69,6 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         paternal_surname: userToEdit.paternal_surname || '',
         maternal_surname: userToEdit.maternal_surname || '',
         birth_date: userToEdit.birth_date || '',
-        bank_account: userToEdit.bank_account || '',
         document_type: userToEdit.document_type || 'DNI',
         document_number: userToEdit.document_number || '',
         category: userToEdit.category || 'Peón',
@@ -71,15 +79,19 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         commission_type: userToEdit.commission_type || 'Flujo',
         cuspp: userToEdit.cuspp || '', 
         has_children: userToEdit.has_children || false,
-        children_count: userToEdit.children_count || 0
+        children_count: userToEdit.children_count || 0,
+        bank_name: userToEdit.bank_name || '', 
+        bank_account: userToEdit.bank_account || '',
+        cci: userToEdit.cci || ''
       });
     } else {
       setFormData({
-        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
+        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
         document_type: 'DNI', document_number: '', category: 'Peón', custom_daily_rate: '', 
         start_date: new Date().toISOString().split('T')[0],
         password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
-        has_children: false, children_count: 0
+        has_children: false, children_count: 0,
+        bank_name: '', bank_account: '', cci: ''
       });
     }
     setShowPassword(false);
@@ -118,7 +130,13 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
       const payload = {
         full_name: fullName,
         first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
-        birth_date: formData.birth_date || null, bank_account: formData.bank_account,
+        birth_date: formData.birth_date || null, 
+        
+        // --- DATOS BANCARIOS ---
+        bank_name: formData.bank_name || null,
+        bank_account: formData.bank_account || null,
+        cci: formData.cci || null,
+
         document_type: formData.document_type, document_number: formData.document_number,
         has_children: formData.has_children, children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
         status: userToEdit ? userToEdit.status : 'Activo',
@@ -132,14 +150,11 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
 
       if (!userToEdit) payload.project_assigned = 'Sin asignar';
 
-      // --- CORRECCIÓN AQUÍ: USAMOS HASH SÍNCRONO PARA EVITAR BLOQUEOS ---
       if (formData.password || !userToEdit) {
         const plainPass = formData.password || formData.document_number;
-        // Usamos genSaltSync y hashSync en lugar de await
         const salt = bcrypt.genSaltSync(10); 
         payload.password = bcrypt.hashSync(plainPass, salt);
       }
-      // ------------------------------------------------------------------
 
       if (userToEdit) {
         const { error } = await supabase.from('workers').update(payload).eq('id', userToEdit.id);
@@ -154,7 +169,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
       console.error("Error al guardar obrero:", error);
       setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message || 'Error desconocido al guardar' });
     } finally {
-      setLoading(false); // Ahora esto siempre se ejecutará
+      setLoading(false);
     }
   };
 
@@ -203,11 +218,60 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Nacimiento</label><div className="relative h-[48px]"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div></div>
                   </div>
 
-                  {/* FINANZAS */}
+                  {/* SECCIÓN FINANCIERA (CORREGIDA VISUALMENTE) */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Jornal Diario</label><div className="relative h-[48px]"><DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="number" name="custom_daily_rate" value={formData.custom_daily_rate} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Usar Tabla"/></div></div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cuenta Bancaria</label><div className="relative h-[48px]"><CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="0011-..."/></div></div>
+                    
+                    {/* SELECTOR BANCO */}
+                    <div className="space-y-1 relative" ref={bankRef}>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Entidad Bancaria</label>
+                      <button type="button" onClick={() => setShowBankMenu(!showBankMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] transition-colors">
+                        <div className="flex items-center gap-2">
+                           <Landmark size={18} className="text-slate-400"/>
+                           {formData.bank_name || <span className="text-slate-400">Seleccionar Banco...</span>}
+                        </div>
+                        <ChevronDown size={16}/>
+                      </button>
+                      <AnimatePresence>
+                        {showBankMenu && (
+                          // AQUÍ ESTÁ EL CAMBIO: z-50 y border-slate-100 para que se vea sólido y encima de todo
+                          <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto">
+                            <DropdownOption label="Ninguno / Efectivo" isSelected={!formData.bank_name} onClick={() => {setFormData({...formData, bank_name: '', bank_account: '', cci: ''}); setShowBankMenu(false);}}/>
+                            {BANKS_LIST.map(b => (
+                              <DropdownOption key={b} label={b} isSelected={formData.bank_name === b} onClick={() => {setFormData({...formData, bank_name: b}); setShowBankMenu(false);}}/>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   </div>
+
+                  {/* DESPLIEGUE DE CUENTAS (SOLO SI HAY BANCO SELECCIONADO) */}
+                  <AnimatePresence>
+                    {formData.bank_name && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }} 
+                        animate={{ opacity: 1, height: 'auto' }} 
+                        exit={{ opacity: 0, height: 0 }}
+                        className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden"
+                      >
+                         <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">N° Cuenta ({formData.bank_name})</label>
+                            <div className="relative h-[48px]">
+                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="000-000..."/>
+                            </div>
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">CCI (Interbancario)</label>
+                            <div className="relative h-[48px]">
+                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input type="text" name="cci" value={formData.cci} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="002-000..."/>
+                            </div>
+                         </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   {/* FECHAS Y CATEGORÍA */}
                   <div className="grid grid-cols-2 gap-4">

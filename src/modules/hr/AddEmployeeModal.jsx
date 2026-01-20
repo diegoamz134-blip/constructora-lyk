@@ -4,10 +4,10 @@ import {
   X, Save, User, Briefcase, DollarSign, Loader2, 
   Baby, BookOpen, ChevronDown, Check,
   Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart, Hash,
-  MapPin // <--- ÍCONO NUEVO
+  MapPin, Landmark // <--- ÍCONO LANDMARK PARA BANCO
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
-import { getSedes } from '../../services/sedesService'; // <--- IMPORTAMOS EL SERVICIO DE SEDES
+import { getSedes } from '../../services/sedesService';
 import bcrypt from 'bcryptjs';
 import StatusModal from '../../components/common/StatusModal';
 
@@ -17,6 +17,7 @@ const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible:
 
 const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
 const COMMISSION_TYPES = ['Flujo', 'Mixta'];
+const BANKS_LIST = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'Banco de la Nación', 'BanBif', 'Pichincha', 'Caja Arequipa', 'Otro']; // <--- LISTA DE BANCOS
 
 const ROLES = [
   { label: 'Staff (Básico)', value: 'staff' },
@@ -36,25 +37,30 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
   const [showAfpMenu, setShowAfpMenu] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false); 
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
-  const [showSedeMenu, setShowSedeMenu] = useState(false); // <--- NUEVO MENÚ SEDE
+  const [showSedeMenu, setShowSedeMenu] = useState(false);
+  const [showBankMenu, setShowBankMenu] = useState(false); // <--- NUEVO ESTADO PARA MENÚ BANCO
 
   // Referencias para clicks fuera
   const docTypeRef = useRef(null);
   const afpRef = useRef(null);
   const roleRef = useRef(null); 
   const commissionRef = useRef(null);
-  const sedeRef = useRef(null); // <--- NUEVA REF
+  const sedeRef = useRef(null);
+  const bankRef = useRef(null); // <--- NUEVA REF
 
   // Estado para la lista de sedes cargada desde BD
   const [sedesList, setSedesList] = useState([]); 
 
   const [formData, setFormData] = useState({
-    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
+    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
     document_type: 'DNI', document_number: '', position: '', salary: '', 
     start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
     password: '', afp: '', commission_type: 'Flujo', cuspp: '', 
     has_children: false, children_count: 0, email: '', role: 'staff',
-    sede_id: '' // <--- NUEVO CAMPO
+    sede_id: '',
+    bank_name: '', // <--- NUEVO CAMPO
+    bank_account: '',
+    cci: ''        // <--- NUEVO CAMPO
   });
 
   // Cargar Sedes al abrir el modal
@@ -79,7 +85,8 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
       if (afpRef.current && !afpRef.current.contains(event.target)) setShowAfpMenu(false);
       if (roleRef.current && !roleRef.current.contains(event.target)) setShowRoleMenu(false); 
       if (commissionRef.current && !commissionRef.current.contains(event.target)) setShowCommissionMenu(false);
-      if (sedeRef.current && !sedeRef.current.contains(event.target)) setShowSedeMenu(false); // <--- NUEVO
+      if (sedeRef.current && !sedeRef.current.contains(event.target)) setShowSedeMenu(false);
+      if (bankRef.current && !bankRef.current.contains(event.target)) setShowBankMenu(false); // <--- CONTROL DE CLICK FUERA
     };
     if (isOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -93,7 +100,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         paternal_surname: userToEdit.paternal_surname || '',
         maternal_surname: userToEdit.maternal_surname || '',
         birth_date: userToEdit.birth_date || '',
-        bank_account: userToEdit.bank_account || '',
         document_type: userToEdit.document_type || 'DNI',
         document_number: userToEdit.document_number || '',
         position: userToEdit.position || '',
@@ -108,17 +114,20 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         children_count: userToEdit.children_count || 0,
         email: userToEdit.email || '',
         role: userToEdit.role || 'staff',
-        sede_id: userToEdit.sede_id || '' // <--- CARGAMOS LA SEDE
+        sede_id: userToEdit.sede_id || '',
+        bank_name: userToEdit.bank_name || '', // <--- CARGAR BANCO
+        bank_account: userToEdit.bank_account || '',
+        cci: userToEdit.cci || '' // <--- CARGAR CCI
       });
     } else {
-      // Valores por defecto
       setFormData({
-        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', bank_account: '',
+        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
         document_type: 'DNI', document_number: '', position: '', salary: '', 
         start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
         password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
         has_children: false, children_count: 0, email: '', role: 'staff',
-        sede_id: ''
+        sede_id: '',
+        bank_name: '', bank_account: '', cci: ''
       });
     }
   }, [userToEdit, isOpen]);
@@ -157,7 +166,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     try {
       const fullName = `${formData.first_name} ${formData.paternal_surname} ${formData.maternal_surname}`.trim();
       
-      // Encriptar contraseña
       let hashedPassword = null;
       if (formData.password) {
           const salt = await bcrypt.genSalt(10);
@@ -173,7 +181,12 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         paternal_surname: formData.paternal_surname, 
         maternal_surname: formData.maternal_surname,
         birth_date: formData.birth_date || null, 
-        bank_account: formData.bank_account,
+        
+        // --- CAMPOS BANCARIOS NUEVOS ---
+        bank_name: formData.bank_name || null,
+        bank_account: formData.bank_account || null,
+        cci: formData.cci || null,
+
         document_type: formData.document_type, 
         document_number: formData.document_number,
         has_children: formData.has_children, 
@@ -188,14 +201,13 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
         cuspp: formData.cuspp,
-        sede_id: formData.sede_id || null // <--- GUARDAMOS LA SEDE
+        sede_id: formData.sede_id || null
       };
 
       if (hashedPassword) {
           payload.password = hashedPassword;
       }
 
-      // Insertar o Actualizar en Base de Datos
       if (userToEdit) {
         const { error } = await supabase.from('employees').update(payload).eq('id', userToEdit.id);
         if (error) throw error;
@@ -204,7 +216,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         if (error) throw error;
       }
 
-      // Sincronizar tabla Profiles
+      // Sincronizar Profiles
       if (formData.email) {
           const profileData = { 
             full_name: fullName, first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
@@ -212,7 +224,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
           };
           
           const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
-          
           if (existing) {
              await supabase.from('profiles').update(profileData).eq('id', existing.id);
           } else {
@@ -246,7 +257,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     return role ? role.label : roleValue;
   };
 
-  // Helper para mostrar el nombre de la sede seleccionada
   const getSedeName = () => {
     const sede = sedesList.find(s => s.id === formData.sede_id);
     return sede ? sede.name : 'Sin Sede Asignada';
@@ -284,10 +294,66 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Nacimiento</label><div className="relative h-[48px]"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div></div>
                   </div>
 
+                  {/* SECCIÓN FINANCIERA ACTUALIZADA */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Salario Mensual</label><div className="relative h-[48px]"><DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="number" name="salary" value={formData.salary} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="0.00"/></div></div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Cuenta Bancaria</label><div className="relative h-[48px]"><CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="0011-..."/></div></div>
+                    {/* SALARIO */}
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Salario Mensual</label>
+                      <div className="relative h-[48px]">
+                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                        <input type="number" name="salary" value={formData.salary} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="0.00"/>
+                      </div>
+                    </div>
+
+                    {/* SELECCIÓN DE BANCO */}
+                    <div className="space-y-1 relative" ref={bankRef}>
+                      <label className="text-xs font-bold text-slate-500 uppercase">Entidad Bancaria</label>
+                      <button type="button" onClick={() => setShowBankMenu(!showBankMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
+                        <div className="flex items-center gap-2">
+                           <Landmark size={18} className="text-slate-400"/>
+                           {formData.bank_name || <span className="text-slate-400">Seleccionar Banco...</span>}
+                        </div>
+                        <ChevronDown size={16}/>
+                      </button>
+                      <AnimatePresence>
+                        {showBankMenu && (
+                          <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden max-h-48 overflow-y-auto">
+                            <DropdownOption label="Ninguno / Efectivo" isSelected={!formData.bank_name} onClick={() => {setFormData({...formData, bank_name: '', bank_account: '', cci: ''}); setShowBankMenu(false);}}/>
+                            {BANKS_LIST.map(b => (
+                              <DropdownOption key={b} label={b} isSelected={formData.bank_name === b} onClick={() => {setFormData({...formData, bank_name: b}); setShowBankMenu(false);}}/>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   </div>
+
+                  {/* DESPLIEGUE DE CUENTAS (SOLO SI HAY BANCO SELECCIONADO) */}
+                  <AnimatePresence>
+                    {formData.bank_name && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }} 
+                        animate={{ opacity: 1, height: 'auto' }} 
+                        exit={{ opacity: 0, height: 0 }}
+                        className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden"
+                      >
+                         <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">N° Cuenta ({formData.bank_name})</label>
+                            <div className="relative h-[48px]">
+                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="000-000..."/>
+                            </div>
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">CCI (Interbancario)</label>
+                            <div className="relative h-[48px]">
+                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input type="text" name="cci" value={formData.cci} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="002-000..."/>
+                            </div>
+                         </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
@@ -306,7 +372,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                           </div>
                       </div>
 
-                      {/* --- NUEVO CAMPO: SEDE --- */}
+                      {/* SEDE */}
                       <div className="space-y-1 relative" ref={sedeRef}>
                           <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
                             <MapPin size={12}/> Sede Asignada
@@ -348,7 +414,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                               )}
                           </AnimatePresence>
                       </div>
-
                   </div>
 
                   <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>

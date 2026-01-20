@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-// --- GESTIÓN DE SEDES (CRUD) ---
+// --- GESTIÓN DE SEDES ---
 
 export const getSedes = async () => {
   const { data, error } = await supabase
@@ -30,63 +30,71 @@ export const deleteSede = async (id) => {
   return true;
 };
 
-// --- GESTIÓN DE PERSONAL EN SEDES ---
+// --- GESTIÓN DE PERSONAL CON PAGINACIÓN ---
 
 /**
- * Obtiene TODO el personal (Staff) y su sede actual.
- * Usamos 'sedes:sede_id(name)' para ser explícitos con la relación.
+ * Obtiene personal paginado y busca por nombre/cargo.
+ * @param {number} page - Número de página actual (inicia en 1)
+ * @param {number} pageSize - Cantidad de registros por página
+ * @param {string} search - Texto para filtrar
  */
-export const getStaffWithSede = async () => {
+export const getStaffWithSedePaginated = async (page = 1, pageSize = 10, search = '') => {
   try {
-    const { data, error } = await supabase
+    // Calcular rango para Supabase (índice 0)
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    // 1. Consulta base de empleados
+    let query = supabase
       .from('employees')
-      .select(`
-        id, 
-        full_name, 
-        document_number, 
-        position, 
-        photo_url,
-        sede_id,
-        status,
-        sedes:sede_id ( name ) 
-      `)
-      .eq('status', 'Activo') // Solo personal activo
+      .select('id, full_name, document_number, position, avatar_url, sede_id, status', { count: 'exact' })
+      .eq('status', 'Activo')
       .order('full_name');
 
-    if (error) {
-      console.error("Error Supabase al traer staff:", error);
-      throw error;
+    // 2. Aplicar filtro de búsqueda si existe
+    if (search) {
+      query = query.or(`full_name.ilike.%${search}%,position.ilike.%${search}%`);
     }
+
+    // 3. Obtener rango (Paginación)
+    const { data: employees, count, error: empError } = await query.range(from, to);
+
+    if (empError) throw empError;
+
+    // 4. Traer sedes para el cruce manual (son pocas, se traen todas rápido)
+    const { data: sedes, error: sedeError } = await supabase
+      .from('sedes')
+      .select('id, name');
+
+    if (sedeError) throw sedeError;
+
+    // 5. Cruzamos la información manualmente
+    const staffWithSede = employees.map(emp => {
+      const sedeInfo = sedes.find(s => s.id === emp.sede_id);
+      return {
+        ...emp,
+        sedes: sedeInfo ? { name: sedeInfo.name } : null
+      };
+    });
     
-    return data || [];
+    return { data: staffWithSede, total: count };
+
   } catch (err) {
-    console.error("Error en getStaffWithSede:", err);
-    return []; // Retornar array vacío en vez de romper la app
+    console.error("Error en getStaffWithSedePaginated:", err);
+    return { data: [], total: 0 }; 
   }
 };
 
-/**
- * Asigna (o mueve) un empleado a una sede
- */
 export const assignStaffToSede = async (employeeId, sedeId) => {
+  if (!employeeId) return;
   const { error } = await supabase
     .from('employees')
     .update({ sede_id: sedeId })
     .eq('id', employeeId);
-
   if (error) throw error;
   return true;
 };
 
-/**
- * Remueve un empleado de una sede
- */
 export const removeStaffFromSede = async (employeeId) => {
-  const { error } = await supabase
-    .from('employees')
-    .update({ sede_id: null })
-    .eq('id', employeeId);
-
-  if (error) throw error;
-  return true;
+  return assignStaffToSede(employeeId, null);
 };

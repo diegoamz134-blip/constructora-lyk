@@ -19,14 +19,13 @@ const navItems = [
     label: 'Dashboard',
     allowed: ['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'obrero', 'ssoma', 'administrativo']
   },
-  // --- CAMBIO: Proyectos ahora tiene submenús ---
   { 
     label: 'Proyectos', 
     icon: Building2, 
     allowed: ['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo'],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
-      { path: '/proyectos/sedes', label: 'Sedes Corporativas' } // Nueva opción
+      { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
     ]
   },
   { 
@@ -47,7 +46,6 @@ const navItems = [
     allowed: ['admin', 'rrhh'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
-      // SE ELIMINÓ LA OPCIÓN DE CONTROL DE ASISTENCIA AQUÍ
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
@@ -78,10 +76,8 @@ const MainLayout = () => {
                       currentUser?.email?.split('@')[0] || 
                       'Usuario';
   
-  // URL de la foto
   const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
 
-  // Iniciales
   const initials = displayName
     .split(' ')
     .map(n => n[0])
@@ -89,9 +85,10 @@ const MainLayout = () => {
     .join('')
     .toUpperCase();
 
+  // --- CORRECCIÓN AQUÍ: Cambiamos a false para que inicien cerrados ---
   const [openMenus, setOpenMenus] = useState({
-    'Recursos Humanos': true, // Por defecto abierto si se desea
-    'Proyectos': true         // Abrimos Proyectos por defecto para visibilidad
+    'Recursos Humanos': false, 
+    'Proyectos': false         
   });
 
   const toggleMenu = (label) => {
@@ -123,6 +120,7 @@ const MainLayout = () => {
 
           if (item.children) {
             const isOpen = openMenus[item.label];
+            // Mantenemos esto: Si estoy en una sub-ruta, resalta el padre aunque esté cerrado
             const isActiveParent = item.children.some(child => child.path === location.pathname);
 
             return (
@@ -205,8 +203,9 @@ const MainLayout = () => {
     if (location.pathname.includes('/users')) return 'Gestión de Personal';
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
     if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
-    if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes'; // Título para la nueva página
+    if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes';
     if (location.pathname.includes('/proyectos')) return 'Gestión de Proyectos';
+    if (location.pathname.includes('/finanzas')) return 'Área Contable'; // Título nuevo
     return 'Constructora L&K';
   };
 

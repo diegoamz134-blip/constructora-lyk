@@ -15,7 +15,6 @@ const ComplaintsBookPage = React.lazy(() => import('./modules/landing/Complaints
 const LoginPage = React.lazy(() => import('./modules/auth/LoginPage'));
 const DashboardPage = React.lazy(() => import('./modules/admin-control/DashboardPage'));
 const ProjectsPage = React.lazy(() => import('./modules/projects/ProjectsPage')); 
-// --- NUEVO IMPORT PARA SEDES ---
 const SedesPage = React.lazy(() => import('./modules/projects/SedesPage'));
 
 const HumanResourcesPage = React.lazy(() => import('./modules/hr/HumanResourcesPage'));
@@ -26,6 +25,9 @@ const UserProfilePage = React.lazy(() => import('./modules/admin-control/UserPro
 const DocumentationPage = React.lazy(() => import('./modules/hr/DocumentationPage'));
 const TendersPage = React.lazy(() => import('./modules/licitaciones/TendersPage'));
 const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetail'));
+
+// NUEVA PÁGINA DE CONTABILIDAD
+const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 
 // Resident Pages
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
@@ -69,7 +71,6 @@ function App() {
         <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/proyectos" element={<ProjectsPage />} />
-             {/* --- NUEVA RUTA DE SEDES --- */}
              <Route path="/proyectos/sedes" element={<SedesPage />} />
           </Route>
         </Route>
@@ -93,17 +94,18 @@ function App() {
         <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/users" element={<HumanResourcesPage />} />
-             {/* SE ELIMINÓ LA RUTA DE ASISTENCIA AQUÍ */}
              <Route path="/planillas" element={<PayrollPage />} />
              <Route path="/documentacion" element={<DocumentationPage />} />
           </Route>
         </Route>
 
-        {/* GRUPO 5: SUPER ADMIN */}
+        {/* GRUPO 5: SUPER ADMIN Y FINANZAS */}
         <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/reportes" element={<ReportsPage />} />
              <Route path="/configuracion" element={<ConfigurationPage />} />
+             {/* --- AQUÍ ESTÁ LA NUEVA RUTA --- */}
+             <Route path="/finanzas" element={<AccountingPage />} />
           </Route>
         </Route>
 
