@@ -1,16 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+// IMPORTAMOS LOS CONTEXTOS ORIGINALES PARA TENER ACCESO A LAS FUNCIONES DE LOGIN
 import { useAuth } from '../../context/AuthContext';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth'; // Usamos este solo para redirección
+
 import { Eye, EyeOff, Loader2, HardHat, Briefcase, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
 import logoLyk from '../../assets/images/logo-lk-full.png'; 
 import bgImage from '../../assets/images/fondo-login.jpg';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { login, user } = useAuth(); 
-  const { loginWorker, worker } = useWorkerAuth();
+  
+  // 1. OBTENEMOS LAS FUNCIONES REALES DE LOS CONTEXTOS
+  const { login: loginStaff } = useAuth(); // Renombramos a loginStaff para claridad
+  const { loginWorker } = useWorkerAuth();
+  
+  // Usamos el hook unificado solo para detectar si ya hay alguien logueado
+  const { currentUser } = useUnifiedAuth(); 
 
   const [activeTab, setActiveTab] = useState('staff'); 
   const [formData, setFormData] = useState({ identifier: '', password: '' });
@@ -18,34 +27,26 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // --- NUEVOS ESTADOS PARA BIENVENIDA ---
+  // Estados para bienvenida
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
 
   // --- REDIRECCIÓN AUTOMÁTICA ---
   useEffect(() => {
-    // Solo redirigir automáticamente si NO estamos en proceso de login manual (loading)
-    // y NO estamos mostrando la animación de éxito (loginSuccess).
-    if (!loading && !loginSuccess) {
-      if (user) {
-        console.log("🚀 Usuario detectado, redirigiendo a Dashboard...");
-        navigate('/dashboard', { replace: true });
-      }
-      if (worker) {
-        console.log("🚀 Obrero detectado, redirigiendo a Portal...");
-        navigate('/worker/dashboard', { replace: true });
-      }
+    // Si ya hay usuario y no estamos cargando ni en animación de éxito, redirigir
+    if (!loading && !loginSuccess && currentUser) {
+       console.log("🚀 Usuario detectado, redirigiendo...");
+       const targetPath = currentUser.role === 'obrero' ? '/worker/dashboard' : '/dashboard';
+       navigate(targetPath, { replace: true });
     }
-  }, [user, worker, navigate, loading, loginSuccess]);
+  }, [currentUser, navigate, loading, loginSuccess]);
 
-  // --- FUNCIÓN PARA ACTIVAR ANIMACIÓN DE ÉXITO ---
   const triggerSuccess = (path, name) => {
     setWelcomeName(name);
     setLoginSuccess(true);
-    // Mantenemos loading en true para evitar parpadeos del formulario
     setTimeout(() => {
         navigate(path, { replace: true });
-    }, 2000); // 2 segundos para disfrutar el mensaje
+    }, 2000); 
   };
 
   const handleSubmit = async (e) => {
@@ -54,38 +55,51 @@ const LoginPage = () => {
     setLoading(true);
 
     try {
+      const identifier = formData.identifier.trim();
+      const password = formData.password;
+
       if (activeTab === 'staff') {
-        const response = await login(formData.identifier, formData.password);
-        if (response && response.user) {
-            triggerSuccess('/dashboard', response.user.first_name || 'Colaborador');
-        }
+         // --- LOGIN ADMINISTRATIVO (STAFF) ---
+         // El AuthContext ya maneja la lógica de buscar por Email o DNI internamente
+         const response = await loginStaff(identifier, password);
+         
+         // Si no lanza error, es exitoso
+         const nameToShow = response.user.full_name?.split(' ')[0] || response.user.first_name || 'Colaborador';
+         triggerSuccess('/dashboard', nameToShow);
+
       } else {
-        const res = await loginWorker(formData.identifier, formData.password);
-        if (!res.success) {
-          setError(res.error);
-          setLoading(false);
-        } else {
-          triggerSuccess('/worker/dashboard', res.data.first_name || 'Compañero');
-        }
+         // --- LOGIN OBRERO ---
+         const response = await loginWorker(identifier, password);
+         
+         if (response.success) {
+            const nameToShow = response.data.full_name?.split(' ')[0] || 'Compañero';
+            triggerSuccess('/worker/dashboard', nameToShow);
+         } else {
+            // El contexto de obreros devuelve un objeto con error, no lanza excepción
+            throw new Error(response.error || 'Error al iniciar sesión.');
+         }
       }
+
     } catch (err) {
-      console.error(err);
-      setError('Credenciales incorrectas o error de conexión.');
+      console.error("Login Error:", err);
+      // Manejo de errores amigable
+      let msg = err.message || 'Error de conexión.';
+      if (msg.includes('PGRST116')) msg = 'Error de datos duplicados. Contacte soporte.';
+      setError(msg);
       setLoading(false);
     }
   };
 
-  // Colores dinámicos según el tab activo
+  // Estilos dinámicos
   const themeColor = activeTab === 'staff' ? 'bg-[#003366]' : 'bg-orange-600';
   const themeHover = activeTab === 'staff' ? 'hover:bg-blue-900' : 'hover:bg-orange-700';
   const themeBorder = activeTab === 'staff' ? 'focus:border-[#003366]' : 'focus:border-orange-500';
   const themeRing = activeTab === 'staff' ? 'focus:ring-blue-100' : 'focus:ring-orange-100';
 
   return (
-    // CONTENEDOR PRINCIPAL
     <div className={`min-h-screen flex flex-col lg:flex-row ${activeTab === 'obrero' ? 'lg:flex-row-reverse' : 'lg:flex-row'} bg-slate-50 overflow-hidden relative`}>
       
-      {/* === OVERLAY DE BIENVENIDA (NUEVO) === */}
+      {/* === OVERLAY DE BIENVENIDA === */}
       <AnimatePresence>
         {loginSuccess && (
           <motion.div 
@@ -107,7 +121,7 @@ const LoginPage = () => {
         )}
       </AnimatePresence>
 
-      {/* === SECCIÓN IMAGEN (ANIMADA) === */}
+      {/* === IMAGEN LATERAL === */}
       <motion.div 
         layout 
         transition={{ type: "spring", stiffness: 60, damping: 20 }}
@@ -148,7 +162,7 @@ const LoginPage = () => {
         </div>
       </motion.div>
 
-      {/* === SECCIÓN FORMULARIO (ANIMADA) === */}
+      {/* === FORMULARIO === */}
       <motion.div 
         layout 
         transition={{ type: "spring", stiffness: 60, damping: 20 }}
@@ -170,7 +184,7 @@ const LoginPage = () => {
             <p className="text-slate-400 mt-2">Selecciona tu perfil para ingresar</p>
           </div>
 
-          {/* TABS CON ANIMACIÓN DE FONDO */}
+          {/* TABS */}
           <div className="bg-slate-100 p-1.5 rounded-2xl mb-8 relative flex">
             <motion.div 
               className="absolute top-1.5 bottom-1.5 rounded-xl bg-white shadow-sm"
@@ -185,7 +199,7 @@ const LoginPage = () => {
             
             <button
               type="button"
-              onClick={() => { setActiveTab('staff'); setError(''); }}
+              onClick={() => { setActiveTab('staff'); setError(''); setFormData({identifier:'', password:''}); }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold rounded-xl relative z-10 transition-colors ${
                 activeTab === 'staff' ? 'text-[#003366]' : 'text-slate-400 hover:text-slate-600'
               }`}
@@ -194,7 +208,7 @@ const LoginPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => { setActiveTab('obrero'); setError(''); }}
+              onClick={() => { setActiveTab('obrero'); setError(''); setFormData({identifier:'', password:''}); }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold rounded-xl relative z-10 transition-colors ${
                 activeTab === 'obrero' ? 'text-orange-600' : 'text-slate-400 hover:text-slate-600'
               }`}
@@ -215,17 +229,17 @@ const LoginPage = () => {
                 >
                     <div>
                         <label htmlFor="identifier" className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">
-                            {activeTab === 'staff' ? 'Correo Corporativo' : 'DNI / Documento'}
+                            {activeTab === 'staff' ? 'DNI o Correo Corporativo' : 'Documento de Identidad (DNI)'}
                         </label>
                         <input
                             id="identifier"
                             name={activeTab === 'staff' ? 'email' : 'username'} 
-                            autoComplete={activeTab === 'staff' ? 'email' : 'username'}
-                            type={activeTab === 'staff' ? 'email' : 'text'}
+                            autoComplete="username"
+                            type="text"
                             value={formData.identifier}
                             onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
                             className={`w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-800 font-bold placeholder:font-normal outline-none transition-all ${themeBorder} focus:ring-4 ${themeRing}`}
-                            placeholder={activeTab === 'staff' ? 'ejemplo@lyk.com' : 'Ingresa tu DNI'}
+                            placeholder={activeTab === 'staff' ? 'Ej: 12345678 o admin@lyk.com' : 'Ingresa tu DNI'}
                             required
                         />
                     </div>

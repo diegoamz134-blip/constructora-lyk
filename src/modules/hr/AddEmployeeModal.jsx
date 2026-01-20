@@ -1,32 +1,75 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  X, Save, User, Briefcase, DollarSign, Loader2, 
-  Baby, BookOpen, ChevronDown, Check,
-  Mail, Lock, Shield, KeyRound, Calendar, CreditCard, Trash2, PieChart, Hash,
-  MapPin, Landmark // <--- ÍCONO LANDMARK PARA BANCO
+  X, Save, User, Briefcase, Loader2, 
+  BookOpen, ChevronDown, Check,
+  Lock, KeyRound, PieChart, Hash,
+  MapPin, Phone, Eye, EyeOff, Trash2, 
+  FileText, UploadCloud, CheckCircle2
 } from 'lucide-react';
-import { supabase } from '../../services/supabase';
 import { getSedes } from '../../services/sedesService';
+import { supabase } from '../../services/supabase';
 import bcrypt from 'bcryptjs';
 import StatusModal from '../../components/common/StatusModal';
+
+// --- CONFIG ---
+const DOC_TYPES_OPTIONAL = [
+  'Curriculum Vitae', 'DNI / CE', 'Certificado Único Laboral', 'Renta de Quinta', 'Carnet de Vacunación', 'Asignación Familiar'
+];
+const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
+const COMMISSION_TYPES = ['Flujo', 'Mixta'];
+
+// --- NUEVA LISTA DE ROLES DETALLADA ---
+const ROLES = [
+  // ALTA DIRECCIÓN (VEN TODO)
+  { label: 'Gerente General', value: 'gerencia_general' },
+  { label: 'Gerente de Admin. y Finanzas', value: 'gerencia_admin_finanzas' },
+  { label: 'Gerente de Proyectos', value: 'gerente_proyectos' },
+  { label: 'Coordinador de Proyectos', value: 'coordinador_proyectos' },
+  { label: 'Jefe de Recursos Humanos', value: 'jefe_rrhh' },
+
+  // CONTABILIDAD Y ADMIN
+  { label: 'Contador', value: 'contador' },
+  { label: 'Analista Contable', value: 'analista_contable' },
+  { label: 'Asistente de Contabilidad', value: 'asistente_contabilidad' },
+  { label: 'Administrador', value: 'administrador' },
+  { label: 'Asistente Administrativo', value: 'asistente_administrativo' },
+  { label: 'Tesorera', value: 'tesorera' },
+
+  // LOGÍSTICA Y SERVICIOS
+  { label: 'Asistente Logística', value: 'asistente_logistica' },
+  { label: 'Encargado de Almacén', value: 'encargado_almacen' },
+  { label: 'Servicios Generales', value: 'servicios_generales' },
+  { label: 'Transportista', value: 'transportista' },
+  { label: 'Personal de Limpieza', value: 'limpieza' },
+
+  // RRHH
+  { label: 'Asistente de RR.HH.', value: 'asistente_rrhh' },
+
+  // OBRAS Y CAMPO
+  { label: 'Residente de Obra', value: 'residente_obra' },
+  { label: 'Encargado de Obra', value: 'encargado_obra' },
+  { label: 'Asistente Residente / Ing. Campo', value: 'asistente_residente' },
+  { label: 'Jefe de Calidad', value: 'jefe_calidad' },
+
+  // LICITACIONES Y COSTOS
+  { label: 'Jefe de Licitaciones', value: 'jefe_licitaciones' },
+  { label: 'Asistente Costos y Presupuestos', value: 'asistente_costos' },
+
+  // SSOMA
+  { label: 'Jefe de SSOMA', value: 'jefe_ssoma' },
+  { label: 'Coordinador SSOMA', value: 'coordinador_ssoma' },
+  { label: 'Prevencionista de Riesgos', value: 'prevencionista' },
+
+  { label: 'Super Admin (Sistema)', value: 'admin' }
+];
+
+// LISTA DE CARGOS (TEXTO) PARA EL OTRO CAMPO
+const POSITIONS = ROLES.map(r => r.label.toUpperCase());
 
 const overlayVariants = { hidden: { opacity: 0 }, visible: { opacity: 1 }, exit: { opacity: 0 } };
 const modalVariants = { hidden: { opacity: 0, scale: 0.95, y: 20 }, visible: { opacity: 1, scale: 1, y: 0 }, exit: { opacity: 0, scale: 0.95, y: 20 } };
 const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: -10, scale: 0.95 } };
-
-const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
-const COMMISSION_TYPES = ['Flujo', 'Mixta'];
-const BANKS_LIST = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'Banco de la Nación', 'BanBif', 'Pichincha', 'Caja Arequipa', 'Otro']; // <--- LISTA DE BANCOS
-
-const ROLES = [
-  { label: 'Staff (Básico)', value: 'staff' },
-  { label: 'Admin', value: 'admin' },
-  { label: 'RR.HH.', value: 'rrhh' },
-  { label: 'Residente de Obra', value: 'resident_engineer' },
-  { label: 'SSOMA', value: 'ssoma' },
-  { label: 'Administrativo', value: 'administrativo' }
-];
 
 const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
   const [loading, setLoading] = useState(false);
@@ -38,47 +81,48 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
   const [showRoleMenu, setShowRoleMenu] = useState(false); 
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
   const [showSedeMenu, setShowSedeMenu] = useState(false);
-  const [showBankMenu, setShowBankMenu] = useState(false); // <--- NUEVO ESTADO PARA MENÚ BANCO
+  const [showPositionMenu, setShowPositionMenu] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  // Referencias para clicks fuera
+  // Referencias
   const docTypeRef = useRef(null);
   const afpRef = useRef(null);
   const roleRef = useRef(null); 
   const commissionRef = useRef(null);
   const sedeRef = useRef(null);
-  const bankRef = useRef(null); // <--- NUEVA REF
+  const positionRef = useRef(null);
 
-  // Estado para la lista de sedes cargada desde BD
   const [sedesList, setSedesList] = useState([]); 
 
+  // Docs
+  const [pendingDocs, setPendingDocs] = useState({});
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [currentDocType, setCurrentDocType] = useState(null);
+  const [tempDocData, setTempDocData] = useState({ file: null, startDate: '', endDate: '' });
+
   const [formData, setFormData] = useState({
-    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
-    document_type: 'DNI', document_number: '', position: '', salary: '', 
+    first_name: '', paternal_surname: '', maternal_surname: '', phone: '',
+    document_type: 'DNI', document_number: '', 
+    position: '', 
     start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
     password: '', afp: '', commission_type: 'Flujo', cuspp: '', 
-    has_children: false, children_count: 0, email: '', role: 'staff',
-    sede_id: '',
-    bank_name: '', // <--- NUEVO CAMPO
-    bank_account: '',
-    cci: ''        // <--- NUEVO CAMPO
+    role: 'asistente_residente', 
+    sede_id: ''
   });
 
-  // Cargar Sedes al abrir el modal
   useEffect(() => {
     if (isOpen) {
       const loadSedes = async () => {
         try {
           const data = await getSedes();
-          setSedesList(data);
-        } catch (error) {
-          console.error("Error cargando sedes:", error);
-        }
+          setSedesList(data || []);
+        } catch (error) { console.error("Error cargando sedes:", error); }
       };
       loadSedes();
+      setPendingDocs({}); 
     }
   }, [isOpen]);
 
-  // Manejador de clicks fuera de los menús
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (docTypeRef.current && !docTypeRef.current.contains(event.target)) setShowDocTypeMenu(false);
@@ -86,50 +130,42 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
       if (roleRef.current && !roleRef.current.contains(event.target)) setShowRoleMenu(false); 
       if (commissionRef.current && !commissionRef.current.contains(event.target)) setShowCommissionMenu(false);
       if (sedeRef.current && !sedeRef.current.contains(event.target)) setShowSedeMenu(false);
-      if (bankRef.current && !bankRef.current.contains(event.target)) setShowBankMenu(false); // <--- CONTROL DE CLICK FUERA
+      if (positionRef.current && !positionRef.current.contains(event.target)) setShowPositionMenu(false);
     };
     if (isOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Cargar datos al editar
   useEffect(() => {
     if (userToEdit) {
       setFormData({
         first_name: userToEdit.first_name || '',
         paternal_surname: userToEdit.paternal_surname || '',
         maternal_surname: userToEdit.maternal_surname || '',
-        birth_date: userToEdit.birth_date || '',
+        phone: userToEdit.phone || '',
         document_type: userToEdit.document_type || 'DNI',
         document_number: userToEdit.document_number || '',
         position: userToEdit.position || '',
-        salary: userToEdit.salary || '',
         start_date: userToEdit.entry_date || userToEdit.start_date || '',
         contract_end_date: userToEdit.contract_end_date || '',
         password: '',
         afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
         commission_type: userToEdit.commission_type || 'Flujo',
         cuspp: userToEdit.cuspp || '', 
-        has_children: userToEdit.has_children || false,
-        children_count: userToEdit.children_count || 0,
-        email: userToEdit.email || '',
-        role: userToEdit.role || 'staff',
-        sede_id: userToEdit.sede_id || '',
-        bank_name: userToEdit.bank_name || '', // <--- CARGAR BANCO
-        bank_account: userToEdit.bank_account || '',
-        cci: userToEdit.cci || '' // <--- CARGAR CCI
+        role: userToEdit.role || 'asistente_residente', 
+        sede_id: userToEdit.sede_id || ''
       });
     } else {
       setFormData({
-        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
-        document_type: 'DNI', document_number: '', position: '', salary: '', 
+        first_name: '', paternal_surname: '', maternal_surname: '', phone: '',
+        document_type: 'DNI', document_number: '', position: '', 
         start_date: new Date().toISOString().split('T')[0], contract_end_date: '',
         password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
-        has_children: false, children_count: 0, email: '', role: 'staff',
-        sede_id: '',
-        bank_name: '', bank_account: '', cci: ''
+        role: 'asistente_residente', 
+        sede_id: ''
       });
     }
+    setShowPassword(false);
   }, [userToEdit, isOpen]);
 
   const handleChange = (e) => {
@@ -143,11 +179,43 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     if (value.length <= maxLength) setFormData({ ...formData, document_number: value });
   };
 
-  const handleDeleteClick = async () => {
+  const handleDeleteClick = () => {
     if (userToEdit && onDelete) {
-      const success = await onDelete(userToEdit.id);
-      if (success) onClose();
+       onDelete(userToEdit.id);
+       onClose(); 
     }
+  };
+
+  const openUploadModal = (docType) => {
+    setCurrentDocType(docType);
+    setTempDocData({ file: null, startDate: '', endDate: '' });
+    setUploadModalOpen(true);
+  };
+
+  const handleSaveTempDoc = () => {
+    if (!tempDocData.file) {
+      alert("Por favor selecciona un archivo.");
+      return;
+    }
+    setPendingDocs(prev => ({ ...prev, [currentDocType]: tempDocData }));
+    setUploadModalOpen(false);
+  };
+
+  const uploadDocumentsToCloud = async (employeeId) => {
+    if (Object.keys(pendingDocs).length === 0) return;
+    const uploadPromises = Object.entries(pendingDocs).map(async ([type, data]) => {
+      try {
+        const fileExt = data.file.name.split('.').pop();
+        const fileName = `${employeeId}/${type.replace(/\s+/g, '_')}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('hr-documents').upload(fileName, data.file);
+        if (uploadError) throw uploadError;
+        await supabase.from('hr_documents').insert([{
+          person_id: employeeId, person_type: 'employee', doc_type: type, file_url: fileName,
+          start_date: data.startDate || null, expiration_date: data.endDate || null
+        }]);
+      } catch (err) { console.error(`Error subiendo ${type}:`, err); }
+    });
+    await Promise.all(uploadPromises);
   };
 
   const handleSubmit = async (e) => {
@@ -158,21 +226,14 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El DNI debe tener 8 dígitos.' });
         setLoading(false); return;
     }
-    if (!formData.email && !userToEdit) {
-        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El correo es obligatorio.' });
-        setLoading(false); return;
-    }
 
     try {
       const fullName = `${formData.first_name} ${formData.paternal_surname} ${formData.maternal_surname}`.trim();
-      
       let hashedPassword = null;
-      if (formData.password) {
+      if (formData.password || !userToEdit) {
+          const plainPass = formData.password || formData.document_number;
           const salt = await bcrypt.genSalt(10);
-          hashedPassword = await bcrypt.hash(formData.password, salt);
-      } else if (!userToEdit) {
-          const salt = await bcrypt.genSalt(10);
-          hashedPassword = await bcrypt.hash(formData.document_number, salt);
+          hashedPassword = await bcrypt.hash(plainPass, salt);
       }
 
       const payload = {
@@ -180,59 +241,38 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
         first_name: formData.first_name, 
         paternal_surname: formData.paternal_surname, 
         maternal_surname: formData.maternal_surname,
-        birth_date: formData.birth_date || null, 
-        
-        // --- CAMPOS BANCARIOS NUEVOS ---
-        bank_name: formData.bank_name || null,
-        bank_account: formData.bank_account || null,
-        cci: formData.cci || null,
-
+        phone: formData.phone,
         document_type: formData.document_type, 
         document_number: formData.document_number,
-        has_children: formData.has_children, 
-        children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
         status: userToEdit ? userToEdit.status : 'Activo',
+        salary: userToEdit ? userToEdit.salary : 0, 
+        has_children: false, children_count: 0, email: null, 
         entry_date: formData.start_date,
-        position: formData.position,
-        salary: parseFloat(formData.salary || 0),
+        position: formData.position, 
         contract_end_date: formData.contract_end_date || null,
-        email: formData.email,
-        role: formData.role,
+        role: formData.role, 
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
-        cuspp: formData.cuspp,
+        cuspp: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.cuspp : null,
         sede_id: formData.sede_id || null
       };
 
-      if (hashedPassword) {
-          payload.password = hashedPassword;
-      }
+      if (hashedPassword) payload.password = hashedPassword;
+
+      let targetId = userToEdit?.id;
 
       if (userToEdit) {
         const { error } = await supabase.from('employees').update(payload).eq('id', userToEdit.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('employees').insert([payload]);
+        const { data, error } = await supabase.from('employees').insert([payload]).select().single();
         if (error) throw error;
+        targetId = data.id; 
       }
 
-      // Sincronizar Profiles
-      if (formData.email) {
-          const profileData = { 
-            full_name: fullName, first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
-            email: formData.email, role: formData.role, status: 'Activo', bank_account: formData.bank_account, birth_date: formData.birth_date || null
-          };
-          
-          const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email).maybeSingle();
-          if (existing) {
-             await supabase.from('profiles').update(profileData).eq('id', existing.id);
-          } else {
-             const { error: profileError } = await supabase.from('profiles').insert([{ id: crypto.randomUUID(), ...profileData }]);
-             if (profileError) console.warn("Error secundario al crear perfil:", profileError.message);
-          }
-      }
+      if (targetId) await uploadDocumentsToCloud(targetId);
 
-      setNotification({ isOpen: true, type: 'success', title: 'Éxito', message: 'Colaborador guardado correctamente.' });
+      setNotification({ isOpen: true, type: 'success', title: 'Éxito', message: 'Personal guardado correctamente.' });
     } catch (error) {
       console.error(error);
       setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message });
@@ -259,8 +299,10 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
 
   const getSedeName = () => {
     const sede = sedesList.find(s => s.id === formData.sede_id);
-    return sede ? sede.name : 'Sin Sede Asignada';
+    return sede ? sede.name : 'Sin Oficina Asignada';
   };
+
+  const isAFP = formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen';
 
   return (
     <>
@@ -271,226 +313,159 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
             <motion.div variants={modalVariants} initial="hidden" animate="visible" exit="exit" className="bg-white rounded-2xl shadow-xl w-full max-w-2xl relative z-10 overflow-hidden flex flex-col max-h-[90vh]">
               
               <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><User className="text-[#003366]"/> {userToEdit ? 'Editar' : 'Nuevo'} Colaborador</h3>
+                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><User className="text-[#003366]"/> {userToEdit ? 'Editar' : 'Nuevo'} Staff / Administrativo</h3>
                 <button onClick={onClose} className="p-1 rounded-full hover:bg-slate-200"><X size={20}/></button>
               </div>
 
               <div className="overflow-y-auto p-6 scrollbar-thin">
                 <form onSubmit={handleSubmit} className="space-y-5">
+                  
+                  {/* DATOS PERSONALES (Omitido por brevedad, es igual al anterior) */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Nombres</label><input name="first_name" required value={formData.first_name} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Paterno</label><input name="paternal_surname" required value={formData.paternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Materno</label><input name="maternal_surname" required value={formData.maternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1 z-30"><label className="text-xs font-bold text-slate-500 uppercase">Documento</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1 col-span-1 md:col-span-2 z-30">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Documento de Identidad</label>
                         <div ref={docTypeRef} className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl h-[48px]">
                             <button type="button" onClick={() => setShowDocTypeMenu(!showDocTypeMenu)} className="h-full flex items-center px-3 text-slate-700 font-bold text-sm border-r border-slate-200 min-w-[80px] justify-between">{formData.document_type} <ChevronDown size={14}/></button>
                             <AnimatePresence>{showDocTypeMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-[120px] bg-white rounded-xl shadow-xl border z-50 overflow-hidden">{['DNI', 'CE'].map(t => <DropdownOption key={t} label={t} isSelected={formData.document_type === t} onClick={() => {setFormData(p=>({...p, document_type:t, document_number:''})); setShowDocTypeMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
                             <input name="document_number" required value={formData.document_number} onChange={handleDocumentChange} className="w-full h-full pl-3 bg-transparent outline-none text-sm font-mono" placeholder="Número"/>
                         </div>
                     </div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Nacimiento</label><div className="relative h-[48px]"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div></div>
-                  </div>
-
-                  {/* SECCIÓN FINANCIERA ACTUALIZADA */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* SALARIO */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase">Salario Mensual</label>
-                      <div className="relative h-[48px]">
-                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                        <input type="number" name="salary" value={formData.salary} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="0.00"/>
-                      </div>
-                    </div>
-
-                    {/* SELECCIÓN DE BANCO */}
-                    <div className="space-y-1 relative" ref={bankRef}>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Entidad Bancaria</label>
-                      <button type="button" onClick={() => setShowBankMenu(!showBankMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
-                        <div className="flex items-center gap-2">
-                           <Landmark size={18} className="text-slate-400"/>
-                           {formData.bank_name || <span className="text-slate-400">Seleccionar Banco...</span>}
+                    <div className="space-y-1 col-span-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Celular</label>
+                        <div className="relative h-[48px]">
+                            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="999..."/>
                         </div>
-                        <ChevronDown size={16}/>
-                      </button>
-                      <AnimatePresence>
-                        {showBankMenu && (
-                          <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden max-h-48 overflow-y-auto">
-                            <DropdownOption label="Ninguno / Efectivo" isSelected={!formData.bank_name} onClick={() => {setFormData({...formData, bank_name: '', bank_account: '', cci: ''}); setShowBankMenu(false);}}/>
-                            {BANKS_LIST.map(b => (
-                              <DropdownOption key={b} label={b} isSelected={formData.bank_name === b} onClick={() => {setFormData({...formData, bank_name: b}); setShowBankMenu(false);}}/>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
                   </div>
-
-                  {/* DESPLIEGUE DE CUENTAS (SOLO SI HAY BANCO SELECCIONADO) */}
-                  <AnimatePresence>
-                    {formData.bank_name && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }} 
-                        animate={{ opacity: 1, height: 'auto' }} 
-                        exit={{ opacity: 0, height: 0 }}
-                        className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden"
-                      >
-                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">N° Cuenta ({formData.bank_name})</label>
-                            <div className="relative h-[48px]">
-                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                <input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="000-000..."/>
-                            </div>
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">CCI (Interbancario)</label>
-                            <div className="relative h-[48px]">
-                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                <input type="text" name="cci" value={formData.cci} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="002-000..."/>
-                            </div>
-                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Fin Contrato</label><input type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
                   </div>
 
-                  {/* SECCIÓN CARGO Y SEDE */}
+                  {/* CARGO Y SEDE */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      
-                      {/* CARGO */}
-                      <div className="space-y-1">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Cargo</label>
-                          <div className="relative h-[48px]">
-                              <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                              <input name="position" required value={formData.position} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Ej. Administrador"/>
-                          </div>
+                      <div className="space-y-1 relative" ref={positionRef}>
+                          <label className="text-xs font-bold text-slate-500 uppercase">Cargo (Etiqueta)</label>
+                          <button type="button" onClick={() => setShowPositionMenu(!showPositionMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] focus:border-[#003366] transition-colors">
+                            <span className="truncate">{formData.position || 'Seleccionar Cargo'}</span> <ChevronDown size={16}/>
+                          </button>
+                          <AnimatePresence>
+                              {showPositionMenu && (
+                                  <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full mb-1 left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto">
+                                      {POSITIONS.map(pos => (
+                                          <DropdownOption key={pos} label={pos} isSelected={formData.position === pos} onClick={() => {setFormData({...formData, position: pos}); setShowPositionMenu(false);}}/>
+                                      ))}
+                                  </motion.div>
+                              )}
+                          </AnimatePresence>
                       </div>
 
-                      {/* SEDE */}
                       <div className="space-y-1 relative" ref={sedeRef}>
-                          <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
-                            <MapPin size={12}/> Sede Asignada
-                          </label>
-                          <button 
-                            type="button" 
-                            onClick={() => setShowSedeMenu(!showSedeMenu)} 
-                            className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] focus:border-[#003366] transition-colors"
-                          >
-                            <span className="truncate">{getSedeName()}</span> 
-                            <ChevronDown size={16}/>
+                          <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><MapPin size={12}/> Oficina (Sede)</label>
+                          <button type="button" onClick={() => setShowSedeMenu(!showSedeMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] focus:border-[#003366] transition-colors">
+                            <span className="truncate">{getSedeName()}</span> <ChevronDown size={16}/>
                           </button>
-                          
                           <AnimatePresence>
                               {showSedeMenu && (
-                                  <motion.div 
-                                    variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" 
-                                    className="absolute bottom-full mb-1 left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto"
-                                  >
-                                      <DropdownOption 
-                                        label="Sin Sede Asignada" 
-                                        isSelected={formData.sede_id === '' || formData.sede_id === null} 
-                                        onClick={() => {setFormData({...formData, sede_id: null}); setShowSedeMenu(false);}}
-                                      />
+                                  <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full mb-1 left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto">
+                                      <DropdownOption label="Sin Oficina Asignada" isSelected={!formData.sede_id} onClick={() => {setFormData({...formData, sede_id: null}); setShowSedeMenu(false);}}/>
                                       {sedesList.map(s => (
-                                          <DropdownOption 
-                                              key={s.id} 
-                                              label={s.name} 
-                                              isSelected={formData.sede_id === s.id} 
-                                              onClick={() => {setFormData({...formData, sede_id: s.id}); setShowSedeMenu(false);}}
-                                          />
+                                          <DropdownOption key={s.id} label={s.name} isSelected={formData.sede_id === s.id} onClick={() => {setFormData({...formData, sede_id: s.id}); setShowSedeMenu(false);}}/>
                                       ))}
-                                      {sedesList.length === 0 && (
-                                        <div className="px-4 py-3 text-xs text-slate-400 text-center italic">
-                                          No hay sedes registradas.
-                                        </div>
-                                      )}
                                   </motion.div>
                               )}
                           </AnimatePresence>
                       </div>
                   </div>
 
-                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
-                    
+                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Información Adicional</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                       <div className="space-y-1 relative" ref={afpRef}>
                         <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
                         <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between">{formData.afp || 'Seleccione'} <ChevronDown size={16}/></button>
                         <AnimatePresence>{showAfpMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">{AFPS.map(a => <DropdownOption key={a} label={a} isSelected={formData.afp === a} onClick={() => {setFormData({...formData, afp: a}); setShowAfpMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
                       </div>
-
-                      {formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen' && (
-                        <div className="space-y-1 relative" ref={commissionRef}>
-                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
-                            <button type="button" onClick={() => setShowCommissionMenu(!showCommissionMenu)} className="w-full h-[48px] px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm font-bold text-[#003366] flex items-center justify-between shadow-sm">
-                                {formData.commission_type} <ChevronDown size={16}/>
-                            </button>
-                            <AnimatePresence>
-                                {showCommissionMenu && (
-                                    <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">
-                                        {COMMISSION_TYPES.map(c => <DropdownOption key={c} label={c} isSelected={formData.commission_type === c} onClick={() => {setFormData({...formData, commission_type: c}); setShowCommissionMenu(false);}}/>)}
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
+                      {isAFP && (
+                        <>
+                          <div className="space-y-1 relative" ref={commissionRef}>
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
+                              <button type="button" onClick={() => setShowCommissionMenu(!showCommissionMenu)} className="w-full h-[48px] px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm font-bold text-[#003366] flex items-center justify-between shadow-sm">
+                                  {formData.commission_type} <ChevronDown size={16}/>
+                              </button>
+                              <AnimatePresence>{showCommissionMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">{COMMISSION_TYPES.map(c => <DropdownOption key={c} label={c} isSelected={formData.commission_type === c} onClick={() => {setFormData({...formData, commission_type: c}); setShowCommissionMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
+                          </div>
+                          <div className="space-y-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
+                              <input type="text" name="cuspp" value={formData.cuspp} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] font-mono" placeholder="Código AFP"/>
+                          </div>
+                        </>
                       )}
-
-                      {formData.afp && formData.afp !== 'Sin Régimen' && (
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
-                            <input 
-                                type="text" 
-                                name="cuspp" 
-                                value={formData.cuspp} 
-                                onChange={handleChange} 
-                                className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] font-mono"
-                                placeholder="Código AFP"
-                            />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div onClick={() => setFormData(p => ({ ...p, has_children: !p.has_children }))} className={`flex items-center justify-between px-3 rounded-xl border cursor-pointer h-[48px] ${formData.has_children ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}><span className="text-sm font-bold text-slate-700 flex gap-2"><Baby size={18}/> ¿Tiene Hijos?</span><div className={`w-10 h-5 rounded-full relative transition-colors ${formData.has_children ? 'bg-[#003366]' : 'bg-slate-300'}`}><div className={`absolute top-0.5 left-0.5 bg-white w-4 h-4 rounded-full transition-transform ${formData.has_children ? 'translate-x-5' : ''}`}></div></div></div>
-                        {formData.has_children && <div><label className="text-xs font-bold text-slate-500 uppercase">N° Hijos</label><input type="number" name="children_count" value={formData.children_count} onChange={handleChange} className="w-full h-[48px] px-3 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold text-[#003366] outline-none"/></div>}
                     </div>
                   </div>
 
-                  <div className="border-t pt-4"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><KeyRound size={16}/> Credenciales y Permisos</h4>
-                    <div className="space-y-2">
-                        <div className="relative"><Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="email" name="email" required value={formData.email} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Email"/></div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="relative"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder={userToEdit ? "******" : "Pass (Opcional)"}/></div>
-                            
-                            <div className="relative" ref={roleRef}>
-                                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/>
-                                <button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
-                                    {getRoleLabel(formData.role)} <ChevronDown size={16}/>
-                                </button>
-                                <AnimatePresence>
-                                    {showRoleMenu && (
-                                        <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 mb-1 overflow-hidden">
-                                            {ROLES.map(r => (
-                                                <DropdownOption 
-                                                    key={r.value} 
-                                                    label={r.label} 
-                                                    isSelected={formData.role === r.value} 
-                                                    onClick={() => {setFormData({...formData, role: r.value}); setShowRoleMenu(false);}}
-                                                />
-                                            ))}
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-                        </div>
-                        {!userToEdit && <p className="text-[10px] text-slate-400 pl-2">* Si no ingresa contraseña, se usará el DNI como contraseña por defecto.</p>}
+                  {/* DOCUMENTOS */}
+                  <div className="border-t pt-4">
+                    <h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2">
+                        <FileText size={16}/> Documentos (Opcional)
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {DOC_TYPES_OPTIONAL.map((doc) => {
+                        const isUploaded = !!pendingDocs[doc];
+                        return (
+                          <div key={doc} className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${isUploaded ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
+                             <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isUploaded ? 'bg-green-100 text-green-600' : 'bg-white text-slate-400'}`}>
+                                   {isUploaded ? <CheckCircle2 size={16}/> : <FileText size={16}/>}
+                                </div>
+                                <div>
+                                   <p className={`text-sm font-bold ${isUploaded ? 'text-green-800' : 'text-slate-700'}`}>{doc}</p>
+                                   <p className="text-[10px] text-slate-400">{isUploaded ? 'Listo para subir' : 'Sin archivo'}</p>
+                                </div>
+                             </div>
+                             {isUploaded ? (
+                               <button type="button" onClick={() => { 
+                                  const newDocs = { ...pendingDocs }; delete newDocs[doc]; setPendingDocs(newDocs); 
+                               }} className="text-xs text-red-500 hover:underline font-medium">Quitar</button>
+                             ) : (
+                               <button type="button" onClick={() => openUploadModal(doc)} className="flex items-center gap-1 text-xs bg-white border border-slate-300 hover:border-[#003366] hover:text-[#003366] px-3 py-1.5 rounded-lg transition-all font-bold shadow-sm">
+                                  <UploadCloud size={14}/> Subir
+                               </button>
+                             )}
+                          </div>
+                        );
+                      })}
                     </div>
+                  </div>
+
+                  {/* ROL DE ACCESO (PERMISOS) */}
+                  <div className="border-t pt-4">
+                     <h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><KeyRound size={16}/> Usuario y Permisos</h4>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">Contraseña</label>
+                            <div className="relative group">
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input type={showPassword ? "text" : "password"} name="password" value={formData.password} onChange={handleChange} className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder={userToEdit ? "•••••• (Opcional)" : "Por defecto: DNI"} autoComplete="new-password"/>
+                                <button type="button" onClick={()=>setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#003366]">{showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
+                            </div>
+                            <p className="text-[10px] text-slate-400 ml-1 mt-1">* El usuario será su DNI/CE.</p>
+                         </div>
+                         <div className="space-y-1 relative" ref={roleRef}>
+                             <label className="text-xs font-bold text-slate-500 uppercase">Rol de Acceso (Permisos)</label>
+                             <button type="button" onClick={() => setShowRoleMenu(!showRoleMenu)} className="w-full h-[48px] pl-3 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
+                                 <span className="truncate mr-2">{getRoleLabel(formData.role)}</span> <ChevronDown size={16}/>
+                             </button>
+                             <AnimatePresence>{showRoleMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 mb-1 overflow-hidden h-60 overflow-y-auto">{ROLES.map(r => (<DropdownOption key={r.value} label={r.label} isSelected={formData.role === r.value} onClick={() => {setFormData({...formData, role: r.value}); setShowRoleMenu(false);}}/>))}</motion.div>)}</AnimatePresence>
+                         </div>
+                     </div>
                   </div>
 
                   <div className="pt-4 flex gap-3">
@@ -506,6 +481,29 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
           </div>
         )}
       </AnimatePresence>
+      
+      {/* MINI MODAL SUBIDA */}
+      <AnimatePresence>
+        {uploadModalOpen && (
+           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-slate-200">
+                 <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+                    <h3 className="font-bold text-slate-800 text-lg">{currentDocType}</h3>
+                    <button onClick={() => setUploadModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                 </div>
+                 <div className="space-y-4">
+                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Archivo (PDF/IMG)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" className="w-full text-sm text-slate-600" onChange={(e) => setTempDocData({ ...tempDocData, file: e.target.files[0] })}/></div>
+                    <div className="grid grid-cols-2 gap-3">
+                       <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Emisión</label><input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={tempDocData.startDate} onChange={(e) => setTempDocData({ ...tempDocData, startDate: e.target.value })}/></div>
+                       <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Vencimiento</label><input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={tempDocData.endDate} onChange={(e) => setTempDocData({ ...tempDocData, endDate: e.target.value })}/></div>
+                    </div>
+                    <button type="button" onClick={handleSaveTempDoc} className="w-full py-3 bg-[#003366] text-white font-bold rounded-xl hover:bg-blue-900 mt-2">Confirmar Carga</button>
+                 </div>
+              </motion.div>
+           </div>
+        )}
+      </AnimatePresence>
+
       <StatusModal isOpen={notification.isOpen} onClose={handleCloseNotif} type={notification.type} title={notification.title} message={notification.message}/>
     </>
   );

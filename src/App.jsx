@@ -7,16 +7,15 @@ import MainLayout from './components/layout/MainLayout';
 import WorkerLayout from './components/layout/WorkerLayout';
 import RoleProtectedRoute from './components/layout/RoleProtectedRoute';
 
-// --- PÁGINAS PÚBLICAS (LANDING) ---
+// Páginas Públicas
 const ClientLandingPage = React.lazy(() => import('./modules/landing/ClientLandingPage'));
 const ComplaintsBookPage = React.lazy(() => import('./modules/landing/ComplaintsBookPage'));
 
-// --- PÁGINAS DEL SISTEMA INTERNO ---
+// Páginas del Sistema
 const LoginPage = React.lazy(() => import('./modules/auth/LoginPage'));
 const DashboardPage = React.lazy(() => import('./modules/admin-control/DashboardPage'));
 const ProjectsPage = React.lazy(() => import('./modules/projects/ProjectsPage')); 
 const SedesPage = React.lazy(() => import('./modules/projects/SedesPage'));
-
 const HumanResourcesPage = React.lazy(() => import('./modules/hr/HumanResourcesPage'));
 const PayrollPage = React.lazy(() => import('./modules/hr/PayrollPage'));
 const ReportsPage = React.lazy(() => import('./modules/admin-control/ReportsPage'));
@@ -25,12 +24,11 @@ const UserProfilePage = React.lazy(() => import('./modules/admin-control/UserPro
 const DocumentationPage = React.lazy(() => import('./modules/hr/DocumentationPage'));
 const TendersPage = React.lazy(() => import('./modules/licitaciones/TendersPage'));
 const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetail'));
-
-// NUEVA PÁGINA DE CONTABILIDAD
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
-
-// Resident Pages
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
+
+// PÁGINA DE MANTENIMIENTO
+const MaintenancePage = React.lazy(() => import('./components/common/MaintenancePage'));
 
 // Worker Pages
 const WorkerDashboard = React.lazy(() => import('./modules/worker/WorkerDashboard'));
@@ -39,59 +37,87 @@ const WorkerProjectView = React.lazy(() => import('./modules/worker/WorkerProjec
 const WorkerProjectLog = React.lazy(() => import('./modules/worker/WorkerProjectLog'));
 const WorkerProfilePage = React.lazy(() => import('./modules/worker/WorkerProfilePage'));
 
-// Componente de Carga (Spinner)
 const LoadingSpinner = () => (
   <div className="h-screen w-full flex items-center justify-center bg-slate-50">
     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#003366]"></div>
   </div>
 );
 
+// GRUPO DE ALTA DIRECCIÓN PARA REUTILIZAR
+const MANAGERS = ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'gerente_proyectos', 'coordinador_proyectos', 'jefe_rrhh'];
+
 function App() {
   return (
     <Suspense fallback={<LoadingSpinner />}>
       <Routes>
-        
-        {/* === RUTAS PÚBLICAS === */}
         <Route path="/" element={<ClientLandingPage />} />
         <Route path="/libro-reclamaciones" element={<ComplaintsBookPage />} />
         <Route path="/login" element={<LoginPage />} />
 
-
-        {/* === RUTAS PRIVADAS / SISTEMA INTERNO === */}
-
-        {/* GRUPO 1: ACCESO GENERAL (Dashboard y Perfil) */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh', 'resident_engineer', 'staff', 'logistica', 'ssoma', 'administrativo']} />}>
+        {/* --- RUTAS PROTEGIDAS --- */}
+        
+        {/* DASHBOARD Y PERFIL (TODOS TIENEN ACCESO) */}
+        <Route element={<RoleProtectedRoute allowedRoles={[
+            ...MANAGERS, 
+            'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 
+            'asistente_administrativo', 'asistente_logistica', 'encargado_almacen', 'servicios_generales', 
+            'transportista', 'limpieza', 'tesorera', 'residente_obra', 'encargado_obra', 
+            'asistente_residente', 'jefe_licitaciones', 'asistente_costos', 'jefe_ssoma', 
+            'coordinador_ssoma', 'prevencionista', 'jefe_calidad'
+        ]} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/dashboard" element={<DashboardPage />} />
              <Route path="/profile" element={<UserProfilePage />} />
           </Route>
         </Route>
 
-        {/* GRUPO 2: GESTIÓN DE OBRAS (Y SEDES) */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer', 'staff', 'ssoma', 'administrativo']} />}>
+        {/* EJECUCIÓN DE OBRAS + CAMPO */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'residente_obra', 'encargado_obra', 'jefe_calidad']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/proyectos" element={<ProjectsPage />} />
              <Route path="/proyectos/sedes" element={<SedesPage />} />
+             <Route path="/campo/tareo" element={<FieldAttendancePage />} />
           </Route>
         </Route>
 
-        {/* Ruta separada para licitaciones (Solo Admin) */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
+        {/* LICITACIONES */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_licitaciones']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/licitaciones" element={<TendersPage />} />
              <Route path="/licitaciones/:id" element={<TenderDetail />} />
           </Route>
         </Route>
 
-        {/* GRUPO 3: SUPERVISIÓN DE CAMPO */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'resident_engineer', 'ssoma', 'administrativo']} />}>
+        {/* ADMINISTRACIÓN */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_administrativo']} />}>
            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-              <Route path="/campo/tareo" element={<FieldAttendancePage />} />
+              <Route path="/administracion" element={<MaintenancePage title="Oficina de Administración" />} />
            </Route>
         </Route>
 
-        {/* GRUPO 4: RECURSOS HUMANOS (RRHH + Admin) */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin', 'rrhh']} />}>
+        {/* LOGÍSTICA */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen']} />}>
+           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+              <Route path="/logistica" element={<MaintenancePage title="Logística y Almacén" />} />
+           </Route>
+        </Route>
+
+        {/* TESORERÍA */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'administrador', 'tesorera']} />}>
+           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+              <Route path="/tesoreria" element={<MaintenancePage title="Tesorería" />} />
+           </Route>
+        </Route>
+
+        {/* SSOMA */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista']} />}>
+           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+              <Route path="/ssoma" element={<MaintenancePage title="Gestión SSOMA" />} />
+           </Route>
+        </Route>
+
+        {/* RRHH */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_rrhh']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
              <Route path="/users" element={<HumanResourcesPage />} />
              <Route path="/planillas" element={<PayrollPage />} />
@@ -99,17 +125,16 @@ function App() {
           </Route>
         </Route>
 
-        {/* GRUPO 5: SUPER ADMIN Y FINANZAS */}
-        <Route element={<RoleProtectedRoute allowedRoles={['admin']} />}>
+        {/* CONTABILIDAD */}
+        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_contabilidad']} />}>
           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+             <Route path="/finanzas" element={<AccountingPage />} />
              <Route path="/reportes" element={<ReportsPage />} />
              <Route path="/configuracion" element={<ConfigurationPage />} />
-             {/* --- AQUÍ ESTÁ LA NUEVA RUTA --- */}
-             <Route path="/finanzas" element={<AccountingPage />} />
           </Route>
         </Route>
 
-        {/* === RUTAS DE OBREROS (WORKERS) === */}
+        {/* WORKERS */}
         <Route path="/worker" element={<WorkerLayout />}>
           <Route path="dashboard" element={<WorkerDashboard />} />
           <Route path="asistencia" element={<WorkerAttendance />} />
@@ -118,9 +143,7 @@ function App() {
           <Route path="profile" element={<WorkerProfilePage />} />
         </Route>
 
-        {/* 404 */}
         <Route path="*" element={<div className="p-10 text-center font-bold text-slate-600 mt-20">Página no encontrada (404)</div>} />
-
       </Routes>
     </Suspense>
   );
