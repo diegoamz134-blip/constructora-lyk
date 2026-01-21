@@ -6,11 +6,14 @@ import {
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
   DollarSign, ClipboardCheck,
-  Truck, Wallet, ShieldCheck, Landmark // <--- NUEVOS ICONOS IMPORTADOS
+  Truck, Wallet, ShieldCheck, Landmark 
 } from 'lucide-react';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
+
+// --- IMPORTAMOS EL BOTÓN FLOTANTE ---
+import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
 
 // --- CONFIGURACIÓN DE MENÚ ACTUALIZADA ---
 const navItems = [
@@ -18,36 +21,26 @@ const navItems = [
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    // TODOS pueden ver el dashboard
     allowed: [
-      'admin', 
-      'gerencia_general', 
-      'oficina_obras', 
-      'oficina_rrhh', 
-      'oficina_admin_logistica', 
-      'oficina_contabilidad', 
-      'oficina_tesoreria', 
-      'oficina_licitaciones', 
-      'oficina_ssoma', 
-      'oficina_calidad'
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_obras', 'oficina_rrhh', 'oficina_admin_logistica', 
+      'oficina_contabilidad', 'oficina_tesoreria', 'oficina_licitaciones', 
+      'oficina_ssoma', 'oficina_calidad'
     ]
   },
   
-  // 1. EJECUCIÓN DE OBRAS (Antes Proyectos)
+  // 1. EJECUCIÓN DE OBRAS
   { 
-    label: 'Ejecución de Obras', // <--- NOMBRE CAMBIADO
+    label: 'Ejecución de Obras', 
     icon: Building2, 
     allowed: [
-      'admin', 
-      'gerencia_general', 
-      'oficina_obras', 
-      'oficina_ssoma', 
-      'oficina_calidad', 
-      'oficina_admin_logistica'
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_obras', 'oficina_ssoma', 'oficina_calidad', 
+      'oficina_admin_logistica', 'residente_obra', 'encargado_obra'
     ],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
-      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck }, // <--- MOVIDO AQUÍ DENTRO
+      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck },
       { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
     ]
   },
@@ -58,34 +51,42 @@ const navItems = [
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
     allowed: [
-      'admin', 
-      'gerencia_general', 
-      'oficina_licitaciones'
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_licitaciones', 'jefe_licitaciones'
     ]
   },
 
-  // 3. ADMINISTRACIÓN (NUEVO)
+  // 3. ADMINISTRACIÓN
   {
     path: '/administracion',
     icon: Briefcase,
     label: 'Administración',
-    allowed: ['admin', 'gerencia_general', 'oficina_admin_logistica']
+    allowed: [
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_admin_logistica'
+    ]
   },
 
-  // 4. LOGÍSTICA (NUEVO)
+  // 4. LOGÍSTICA
   {
     path: '/logistica',
     icon: Truck,
     label: 'Logística',
-    allowed: ['admin', 'gerencia_general', 'oficina_admin_logistica']
+    allowed: [
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_admin_logistica', 'asistente_logistica', 'encargado_almacen'
+    ]
   },
 
-  // 5. TESORERÍA (NUEVO)
+  // 5. TESORERÍA
   {
     path: '/tesoreria',
     icon: Wallet,
     label: 'Tesorería',
-    allowed: ['admin', 'gerencia_general', 'oficina_tesoreria', 'oficina_contabilidad']
+    allowed: [
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_tesoreria', 'oficina_contabilidad', 'tesorera'
+    ]
   },
 
   // 6. CONTABILIDAD
@@ -94,11 +95,9 @@ const navItems = [
     icon: Landmark, 
     label: 'Contabilidad',
     allowed: [
-      'admin', 
-      'gerencia_general', 
-      'oficina_contabilidad', 
-      'oficina_tesoreria', 
-      'oficina_admin_logistica'
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_contabilidad', 'oficina_tesoreria', 'oficina_admin_logistica',
+      'contador', 'analista_contable'
     ]
   },
 
@@ -107,10 +106,8 @@ const navItems = [
     label: 'Recursos Humanos', 
     icon: Users,
     allowed: [
-      'admin', 
-      'gerencia_general', 
-      'oficina_rrhh', 
-      'oficina_admin_logistica'
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_rrhh', 'oficina_admin_logistica', 'jefe_rrhh', 'asistente_rrhh'
     ],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -120,12 +117,15 @@ const navItems = [
     ]
   },
 
-  // 8. SSOMA (NUEVO)
+  // 8. SSOMA
   {
     path: '/ssoma',
     icon: ShieldCheck,
     label: 'SSOMA',
-    allowed: ['admin', 'gerencia_general', 'oficina_ssoma', 'oficina_obras']
+    allowed: [
+      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
+      'oficina_ssoma', 'oficina_obras', 'jefe_ssoma'
+    ]
   },
 ];
 
@@ -159,7 +159,7 @@ const MainLayout = () => {
   // Estado de menús desplegables
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': false, 
-    'Ejecución de Obras': false // <--- ACTUALIZADO KEY A NUEVO NOMBRE
+    'Ejecución de Obras': false
   });
 
   const toggleMenu = (label) => {
@@ -257,7 +257,7 @@ const MainLayout = () => {
       </nav>
 
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         {['admin', 'gerencia_general'].includes(currentRole) && (
+         {['admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos'].includes(currentRole) && (
              <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
                 <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
              </NavLink>
@@ -275,8 +275,8 @@ const MainLayout = () => {
     if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
     if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
     if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes';
-    if (location.pathname.includes('/proyectos')) return 'Ejecución de Obras'; // Actualizado
-    if (location.pathname.includes('/campo')) return 'Supervisión de Campo'; // Actualizado
+    if (location.pathname.includes('/proyectos')) return 'Ejecución de Obras';
+    if (location.pathname.includes('/campo')) return 'Supervisión de Campo';
     if (location.pathname.includes('/finanzas')) return 'Área Contable';
     if (location.pathname.includes('/licitaciones')) return 'Licitaciones';
     if (location.pathname.includes('/administracion')) return 'Administración';
@@ -347,12 +347,7 @@ const MainLayout = () => {
                 
                 <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
                   {displayPhoto ? (
-                    <img 
-                      src={displayPhoto} 
-                      alt="Perfil" 
-                      className="w-full h-full object-cover"
-                      onError={(e) => { e.target.style.display = 'none'; }} 
-                    />
+                    <img src={displayPhoto} alt="Perfil" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
                   ) : (
                     <span className="text-xs font-bold text-slate-500">{initials}</span>
                   )}
@@ -372,6 +367,10 @@ const MainLayout = () => {
         <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide">
            <Outlet />
         </div>
+        
+        {/* --- BOTÓN FLOTANTE --- */}
+        <OnboardingFloatingBtn />
+        
       </main>
 
       {isLoggingOut && (

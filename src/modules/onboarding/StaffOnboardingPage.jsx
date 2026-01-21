@@ -139,31 +139,60 @@ const StaffOnboardingPage = () => {
     setFormData({ ...formData, [name]: value });
   };
 
-  // --- SUBMIT FINAL ---
-  const handleSubmit = async () => {
+  // --- SUBMIT FINAL (LÓGICA ACTUALIZADA) ---
+  const handleSubmit = async (skip = false) => {
     setLoading(true);
     try {
       if (!currentUser?.id) {
-         // Si se perdió la sesión, forzamos salida para que vuelva a entrar
          handleLogoutForce("Sesión no detectada. Por favor ingrese nuevamente.");
          return;
       }
 
-      // 1. Guardar en Supabase
+      // 1. Preparamos los datos
+      // Si es SKIP, guardamos lo que tenga + la bandera skipped: true
+      // Si es FINALIZAR (skip=false), guardamos todo + la bandera skipped: false
+      // Así sabemos si mostrar o no el botón flotante después
+      const dataToSave = {
+          ...formData,
+          skipped: skip ? true : false, 
+          updated_at: new Date().toISOString()
+      };
+
+      const updatePayload = {
+        onboarding_completed: true, // Siempre true para dejarlo entrar al dashboard
+        onboarding_data: dataToSave
+      };
+
+      // 2. Guardar en Supabase
       const { error } = await supabase
         .from('employees')
-        .update({
-          onboarding_data: formData, // JSON completo
-          onboarding_completed: true // Bandera completado
-        })
+        .update(updatePayload)
         .eq('id', currentUser.id);
 
       if (error) throw error;
 
-      // 2. IMPORTANTE: Eliminar el timer del localStorage para que no moleste en el futuro
+      // 3. ACTUALIZAR LA SESIÓN LOCAL
+      // Esto es clave para que el botón flotante aparezca/desaparezca instantáneamente
+      const storedSession = localStorage.getItem('lyk_session');
+      if (storedSession) {
+        try {
+            const sessionData = JSON.parse(storedSession);
+            
+            if (sessionData.user) {
+              sessionData.user.onboarding_completed = true;
+              sessionData.user.onboarding_data = dataToSave; // Guardamos la data actualizada en local
+            }
+
+            localStorage.setItem('lyk_session', JSON.stringify(sessionData));
+        } catch (e) {
+            console.error("Error actualizando sesión local:", e);
+        }
+      }
+
+      // 4. Limpieza final
       localStorage.removeItem(TIMER_KEY);
 
-      // 3. Redirección Forzada al Dashboard
+      // 5. Redirección Forzada al Dashboard
       window.location.href = '/dashboard';
 
     } catch (error) {
@@ -282,9 +311,10 @@ const StaffOnboardingPage = () => {
               <button onClick={prevStep} disabled={currentStep === 1} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-slate-500 hover:text-[#003366] hover:bg-slate-100 transition-all ${currentStep === 1 ? 'opacity-0 pointer-events-none' : ''}`}>
                  <ArrowLeft size={20} /> Atrás
               </button>
+              
               <div className="flex items-center gap-4">
                  
-                 {/* BOTÓN SALIR QUE FUNCIONA */}
+                 {/* BOTÓN SALIR */}
                  <button onClick={() => handleLogoutForce()} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-red-500 uppercase tracking-wider px-4">
                     <LogOut size={14} /> Salir
                  </button>
@@ -294,14 +324,27 @@ const StaffOnboardingPage = () => {
                        Siguiente <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform"/>
                     </button>
                  ) : (
-                    <button 
-                       type="button" 
-                       onClick={handleSubmit} 
-                       disabled={loading || !currentUser} 
-                       className={`group flex items-center gap-3 px-8 py-3 rounded-xl font-bold shadow-xl transition-all ${loading ? 'bg-slate-300 cursor-not-allowed text-slate-500' : 'bg-[#f0c419] text-[#003366] hover:shadow-yellow-500/30 hover:scale-[1.02] active:scale-95'}`}
-                    >
-                       {loading ? 'Guardando...' : <><Save size={18} /> Finalizar</>}
-                    </button>
+                    <>
+                       {/* BOTÓN OMITIR */}
+                       <button 
+                           type="button" 
+                           onClick={() => handleSubmit(true)} // True = Omitir (skipped: true)
+                           disabled={loading}
+                           className="hidden sm:block px-5 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 hover:text-[#003366] transition-all"
+                       >
+                           Omitir
+                       </button>
+
+                       {/* BOTÓN FINALIZAR (GUARDAR) */}
+                       <button 
+                          type="button" 
+                          onClick={() => handleSubmit(false)} // False = Guardar (skipped: false)
+                          disabled={loading || !currentUser} 
+                          className={`group flex items-center gap-3 px-8 py-3 rounded-xl font-bold shadow-xl transition-all ${loading ? 'bg-slate-300 cursor-not-allowed text-slate-500' : 'bg-[#f0c419] text-[#003366] hover:shadow-yellow-500/30 hover:scale-[1.02] active:scale-95'}`}
+                       >
+                          {loading ? 'Guardando...' : <><Save size={18} /> Finalizar</>}
+                       </button>
+                    </>
                  )}
               </div>
            </div>
@@ -312,7 +355,7 @@ const StaffOnboardingPage = () => {
   );
 };
 
-/* --- SUB-COMPONENTES (Opcionales / Sin required) --- */
+/* --- SUB-COMPONENTES DE FORMULARIO --- */
 
 const StepPersonal = ({ formData, handleChange }) => (
    <div className="space-y-8">
