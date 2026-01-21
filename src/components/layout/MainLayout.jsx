@@ -6,43 +6,48 @@ import {
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
   DollarSign, ClipboardCheck,
-  Truck, Wallet, ShieldCheck, Landmark 
+  Truck, Wallet, ShieldCheck, Landmark // <--- NUEVOS ICONOS IMPORTADOS
 } from 'lucide-react';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
-// --- CONFIGURACIÓN DE MENÚ EXACTA SEGÚN TU LISTA ---
-
-// Roles de Alta Dirección (Ven todo o casi todo)
-const MANAGERS = ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'gerente_proyectos', 'coordinador_proyectos', 'jefe_rrhh'];
-
-// Configuración de Ítems
+// --- CONFIGURACIÓN DE MENÚ ACTUALIZADA ---
 const navItems = [
   { 
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    // Todos ven Dashboard, incluyendo limpieza, choferes, etc.
+    // TODOS pueden ver el dashboard
     allowed: [
-      ...MANAGERS,
-      'contador', 'analista_contable', 'administrador', 'servicios_generales', 'transportista', 'limpieza', 'tesorera', 
-      'residente_obra', 'encargado_obra', 'asistente_residente', 'asistente_costos', 'jefe_licitaciones',
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista', 'jefe_calidad', 'asistente_logistica', 'encargado_almacen'
+      'admin', 
+      'gerencia_general', 
+      'oficina_obras', 
+      'oficina_rrhh', 
+      'oficina_admin_logistica', 
+      'oficina_contabilidad', 
+      'oficina_tesoreria', 
+      'oficina_licitaciones', 
+      'oficina_ssoma', 
+      'oficina_calidad'
     ]
   },
   
-  // 1. EJECUCIÓN DE OBRAS
+  // 1. EJECUCIÓN DE OBRAS (Antes Proyectos)
   { 
-    label: 'Ejecución de Obras', 
+    label: 'Ejecución de Obras', // <--- NOMBRE CAMBIADO
     icon: Building2, 
     allowed: [
-      ...MANAGERS, 
-      'residente_obra', 'encargado_obra', 'jefe_calidad'
+      'admin', 
+      'gerencia_general', 
+      'oficina_obras', 
+      'oficina_ssoma', 
+      'oficina_calidad', 
+      'oficina_admin_logistica'
     ],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
-      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck }, 
+      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck }, // <--- MOVIDO AQUÍ DENTRO
       { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
     ]
   },
@@ -52,40 +57,35 @@ const navItems = [
     path: '/licitaciones', 
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
-    allowed: [...MANAGERS, 'jefe_licitaciones']
+    allowed: [
+      'admin', 
+      'gerencia_general', 
+      'oficina_licitaciones'
+    ]
   },
 
-  // 3. ADMINISTRACIÓN
+  // 3. ADMINISTRACIÓN (NUEVO)
   {
     path: '/administracion',
     icon: Briefcase,
     label: 'Administración',
-    allowed: [
-      ...MANAGERS, 
-      'contador', 'analista_contable', 'administrador', 'asistente_administrativo'
-    ]
+    allowed: ['admin', 'gerencia_general', 'oficina_admin_logistica']
   },
 
-  // 4. LOGÍSTICA
+  // 4. LOGÍSTICA (NUEVO)
   {
     path: '/logistica',
     icon: Truck,
     label: 'Logística',
-    allowed: [
-      ...MANAGERS, 
-      'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen'
-    ]
+    allowed: ['admin', 'gerencia_general', 'oficina_admin_logistica']
   },
 
-  // 5. TESORERÍA
+  // 5. TESORERÍA (NUEVO)
   {
     path: '/tesoreria',
     icon: Wallet,
     label: 'Tesorería',
-    allowed: [
-      ...MANAGERS, 
-      'administrador', 'tesorera'
-    ]
+    allowed: ['admin', 'gerencia_general', 'oficina_tesoreria', 'oficina_contabilidad']
   },
 
   // 6. CONTABILIDAD
@@ -94,8 +94,11 @@ const navItems = [
     icon: Landmark, 
     label: 'Contabilidad',
     allowed: [
-      ...MANAGERS, 
-      'contador', 'analista_contable', 'administrador', 'asistente_contabilidad'
+      'admin', 
+      'gerencia_general', 
+      'oficina_contabilidad', 
+      'oficina_tesoreria', 
+      'oficina_admin_logistica'
     ]
   },
 
@@ -104,8 +107,10 @@ const navItems = [
     label: 'Recursos Humanos', 
     icon: Users,
     allowed: [
-      ...MANAGERS, 
-      'contador', 'analista_contable', 'administrador', 'asistente_rrhh'
+      'admin', 
+      'gerencia_general', 
+      'oficina_rrhh', 
+      'oficina_admin_logistica'
     ],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -115,46 +120,62 @@ const navItems = [
     ]
   },
 
-  // 8. SSOMA
+  // 8. SSOMA (NUEVO)
   {
     path: '/ssoma',
     icon: ShieldCheck,
     label: 'SSOMA',
-    allowed: [
-      ...MANAGERS, 
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista'
-    ]
+    allowed: ['admin', 'gerencia_general', 'oficina_ssoma', 'oficina_obras']
   },
 ];
 
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  
   const { currentUser, role, logout, isLoading } = useUnifiedAuth();
+  
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  // Normalizamos
-  const currentRole = role && role !== 'undefined' ? role : 'asistente_residente';
-  
-  const displayName = currentUser?.user_metadata?.full_name || currentUser?.full_name || 'Usuario';
-  const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
-  const initials = displayName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
+  // Normalizamos el rol
+  const currentRole = role && role !== 'undefined' ? role : 'staff';
+  
+  // Datos del Usuario
+  const displayName = currentUser?.user_metadata?.full_name || 
+                      currentUser?.full_name || 
+                      currentUser?.email?.split('@')[0] || 
+                      'Usuario';
+  
+  const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
+
+  const initials = displayName
+    .split(' ')
+    .map(n => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  // Estado de menús desplegables
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': false, 
-    'Ejecución de Obras': false
+    'Ejecución de Obras': false // <--- ACTUALIZADO KEY A NUEVO NOMBRE
   });
 
   const toggleMenu = (label) => {
     setOpenMenus(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
-  useEffect(() => { setIsMobileMenuOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = () => {
     setIsLoggingOut(true);
-    setTimeout(async () => { await logout(); navigate('/login'); }, 1000);
+    setTimeout(async () => { 
+        await logout(); 
+        navigate('/login'); 
+    }, 1000);
   };
 
   const SidebarContent = () => (
@@ -166,6 +187,7 @@ const MainLayout = () => {
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
           const allowedRoles = item.allowed || [];
+          // Si el rol actual NO está en la lista permitida, NO mostramos el menú
           if (!allowedRoles.includes(currentRole)) return null;
 
           if (item.children) {
@@ -176,18 +198,32 @@ const MainLayout = () => {
               <div key={index} className="mb-1 overflow-hidden">
                 <button 
                   onClick={() => toggleMenu(item.label)}
-                  className={`w-full relative group flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-300 ${isOpen ? 'bg-white/5' : 'hover:bg-white/5'}`}
+                  className={`w-full relative group flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-300 ${
+                    isOpen ? 'bg-white/5' : 'hover:bg-white/5'
+                  }`}
                 >
-                  {isActiveParent && !isOpen && (<motion.div layoutId="active-pill" className="absolute inset-0 bg-white rounded-xl shadow-md" initial={false} />)}
-                  <div className={`relative z-10 flex items-center gap-3 transition-colors duration-200 ${isActiveParent && !isOpen ? 'text-[#0F172A]' : 'text-slate-400 group-hover:text-white'}`}>
+                  {isActiveParent && !isOpen && (
+                    <motion.div layoutId="active-pill" className="absolute inset-0 bg-white rounded-xl shadow-md" initial={false} />
+                  )}
+                  <div className={`relative z-10 flex items-center gap-3 transition-colors duration-200 ${
+                    isActiveParent && !isOpen ? 'text-[#0F172A]' : 'text-slate-400 group-hover:text-white'
+                  }`}>
                     <item.icon size={20} strokeWidth={isActiveParent ? 2.5 : 2} />
                     <span className={`text-sm font-medium tracking-wide ${isActiveParent ? 'font-bold' : ''}`}>{item.label}</span>
                   </div>
-                  <div className={`relative z-10 text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180 text-white' : ''}`}><ChevronDown size={16} /></div>
+                  <div className={`relative z-10 text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180 text-white' : ''}`}>
+                    <ChevronDown size={16} />
+                  </div>
                 </button>
+
                 <AnimatePresence initial={false}>
                   {isOpen && (
-                    <motion.div key="content" initial="collapsed" animate="open" exit="collapsed" variants={{ open: { opacity: 1, height: "auto", marginTop: 4 }, collapsed: { opacity: 0, height: 0, marginTop: 0 } }} transition={{ duration: 0.3 }} className="pl-4 pr-2 space-y-1">
+                    <motion.div 
+                      key="content" initial="collapsed" animate="open" exit="collapsed"
+                      variants={{ open: { opacity: 1, height: "auto", marginTop: 4 }, collapsed: { opacity: 0, height: 0, marginTop: 0 } }}
+                      transition={{ duration: 0.3 }}
+                      className="pl-4 pr-2 space-y-1"
+                    >
                       {item.children.map((child) => {
                         const isChildActive = location.pathname === child.path;
                         return (
@@ -204,10 +240,13 @@ const MainLayout = () => {
               </div>
             );
           }
+
           const isActive = location.pathname === item.path;
           return (
             <NavLink key={item.path} to={item.path} className="block relative group mb-1">
-              {isActive && (<motion.div layoutId="active-pill" className="absolute inset-0 bg-white rounded-xl shadow-md" initial={false} transition={{ type: "spring", stiffness: 300, damping: 30 }} />)}
+              {isActive && (
+                <motion.div layoutId="active-pill" className="absolute inset-0 bg-white rounded-xl shadow-md" initial={false} transition={{ type: "spring", stiffness: 300, damping: 30 }} />
+              )}
               <div className={`relative z-10 flex items-center gap-3 px-4 py-3 transition-colors duration-200 ${isActive ? 'text-[#0F172A]' : 'text-slate-400 group-hover:text-white'}`}>
                 <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
                 <span className={`text-sm font-medium tracking-wide ${isActive ? 'font-bold' : ''}`}>{item.label}</span>
@@ -216,42 +255,133 @@ const MainLayout = () => {
           );
         })}
       </nav>
+
       <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         {MANAGERS.includes(currentRole) && (
-             <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2"><Settings size={20} /> <span className="text-sm font-medium">Configuración</span></NavLink>
+         {['admin', 'gerencia_general'].includes(currentRole) && (
+             <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
+                <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
+             </NavLink>
          )}
-         <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl"><LogOut size={20} /> <span className="text-sm font-medium">Cerrar Sesión</span></button>
+         <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl">
+            <LogOut size={20} /> <span className="text-sm font-medium">Cerrar Sesión</span>
+         </button>
       </div>
     </>
   );
 
   const getPageTitle = () => {
+    if (location.pathname.includes('/dashboard')) return 'Dashboard General';
+    if (location.pathname.includes('/users')) return 'Gestión de Personal';
+    if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
+    if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
+    if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes';
+    if (location.pathname.includes('/proyectos')) return 'Ejecución de Obras'; // Actualizado
+    if (location.pathname.includes('/campo')) return 'Supervisión de Campo'; // Actualizado
+    if (location.pathname.includes('/finanzas')) return 'Área Contable';
+    if (location.pathname.includes('/licitaciones')) return 'Licitaciones';
     if (location.pathname.includes('/administracion')) return 'Administración';
     if (location.pathname.includes('/logistica')) return 'Logística y Almacén';
     if (location.pathname.includes('/tesoreria')) return 'Tesorería';
     if (location.pathname.includes('/ssoma')) return 'Gestión SSOMA';
-    if (location.pathname.includes('/proyectos')) return 'Ejecución de Obras';
-    if (location.pathname.includes('/campo')) return 'Supervisión de Campo';
-    if (location.pathname.includes('/licitaciones')) return 'Licitaciones';
-    if (location.pathname.includes('/users')) return 'Gestión de Personal';
-    if (location.pathname.includes('/finanzas')) return 'Contabilidad';
     return 'Constructora L&K';
   };
 
-  if (isLoading) return <div className="h-screen w-full flex items-center justify-center bg-[#F1F5F9]"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#003366]"></div></div>;
+  if (isLoading) {
+      return (
+        <div className="h-screen w-full flex items-center justify-center bg-[#F1F5F9]">
+          <div className="flex flex-col items-center gap-4 animate-pulse">
+              <div className="h-16 w-16 bg-slate-200 rounded-full"></div>
+              <div className="h-4 w-48 bg-slate-200 rounded"></div>
+          </div>
+        </div>
+      );
+  }
 
   return (
     <div className="flex h-screen bg-[#F1F5F9] md:p-3 font-sans overflow-hidden">
-      <motion.aside initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="hidden md:flex w-72 bg-[#0F172A] rounded-2xl flex-col shadow-xl z-20 relative overflow-hidden"><SidebarContent /></motion.aside>
-      <AnimatePresence>{isMobileMenuOpen && (<><motion.div onClick={() => setIsMobileMenuOpen(false)} className="fixed inset-0 bg-slate-900/60 z-40 md:hidden backdrop-blur-sm"/><motion.aside initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 w-72 bg-[#0F172A] z-50 flex flex-col md:hidden shadow-2xl"><SidebarContent /><button onClick={() => setIsMobileMenuOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white p-2"><X size={24} /></button></motion.aside></>)}</AnimatePresence>
+      <motion.aside 
+        initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.4 }}
+        className="hidden md:flex w-72 bg-[#0F172A] rounded-2xl flex-col shadow-xl z-20 relative overflow-hidden"
+      >
+        <SidebarContent />
+      </motion.aside>
+
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-slate-900/60 z-40 md:hidden backdrop-blur-sm"
+            />
+            <motion.aside
+              initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed inset-y-0 left-0 w-72 bg-[#0F172A] z-50 flex flex-col md:hidden shadow-2xl"
+            >
+               <SidebarContent />
+               <button onClick={() => setIsMobileMenuOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white p-2">
+                 <X size={24} />
+               </button>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
         <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-10">
-           <div className="flex items-center gap-3"><button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden"><Menu size={24} /></button><h1 className="text-lg md:text-2xl font-bold text-slate-800 truncate">{getPageTitle()}</h1></div>
-           <div className="flex items-center gap-2 md:gap-4"><button className="relative p-2 bg-slate-50 md:bg-white rounded-xl text-slate-500 hover:text-[#0F172A] shadow-sm"><Bell size={20} /></button><div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group"><div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] bg-slate-200 flex items-center justify-center shrink-0">{displayPhoto ? <img src={displayPhoto} alt="" className="w-full h-full object-cover"/> : <span className="text-xs font-bold text-slate-500">{initials}</span>}</div><div className="hidden md:block text-right"><p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p><p className="text-[11px] text-slate-400 font-medium capitalize">{currentRole.replace(/_/g, ' ').replace('oficina', 'Of.')}</p></div><ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 hidden md:block" /></div></div>
+           <div className="flex items-center gap-3">
+             <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden">
+               <Menu size={24} />
+             </button>
+             <h1 className="text-lg md:text-2xl font-bold text-slate-800 truncate max-w-[200px] md:max-w-none">
+               {getPageTitle()}
+             </h1>
+           </div>
+           
+           <div className="flex items-center gap-2 md:gap-4">
+              <button className="relative p-2 bg-slate-50 md:bg-white rounded-xl text-slate-500 hover:text-[#0F172A] shadow-sm transition-all">
+                <Bell size={20} />
+              </button>
+              <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
+                
+                <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
+                  {displayPhoto ? (
+                    <img 
+                      src={displayPhoto} 
+                      alt="Perfil" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.target.style.display = 'none'; }} 
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-slate-500">{initials}</span>
+                  )}
+                </div>
+
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
+                  <p className="text-[11px] text-slate-400 font-medium capitalize">
+                     {currentRole.replace(/_/g, ' ').replace('oficina', 'Of.')}
+                  </p>
+                </div>
+                <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors hidden md:block" />
+              </div>
+           </div>
         </header>
-        <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide"><Outlet /></div>
+
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide">
+           <Outlet />
+        </div>
       </main>
-      {isLoggingOut && (<motion.div className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-[60] flex items-center justify-center"><div className="text-center"><div className="w-12 h-12 border-4 border-t-white border-white/20 rounded-full animate-spin mx-auto mb-4"></div><h2 className="text-white text-lg font-medium">Cerrando sesión...</h2></div></motion.div>)}
+
+      {isLoggingOut && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-[60] flex items-center justify-center">
+           <div className="text-center">
+              <div className="w-12 h-12 border-4 border-t-white border-white/20 rounded-full animate-spin mx-auto mb-4"></div>
+              <h2 className="text-white text-lg font-medium tracking-wide">Cerrando sesión...</h2>
+           </div>
+        </motion.div>
+      )}
     </div>
   );
 };

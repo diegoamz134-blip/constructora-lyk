@@ -1,23 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  X, Save, User, Briefcase, DollarSign, Loader2, 
-  Baby, BookOpen, ChevronDown, Check,
-  Calendar, CreditCard, Trash2, PieChart, Hash,
-  Lock, Eye, EyeOff, Landmark 
+  X, Save, User, Briefcase, Loader2, 
+  BookOpen, ChevronDown, Check,
+  Calendar, Trash2, PieChart, Hash,
+  Lock, Eye, EyeOff, MapPin, Phone,
+  FileText, UploadCloud, CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import bcrypt from 'bcryptjs';
 import StatusModal from '../../components/common/StatusModal';
 
+// --- CONFIGURACIÓN ---
+const DOC_TYPES_WORKER = [
+  'Curriculum Vitae', 
+  'DNI / CE', 
+  'Certificado Único Laboral', 
+  'Carnet de Vacunación', 
+  'Escolaridad'
+];
+
+// LISTA ACTUALIZADA DE CATEGORÍAS
+const CATEGORIES = ['Capataz', 'Operario', 'Oficial', 'Ayudante'];
+
+const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
+const COMMISSION_TYPES = ['Flujo', 'Mixta'];
+
 const overlayVariants = { hidden: { opacity: 0 }, visible: { opacity: 1 }, exit: { opacity: 0 } };
 const modalVariants = { hidden: { opacity: 0, scale: 0.95, y: 20 }, visible: { opacity: 1, scale: 1, y: 0 }, exit: { opacity: 0, scale: 0.95, y: 20 } };
 const dropdownVariants = { hidden: { opacity: 0, y: -10, scale: 0.95 }, visible: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: -10, scale: 0.95 } };
-
-const CATEGORIES = ['Peón', 'Oficial', 'Operario', 'Capataz'];
-const AFPS = ['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'];
-const COMMISSION_TYPES = ['Flujo', 'Mixta'];
-const BANKS_LIST = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'Banco de la Nación', 'BanBif', 'Pichincha', 'Caja Arequipa', 'Otro'];
 
 const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) => {
   const [loading, setLoading] = useState(false);
@@ -28,71 +39,75 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [showAfpMenu, setShowAfpMenu] = useState(false);
   const [showCommissionMenu, setShowCommissionMenu] = useState(false);
-  const [showBankMenu, setShowBankMenu] = useState(false);
   
   const [showPassword, setShowPassword] = useState(false);
 
-  // Referencias
+  // Referencias para cerrar menús al hacer click fuera
   const docTypeRef = useRef(null);
   const categoryRef = useRef(null);
   const afpRef = useRef(null);
   const commissionRef = useRef(null);
-  const bankRef = useRef(null);
+
+  // Estados para Documentos
+  const [pendingDocs, setPendingDocs] = useState({});
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [currentDocType, setCurrentDocType] = useState(null);
+  const [tempDocData, setTempDocData] = useState({ file: null, startDate: '', endDate: '' });
 
   const [formData, setFormData] = useState({
-    first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
-    document_type: 'DNI', document_number: '', category: 'Peón', custom_daily_rate: '', 
+    first_name: '', paternal_surname: '', maternal_surname: '', 
+    document_type: 'DNI', document_number: '', 
+    phone: '',
     start_date: new Date().toISOString().split('T')[0],
-    password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '', 
-    has_children: false, children_count: 0,
-    bank_name: '', 
-    bank_account: '',
-    cci: ''
+    category: 'Ayudante', // Valor por defecto actualizado a uno de la lista nueva
+    office: '', 
+    password: '', 
+    afp: 'ONP', commission_type: 'Flujo', cuspp: ''
   });
 
+  // Cierre de menús al hacer click fuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (docTypeRef.current && !docTypeRef.current.contains(event.target)) setShowDocTypeMenu(false);
       if (categoryRef.current && !categoryRef.current.contains(event.target)) setShowCategoryMenu(false);
       if (afpRef.current && !afpRef.current.contains(event.target)) setShowAfpMenu(false);
       if (commissionRef.current && !commissionRef.current.contains(event.target)) setShowCommissionMenu(false);
-      if (bankRef.current && !bankRef.current.contains(event.target)) setShowBankMenu(false);
     };
     if (isOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
+  // Cargar datos si es edición
   useEffect(() => {
     if (userToEdit) {
       setFormData({
         first_name: userToEdit.first_name || '',
         paternal_surname: userToEdit.paternal_surname || '',
         maternal_surname: userToEdit.maternal_surname || '',
-        birth_date: userToEdit.birth_date || '',
         document_type: userToEdit.document_type || 'DNI',
         document_number: userToEdit.document_number || '',
-        category: userToEdit.category || 'Peón',
-        custom_daily_rate: userToEdit.custom_daily_rate || userToEdit.weekly_rate || '',
+        phone: userToEdit.phone || '',
         start_date: userToEdit.start_date || '',
+        category: userToEdit.category || 'Ayudante',
+        office: userToEdit.project_assigned || '',
         password: '', 
         afp: userToEdit.pension_system || userToEdit.afp || 'ONP',
         commission_type: userToEdit.commission_type || 'Flujo',
-        cuspp: userToEdit.cuspp || '', 
-        has_children: userToEdit.has_children || false,
-        children_count: userToEdit.children_count || 0,
-        bank_name: userToEdit.bank_name || '', 
-        bank_account: userToEdit.bank_account || '',
-        cci: userToEdit.cci || ''
+        cuspp: userToEdit.cuspp || ''
       });
+      setPendingDocs({});
     } else {
+      // Limpiar formulario
       setFormData({
-        first_name: '', paternal_surname: '', maternal_surname: '', birth_date: '', 
-        document_type: 'DNI', document_number: '', category: 'Peón', custom_daily_rate: '', 
+        first_name: '', paternal_surname: '', maternal_surname: '', 
+        document_type: 'DNI', document_number: '', 
+        phone: '',
         start_date: new Date().toISOString().split('T')[0],
-        password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: '',
-        has_children: false, children_count: 0,
-        bank_name: '', bank_account: '', cci: ''
+        category: 'Ayudante', 
+        office: '',
+        password: '', afp: 'ONP', commission_type: 'Flujo', cuspp: ''
       });
+      setPendingDocs({});
     }
     setShowPassword(false);
   }, [userToEdit, isOpen]);
@@ -115,6 +130,50 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
     }
   };
 
+  // --- LÓGICA DE DOCUMENTOS ---
+  const openUploadModal = (docType) => {
+    setCurrentDocType(docType);
+    setTempDocData({ file: null, startDate: '', endDate: '' });
+    setUploadModalOpen(true);
+  };
+
+  const handleSaveTempDoc = () => {
+    if (!tempDocData.file) {
+      alert("Por favor selecciona un archivo.");
+      return;
+    }
+    setPendingDocs(prev => ({ ...prev, [currentDocType]: tempDocData }));
+    setUploadModalOpen(false);
+  };
+
+  const uploadDocumentsToCloud = async (workerId) => {
+    if (Object.keys(pendingDocs).length === 0) return;
+    
+    const uploadPromises = Object.entries(pendingDocs).map(async ([type, data]) => {
+      try {
+        const fileExt = data.file.name.split('.').pop();
+        const fileName = `${workerId}/${type.replace(/\s+/g, '_')}_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage.from('hr-documents').upload(fileName, data.file);
+        if (uploadError) throw uploadError;
+
+        await supabase.from('hr_documents').insert([{
+          person_id: workerId, 
+          person_type: 'worker', 
+          doc_type: type, 
+          file_url: fileName,
+          start_date: data.startDate || null, 
+          expiration_date: data.endDate || null
+        }]);
+      } catch (err) { 
+        console.error(`Error subiendo ${type}:`, err); 
+      }
+    });
+    
+    await Promise.all(uploadPromises);
+  };
+
+  // --- SUBMIT ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -129,26 +188,24 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
       
       const payload = {
         full_name: fullName,
-        first_name: formData.first_name, paternal_surname: formData.paternal_surname, maternal_surname: formData.maternal_surname,
-        birth_date: formData.birth_date || null, 
+        first_name: formData.first_name, 
+        paternal_surname: formData.paternal_surname, 
+        maternal_surname: formData.maternal_surname,
         
-        // --- DATOS BANCARIOS ---
-        bank_name: formData.bank_name || null,
-        bank_account: formData.bank_account || null,
-        cci: formData.cci || null,
-
-        document_type: formData.document_type, document_number: formData.document_number,
-        has_children: formData.has_children, children_count: formData.has_children ? parseInt(formData.children_count || 0) : 0,
-        status: userToEdit ? userToEdit.status : 'Activo',
+        document_type: formData.document_type, 
+        document_number: formData.document_number,
+        phone: formData.phone,
+        
         start_date: formData.start_date,
         category: formData.category,
-        custom_daily_rate: formData.custom_daily_rate ? parseFloat(formData.custom_daily_rate) : null,
+        project_assigned: formData.office || 'Sin asignar',
+        
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
-        cuspp: formData.cuspp
+        cuspp: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.cuspp : null,
+        
+        status: userToEdit ? userToEdit.status : 'Activo'
       };
-
-      if (!userToEdit) payload.project_assigned = 'Sin asignar';
 
       if (formData.password || !userToEdit) {
         const plainPass = formData.password || formData.document_number;
@@ -156,13 +213,18 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         payload.password = bcrypt.hashSync(plainPass, salt);
       }
 
+      let targetId = userToEdit?.id;
+
       if (userToEdit) {
         const { error } = await supabase.from('workers').update(payload).eq('id', userToEdit.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('workers').insert([payload]);
+        const { data, error } = await supabase.from('workers').insert([payload]).select().single();
         if (error) throw error;
+        targetId = data.id;
       }
+
+      if (targetId) await uploadDocumentsToCloud(targetId);
 
       setNotification({ isOpen: true, type: 'success', title: 'Éxito', message: 'Obrero guardado correctamente.' });
     } catch (error) {
@@ -199,97 +261,151 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
 
               <div className="overflow-y-auto p-6 scrollbar-thin">
                 <form onSubmit={handleSubmit} className="space-y-5">
-                  {/* NOMBRES */}
+                  
+                  {/* NOMBRES Y APELLIDOS */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Nombres</label><input name="first_name" required value={formData.first_name} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Paterno</label><input name="paternal_surname" required value={formData.paternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Materno</label><input name="maternal_surname" required value={formData.maternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Nombres</label>
+                        <input name="first_name" required value={formData.first_name} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Ap. Paterno</label>
+                        <input name="paternal_surname" required value={formData.paternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Ap. Materno</label>
+                        <input name="maternal_surname" required value={formData.maternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/>
+                    </div>
                   </div>
 
-                  {/* DOCUMENTO Y NACIMIENTO */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1 z-30"><label className="text-xs font-bold text-slate-500 uppercase">Documento</label>
+                  {/* DOCUMENTO Y CELULAR */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1 col-span-1 md:col-span-2 z-30">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Documento de Identidad</label>
                         <div ref={docTypeRef} className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl h-[48px]">
-                            <button type="button" onClick={() => setShowDocTypeMenu(!showDocTypeMenu)} className="h-full flex items-center px-3 text-slate-700 font-bold text-sm border-r border-slate-200 min-w-[80px] justify-between">{formData.document_type} <ChevronDown size={14}/></button>
-                            <AnimatePresence>{showDocTypeMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-[120px] bg-white rounded-xl shadow-xl border z-50 overflow-hidden">{['DNI', 'CE'].map(t => <DropdownOption key={t} label={t} isSelected={formData.document_type === t} onClick={() => {setFormData(p=>({...p, document_type:t, document_number:''})); setShowDocTypeMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
+                            <button type="button" onClick={() => setShowDocTypeMenu(!showDocTypeMenu)} className="h-full flex items-center px-3 text-slate-700 font-bold text-sm border-r border-slate-200 min-w-[80px] justify-between">
+                                {formData.document_type} <ChevronDown size={14}/>
+                            </button>
+                            <AnimatePresence>
+                                {showDocTypeMenu && (
+                                    <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-[120px] bg-white rounded-xl shadow-xl border z-50 overflow-hidden">
+                                        {['DNI', 'CE'].map(t => (
+                                            <DropdownOption key={t} label={t} isSelected={formData.document_type === t} onClick={() => {setFormData(p=>({...p, document_type:t, document_number:''})); setShowDocTypeMenu(false);}}/>
+                                        ))}
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                             <input name="document_number" required value={formData.document_number} onChange={handleDocumentChange} className="w-full h-full pl-3 bg-transparent outline-none text-sm font-mono" placeholder="Número"/>
                         </div>
                     </div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Nacimiento</label><div className="relative h-[48px]"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div></div>
-                  </div>
-
-                  {/* SECCIÓN FINANCIERA (CORREGIDA VISUALMENTE) */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Jornal Diario</label><div className="relative h-[48px]"><DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/><input type="number" name="custom_daily_rate" value={formData.custom_daily_rate} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Usar Tabla"/></div></div>
-                    
-                    {/* SELECTOR BANCO */}
-                    <div className="space-y-1 relative" ref={bankRef}>
-                      <label className="text-xs font-bold text-slate-500 uppercase">Entidad Bancaria</label>
-                      <button type="button" onClick={() => setShowBankMenu(!showBankMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700 hover:border-[#003366] transition-colors">
-                        <div className="flex items-center gap-2">
-                           <Landmark size={18} className="text-slate-400"/>
-                           {formData.bank_name || <span className="text-slate-400">Seleccionar Banco...</span>}
+                    <div className="space-y-1 col-span-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Celular</label>
+                        <div className="relative h-[48px]">
+                            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="999..."/>
                         </div>
-                        <ChevronDown size={16}/>
-                      </button>
-                      <AnimatePresence>
-                        {showBankMenu && (
-                          // AQUÍ ESTÁ EL CAMBIO: z-50 y border-slate-100 para que se vea sólido y encima de todo
-                          <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden max-h-48 overflow-y-auto">
-                            <DropdownOption label="Ninguno / Efectivo" isSelected={!formData.bank_name} onClick={() => {setFormData({...formData, bank_name: '', bank_account: '', cci: ''}); setShowBankMenu(false);}}/>
-                            {BANKS_LIST.map(b => (
-                              <DropdownOption key={b} label={b} isSelected={formData.bank_name === b} onClick={() => {setFormData({...formData, bank_name: b}); setShowBankMenu(false);}}/>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
                     </div>
                   </div>
 
-                  {/* DESPLIEGUE DE CUENTAS (SOLO SI HAY BANCO SELECCIONADO) */}
-                  <AnimatePresence>
-                    {formData.bank_name && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }} 
-                        animate={{ opacity: 1, height: 'auto' }} 
-                        exit={{ opacity: 0, height: 0 }}
-                        className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-hidden"
-                      >
-                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">N° Cuenta ({formData.bank_name})</label>
-                            <div className="relative h-[48px]">
-                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                <input type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="000-000..."/>
-                            </div>
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">CCI (Interbancario)</label>
-                            <div className="relative h-[48px]">
-                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                <input type="text" name="cci" value={formData.cci} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-blue-50/50 border border-blue-200 rounded-xl text-sm font-mono outline-none focus:border-[#003366]" placeholder="002-000..."/>
-                            </div>
-                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* FECHAS Y CATEGORÍA */}
+                  {/* FECHA INGRESO Y CATEGORÍA (ARREGLADA) */}
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
-                    <div className="space-y-1 z-20" ref={categoryRef}><label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
-                      <div className="relative h-[48px]">
-                        <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/>
-                        <button type="button" onClick={() => setShowCategoryMenu(!showCategoryMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between">{formData.category} <ChevronDown size={16}/></button>
-                        <AnimatePresence>{showCategoryMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute bottom-full left-0 w-full bg-white rounded-xl shadow-xl border z-50 mb-1">{CATEGORIES.map(c => <DropdownOption key={c} label={c} isSelected={formData.category === c} onClick={() => {setFormData({...formData, category: c}); setShowCategoryMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
-                      </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Fecha de Ingreso</label>
+                        <div className="relative h-[48px]">
+                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                            <input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/>
+                        </div>
+                    </div>
+                    <div className="space-y-1 z-20" ref={categoryRef}>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Categoría</label>
+                        <div className="relative h-[48px]">
+                            <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18}/>
+                            <button type="button" onClick={() => setShowCategoryMenu(!showCategoryMenu)} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between hover:border-[#003366] transition-colors">
+                                {formData.category} <ChevronDown size={16}/>
+                            </button>
+                            <AnimatePresence>
+                                {showCategoryMenu && (
+                                    // AQUI ESTA EL ARREGLO: top-full y mt-1 para que baje ordenado
+                                    <motion.div 
+                                        variants={dropdownVariants} 
+                                        initial="hidden" 
+                                        animate="visible" 
+                                        exit="exit" 
+                                        className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 mt-1 overflow-hidden"
+                                    >
+                                        {CATEGORIES.map(c => (
+                                            <DropdownOption 
+                                                key={c} 
+                                                label={c} 
+                                                isSelected={formData.category === c} 
+                                                onClick={() => {
+                                                    setFormData({...formData, category: c}); 
+                                                    setShowCategoryMenu(false);
+                                                }}
+                                            />
+                                        ))}
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
                     </div>
                   </div>
+
+                  {/* OFICINA Y RÉGIMEN PENSIONARIO */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* OFICINA (PROYECTO) */}
+                      <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Oficina (Obra/Proyecto)</label>
+                          <div className="relative h-[48px]">
+                              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                              <input type="text" name="office" value={formData.office} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Nombre de la Obra"/>
+                          </div>
+                      </div>
+
+                      {/* RÉGIMEN PENSIONARIO */}
+                      <div className="space-y-1 relative" ref={afpRef}>
+                          <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
+                          <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
+                              <span className="truncate">{formData.afp || 'Seleccionar'}</span> <ChevronDown size={16}/>
+                          </button>
+                          <AnimatePresence>
+                              {showAfpMenu && (
+                                  <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full mt-1 right-0 w-full bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden">
+                                      {AFPS.map(a => <DropdownOption key={a} label={a} isSelected={formData.afp === a} onClick={() => {setFormData({...formData, afp: a}); setShowAfpMenu(false);}}/>)}
+                                  </motion.div>
+                              )}
+                          </AnimatePresence>
+                      </div>
+                  </div>
+
+                  {/* DETALLES DE AFP (SOLO SI APLICA) */}
+                  {formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                           <div className="space-y-1 relative" ref={commissionRef}>
+                                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
+                                <button type="button" onClick={() => setShowCommissionMenu(!showCommissionMenu)} className="w-full h-[40px] px-3 bg-white border border-slate-200 rounded-lg text-sm font-bold text-[#003366] flex items-center justify-between">
+                                    {formData.commission_type} <ChevronDown size={16}/>
+                                </button>
+                                <AnimatePresence>
+                                    {showCommissionMenu && (
+                                        <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full mt-1 left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">
+                                            {COMMISSION_TYPES.map(c => <DropdownOption key={c} label={c} isSelected={formData.commission_type === c} onClick={() => {setFormData({...formData, commission_type: c}); setShowCommissionMenu(false);}}/>)}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                           </div>
+                           <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
+                                <input type="text" name="cuspp" value={formData.cuspp} onChange={handleChange} className="w-full h-[40px] px-3 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-[#003366] font-mono" placeholder="Código AFP"/>
+                           </div>
+                      </div>
+                  )}
 
                   {/* SECCIÓN DE CONTRASEÑA */}
                   <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200/60">
                      <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                            <Lock size={14} className="text-[#003366]"/> Contraseña de Acceso
+                            <Lock size={14} className="text-[#003366]"/> Contraseña (Password)
                         </label>
                         <div className="relative group">
                             <input 
@@ -310,62 +426,46 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                             </button>
                         </div>
                         <p className="text-[10px] text-slate-400 pl-1 leading-tight">
-                            * El usuario para iniciar sesión siempre será el Documento (DNI/CE).
+                            * Usuario: DNI/CE. Contraseña por defecto: DNI/CE.
                         </p>
                      </div>
                   </div>
 
-                  {/* INFO ADICIONAL */}
-                  <div className="border-t pt-2"><h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2"><BookOpen size={16}/> Info Adicional</h4>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                      {/* SELECTOR AFP */}
-                      <div className="space-y-1 relative" ref={afpRef}>
-                        <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
-                        <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between">{formData.afp || 'Seleccione'} <ChevronDown size={16}/></button>
-                        <AnimatePresence>{showAfpMenu && (<motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">{AFPS.map(a => <DropdownOption key={a} label={a} isSelected={formData.afp === a} onClick={() => {setFormData({...formData, afp: a}); setShowAfpMenu(false);}}/>)}</motion.div>)}</AnimatePresence>
-                      </div>
-
-                      {/* SELECTOR COMISIÓN */}
-                      {formData.afp && formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen' && (
-                        <div className="space-y-1 relative" ref={commissionRef}>
-                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><PieChart size={12}/> Tipo Comisión</label>
-                            <button type="button" onClick={() => setShowCommissionMenu(!showCommissionMenu)} className="w-full h-[48px] px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm font-bold text-[#003366] flex items-center justify-between shadow-sm">
-                                {formData.commission_type} <ChevronDown size={16}/>
-                            </button>
-                            <AnimatePresence>
-                                {showCommissionMenu && (
-                                    <motion.div variants={dropdownVariants} initial="hidden" animate="visible" exit="exit" className="absolute top-full left-0 w-full bg-white rounded-xl shadow-xl border z-20 overflow-hidden">
-                                        {COMMISSION_TYPES.map(c => <DropdownOption key={c} label={c} isSelected={formData.commission_type === c} onClick={() => {setFormData({...formData, commission_type: c}); setShowCommissionMenu(false);}}/>)}
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                      )}
-
-                      {/* CAMPO CUSPP */}
-                      {formData.afp && formData.afp !== 'Sin Régimen' && (
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Hash size={12}/> CUSPP</label>
-                            <input 
-                                type="text" 
-                                name="cuspp" 
-                                value={formData.cuspp} 
-                                onChange={handleChange} 
-                                className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] font-mono"
-                                placeholder="Código AFP"
-                            />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* HIJOS */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div onClick={() => setFormData(p => ({ ...p, has_children: !p.has_children }))} className={`flex items-center justify-between px-3 rounded-xl border cursor-pointer h-[48px] ${formData.has_children ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}><span className="text-sm font-bold text-slate-700 flex gap-2"><Baby size={18}/> ¿Tiene Hijos?</span><div className={`w-10 h-5 rounded-full relative transition-colors ${formData.has_children ? 'bg-[#003366]' : 'bg-slate-300'}`}><div className={`absolute top-0.5 left-0.5 bg-white w-4 h-4 rounded-full transition-transform ${formData.has_children ? 'translate-x-5' : ''}`}></div></div></div>
-                        {formData.has_children && <div><label className="text-xs font-bold text-slate-500 uppercase">N° Hijos</label><input type="number" name="children_count" value={formData.children_count} onChange={handleChange} className="w-full h-[48px] px-3 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold text-[#003366] outline-none"/></div>}
+                  {/* SECCIÓN DE ARCHIVOS (NUEVA) */}
+                  <div className="border-t pt-4">
+                    <h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2">
+                        <FileText size={16}/> Documentos del Obrero
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3">
+                      {DOC_TYPES_WORKER.map((doc) => {
+                        const isUploaded = !!pendingDocs[doc];
+                        return (
+                          <div key={doc} className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${isUploaded ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200'}`}>
+                             <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isUploaded ? 'bg-green-100 text-green-600' : 'bg-white text-slate-400'}`}>
+                                   {isUploaded ? <CheckCircle2 size={16}/> : <FileText size={16}/>}
+                                </div>
+                                <div>
+                                   <p className={`text-sm font-bold ${isUploaded ? 'text-green-800' : 'text-slate-700'}`}>{doc}</p>
+                                   <p className="text-[10px] text-slate-400">{isUploaded ? 'Listo para subir' : 'Sin archivo'}</p>
+                                </div>
+                             </div>
+                             {isUploaded ? (
+                               <button type="button" onClick={() => { 
+                                  const newDocs = { ...pendingDocs }; delete newDocs[doc]; setPendingDocs(newDocs); 
+                               }} className="text-xs text-red-500 hover:underline font-medium">Quitar</button>
+                             ) : (
+                               <button type="button" onClick={() => openUploadModal(doc)} className="flex items-center gap-1 text-xs bg-white border border-slate-300 hover:border-[#003366] hover:text-[#003366] px-3 py-1.5 rounded-lg transition-all font-bold shadow-sm">
+                                  <UploadCloud size={14}/> Subir
+                               </button>
+                             )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
+                  {/* BOTONES DE ACCIÓN */}
                   <div className="pt-4 flex gap-3">
                     {userToEdit && (
                       <button type="button" onClick={handleDeleteClick} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors border border-red-100 flex items-center justify-center" title="Eliminar"><Trash2 size={20} /></button>
@@ -379,6 +479,29 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
           </div>
         )}
       </AnimatePresence>
+      
+      {/* MINI MODAL SUBIDA DE ARCHIVOS */}
+      <AnimatePresence>
+        {uploadModalOpen && (
+           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm border border-slate-200">
+                 <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+                    <h3 className="font-bold text-slate-800 text-lg">{currentDocType}</h3>
+                    <button onClick={() => setUploadModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                 </div>
+                 <div className="space-y-4">
+                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Archivo (PDF/IMG)</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" className="w-full text-sm text-slate-600" onChange={(e) => setTempDocData({ ...tempDocData, file: e.target.files[0] })}/></div>
+                    <div className="grid grid-cols-2 gap-3">
+                       <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Emisión</label><input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={tempDocData.startDate} onChange={(e) => setTempDocData({ ...tempDocData, startDate: e.target.value })}/></div>
+                       <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Vencimiento</label><input type="date" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" value={tempDocData.endDate} onChange={(e) => setTempDocData({ ...tempDocData, endDate: e.target.value })}/></div>
+                    </div>
+                    <button type="button" onClick={handleSaveTempDoc} className="w-full py-3 bg-[#003366] text-white font-bold rounded-xl hover:bg-blue-900 mt-2">Confirmar Carga</button>
+                 </div>
+              </motion.div>
+           </div>
+        )}
+      </AnimatePresence>
+
       <StatusModal isOpen={notification.isOpen} onClose={handleCloseNotif} type={notification.type} title={notification.title} message={notification.message}/>
     </>
   );

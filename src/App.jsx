@@ -6,6 +6,7 @@ import { CompanyProvider } from './context/CompanyContext';
 import MainLayout from './components/layout/MainLayout';
 import WorkerLayout from './components/layout/WorkerLayout';
 import RoleProtectedRoute from './components/layout/RoleProtectedRoute';
+import OnboardingGuard from './components/layout/OnboardingGuard'; // <--- NUEVO IMPORT
 
 // Páginas Públicas
 const ClientLandingPage = React.lazy(() => import('./modules/landing/ClientLandingPage'));
@@ -26,6 +27,9 @@ const TendersPage = React.lazy(() => import('./modules/licitaciones/TendersPage'
 const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetail'));
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
+
+// NUEVA PÁGINA DE ONBOARDING
+const StaffOnboardingPage = React.lazy(() => import('./modules/onboarding/StaffOnboardingPage'));
 
 // PÁGINA DE MANTENIMIENTO
 const MaintenancePage = React.lazy(() => import('./components/common/MaintenancePage'));
@@ -54,87 +58,95 @@ function App() {
         <Route path="/libro-reclamaciones" element={<ComplaintsBookPage />} />
         <Route path="/login" element={<LoginPage />} />
 
-        {/* --- RUTAS PROTEGIDAS --- */}
-        
-        {/* DASHBOARD Y PERFIL (TODOS TIENEN ACCESO) */}
-        <Route element={<RoleProtectedRoute allowedRoles={[
-            ...MANAGERS, 
-            'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 
-            'asistente_administrativo', 'asistente_logistica', 'encargado_almacen', 'servicios_generales', 
-            'transportista', 'limpieza', 'tesorera', 'residente_obra', 'encargado_obra', 
-            'asistente_residente', 'jefe_licitaciones', 'asistente_costos', 'jefe_ssoma', 
-            'coordinador_ssoma', 'prevencionista', 'jefe_calidad'
-        ]} />}>
-          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-             <Route path="/dashboard" element={<DashboardPage />} />
-             <Route path="/profile" element={<UserProfilePage />} />
+        {/* --- RUTA DE ONBOARDING (ACCESIBLE PARA COMPLETAR EL REGISTRO) --- */}
+        <Route path="/onboarding" element={<StaffOnboardingPage />} />
+
+        {/* --- RUTAS PROTEGIDAS CON ONBOARDING GUARD --- */}
+        {/* Este guardia verifica si el staff ya completó sus datos. Si no, lo manda a /onboarding */}
+        <Route element={<OnboardingGuard />}>
+          
+          {/* DASHBOARD Y PERFIL (TODOS TIENEN ACCESO) */}
+          <Route element={<RoleProtectedRoute allowedRoles={[
+              ...MANAGERS, 
+              'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 
+              'asistente_administrativo', 'asistente_logistica', 'encargado_almacen', 'servicios_generales', 
+              'transportista', 'limpieza', 'tesorera', 'residente_obra', 'encargado_obra', 
+              'asistente_residente', 'jefe_licitaciones', 'asistente_costos', 'jefe_ssoma', 
+              'coordinador_ssoma', 'prevencionista', 'jefe_calidad'
+          ]} />}>
+            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+               <Route path="/dashboard" element={<DashboardPage />} />
+               <Route path="/profile" element={<UserProfilePage />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* EJECUCIÓN DE OBRAS + CAMPO */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'residente_obra', 'encargado_obra', 'jefe_calidad']} />}>
-          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-             <Route path="/proyectos" element={<ProjectsPage />} />
-             <Route path="/proyectos/sedes" element={<SedesPage />} />
-             <Route path="/campo/tareo" element={<FieldAttendancePage />} />
+          {/* EJECUCIÓN DE OBRAS + CAMPO */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'residente_obra', 'encargado_obra', 'jefe_calidad']} />}>
+            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+               <Route path="/proyectos" element={<ProjectsPage />} />
+               <Route path="/proyectos/sedes" element={<SedesPage />} />
+               <Route path="/campo/tareo" element={<FieldAttendancePage />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* LICITACIONES */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_licitaciones']} />}>
-          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-             <Route path="/licitaciones" element={<TendersPage />} />
-             <Route path="/licitaciones/:id" element={<TenderDetail />} />
+          {/* LICITACIONES */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_licitaciones']} />}>
+            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+               <Route path="/licitaciones" element={<TendersPage />} />
+               <Route path="/licitaciones/:id" element={<TenderDetail />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* ADMINISTRACIÓN */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_administrativo']} />}>
-           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-              <Route path="/administracion" element={<MaintenancePage title="Oficina de Administración" />} />
-           </Route>
-        </Route>
-
-        {/* LOGÍSTICA */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen']} />}>
-           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-              <Route path="/logistica" element={<MaintenancePage title="Logística y Almacén" />} />
-           </Route>
-        </Route>
-
-        {/* TESORERÍA */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'administrador', 'tesorera']} />}>
-           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-              <Route path="/tesoreria" element={<MaintenancePage title="Tesorería" />} />
-           </Route>
-        </Route>
-
-        {/* SSOMA */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista']} />}>
-           <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-              <Route path="/ssoma" element={<MaintenancePage title="Gestión SSOMA" />} />
-           </Route>
-        </Route>
-
-        {/* RRHH */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_rrhh']} />}>
-          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-             <Route path="/users" element={<HumanResourcesPage />} />
-             <Route path="/planillas" element={<PayrollPage />} />
-             <Route path="/documentacion" element={<DocumentationPage />} />
+          {/* ADMINISTRACIÓN */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_administrativo']} />}>
+             <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+                <Route path="/administracion" element={<MaintenancePage title="Oficina de Administración" />} />
+             </Route>
           </Route>
-        </Route>
 
-        {/* CONTABILIDAD */}
-        <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_contabilidad']} />}>
-          <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-             <Route path="/finanzas" element={<AccountingPage />} />
-             <Route path="/reportes" element={<ReportsPage />} />
-             <Route path="/configuracion" element={<ConfigurationPage />} />
+          {/* LOGÍSTICA */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen']} />}>
+             <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+                <Route path="/logistica" element={<MaintenancePage title="Logística y Almacén" />} />
+             </Route>
           </Route>
-        </Route>
+
+          {/* TESORERÍA */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'administrador', 'tesorera']} />}>
+             <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+                <Route path="/tesoreria" element={<MaintenancePage title="Tesorería" />} />
+             </Route>
+          </Route>
+
+          {/* SSOMA */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista']} />}>
+             <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+                <Route path="/ssoma" element={<MaintenancePage title="Gestión SSOMA" />} />
+             </Route>
+          </Route>
+
+          {/* RRHH */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_rrhh']} />}>
+            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+               <Route path="/users" element={<HumanResourcesPage />} />
+               <Route path="/planillas" element={<PayrollPage />} />
+               <Route path="/documentacion" element={<DocumentationPage />} />
+            </Route>
+          </Route>
+
+          {/* CONTABILIDAD */}
+          <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_contabilidad']} />}>
+            <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
+               <Route path="/finanzas" element={<AccountingPage />} />
+               <Route path="/reportes" element={<ReportsPage />} />
+               <Route path="/configuracion" element={<ConfigurationPage />} />
+            </Route>
+          </Route>
+
+        </Route> {/* FIN DEL ONBOARDING GUARD */}
 
         {/* WORKERS */}
+        {/* Nota: No aplicamos el OnboardingGuard aquí porque los obreros tienen un flujo distinto o no se especificó */}
         <Route path="/worker" element={<WorkerLayout />}>
           <Route path="dashboard" element={<WorkerDashboard />} />
           <Route path="asistencia" element={<WorkerAttendance />} />

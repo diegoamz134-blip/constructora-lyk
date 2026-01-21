@@ -3,7 +3,7 @@ import {
   Plus, Search, Filter, 
   Edit, Trash2, User, Building2, Phone, 
   MapPin, HardHat, 
-  Construction, X, Users, Hammer, AlertTriangle // <--- AlertTriangle para el modal bonito
+  Construction, X, Users, Hammer, AlertTriangle 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -36,7 +36,7 @@ const HumanResourcesPage = () => {
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
 
-  // NUEVO: Modal de Confirmación de Eliminación
+  // Modal de Confirmación de Eliminación
   const [confirmDeleteModal, setConfirmDeleteModal] = useState({ isOpen: false, id: null, name: '' });
 
   // Cargar datos al cambiar de pestaña
@@ -87,13 +87,13 @@ const HumanResourcesPage = () => {
     }
   };
 
-  // 1. SOLICITAR ELIMINACIÓN (Abre el modal bonito)
+  // SOLICITAR ELIMINACIÓN
   const requestDelete = (e, id, name) => {
     if(e) { e.preventDefault(); e.stopPropagation(); }
     setConfirmDeleteModal({ isOpen: true, id, name });
   };
 
-  // 2. EJECUTAR ELIMINACIÓN (Al confirmar en el modal)
+  // EJECUTAR ELIMINACIÓN
   const executeDelete = async () => {
     const idToDelete = confirmDeleteModal.id;
     if (!idToDelete) return;
@@ -196,7 +196,7 @@ const HumanResourcesPage = () => {
         </button>
       </div>
 
-      {/* TABLA */}
+      {/* TABLA UNIFICADA */}
       <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -204,34 +204,20 @@ const HumanResourcesPage = () => {
               <tr className="bg-slate-50/80 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-bold">
                 <th className="px-6 py-4 min-w-[250px]">Nombre Completo</th>
                 <th className="px-4 py-4">DNI / CE</th>
-                
-                {activeTab === 'staff' ? (
-                   <>
-                     <th className="px-4 py-4">Cargo</th>
-                     <th className="px-4 py-4">Oficina</th>
-                     <th className="px-4 py-4">F. Ingreso</th>
-                     <th className="px-4 py-4 text-center">Estado</th>
-                     <th className="px-4 py-4">Distrito</th>
-                     <th className="px-4 py-4">Celular</th>
-                     <th className="px-4 py-4 text-center">Obra Asignada</th>
-                   </>
-                ) : (
-                   <>
-                     <th className="px-4 py-4">Categoría</th>
-                     <th className="px-4 py-4">Jornal</th>
-                     <th className="px-4 py-4">F. Inicio</th>
-                     <th className="px-4 py-4 text-center">Estado</th>
-                     <th className="px-4 py-4">Proyecto Actual</th>
-                   </>
-                )}
-
+                <th className="px-4 py-4">Cargo</th>
+                <th className="px-4 py-4">Oficina</th>
+                <th className="px-4 py-4">F. Ingreso</th>
+                <th className="px-4 py-4 text-center">Estado</th>
+                <th className="px-4 py-4">Distrito</th>
+                <th className="px-4 py-4">Celular</th>
+                <th className="px-4 py-4 text-center">Obra Asignada</th>
                 <th className="px-4 py-4 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="12" className="p-10 text-center text-slate-400">
+                  <td colSpan="10" className="p-10 text-center text-slate-400">
                     <div className="flex flex-col items-center gap-2">
                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#003366]"></div>
                        <span>Cargando datos...</span>
@@ -240,82 +226,115 @@ const HumanResourcesPage = () => {
                 </tr>
               ) : filteredList.length === 0 ? (
                 <tr>
-                  <td colSpan="12" className="p-10 text-center text-slate-400 italic">
+                  <td colSpan="10" className="p-10 text-center text-slate-400 italic">
                     No se encontraron registros.
                   </td>
                 </tr>
               ) : (
-                filteredList.map((item) => (
-                  <tr key={item.id} className="hover:bg-blue-50/30 transition-colors group">
-                    
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 font-bold overflow-hidden shrink-0">
-                           {activeTab === 'staff' && item.avatar_url ? (
-                              <img src={item.avatar_url} alt="" className="w-full h-full object-cover"/>
-                           ) : (
-                              <User size={20} />
-                           )}
+                filteredList.map((item) => {
+                  // LÓGICA DE MAPPING DE DATOS SEGÚN TIPO
+                  const isStaff = activeTab === 'staff';
+                  
+                  // Campos dinámicos
+                  const cargo = isStaff ? (item.position || 'Sin Cargo') : (item.category || 'Peón');
+                  const oficina = isStaff ? (item.sedes?.name || <span className="text-slate-400 italic text-xs">Sin Sede</span>) : (item.project_assigned || <span className="text-slate-400 italic text-xs">Sin Asignar</span>);
+                  const fechaIngreso = isStaff ? item.entry_date : item.start_date;
+                  const fechaFormat = fechaIngreso ? new Date(fechaIngreso + 'T12:00:00').toLocaleDateString('es-PE') : '-';
+                  
+                  // Estilos de Cargo
+                  const cargoClass = isStaff 
+                     ? "text-slate-700 bg-slate-100 border-slate-200"
+                     : "text-orange-700 bg-orange-50 border-orange-200";
+
+                  return (
+                    <tr key={item.id} className="hover:bg-blue-50/30 transition-colors group">
+                      
+                      {/* 1. Nombre */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 font-bold overflow-hidden shrink-0">
+                             {isStaff && item.avatar_url ? (
+                                <img src={item.avatar_url} alt="" className="w-full h-full object-cover"/>
+                             ) : (
+                                <User size={20} />
+                             )}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-800 text-sm">{item.full_name}</p>
+                            {isStaff && <p className="text-[10px] text-slate-400">{item.email || 'Sin correo'}</p>}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-slate-800 text-sm">{item.full_name}</p>
-                          {activeTab === 'staff' && <p className="text-[10px] text-slate-400">{item.email || 'Sin correo'}</p>}
-                        </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="px-4 py-4 text-sm font-mono text-slate-600">{item.document_number}</td>
+                      {/* 2. Documento */}
+                      <td className="px-4 py-4 text-sm font-mono text-slate-600">{item.document_number}</td>
 
-                    {activeTab === 'staff' && (
-                        <>
-                            <td className="px-4 py-4"><span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-md border border-slate-200">{item.position || 'Sin Cargo'}</span></td>
-                            <td className="px-4 py-4 text-sm text-slate-600">{item.sedes?.name ? <div className="flex items-center gap-1.5"><Building2 size={14} className="text-slate-400"/> {item.sedes.name}</div> : <span className="text-slate-400 italic text-xs">Sin Sede</span>}</td>
-                            <td className="px-4 py-4 text-sm text-slate-600">{item.entry_date ? new Date(item.entry_date + 'T12:00:00').toLocaleDateString('es-PE') : '-'}</td>
-                            <td className="px-4 py-4 text-center"><span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${item.status === 'Activo' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{item.status}</span></td>
-                            <td className="px-4 py-4 text-sm text-slate-600">{item.district || '-'}</td>
-                            <td className="px-4 py-4 text-sm text-slate-600">{item.phone ? <div className="flex items-center gap-1"><Phone size={14} className="text-slate-400"/> {item.phone}</div> : '-'}</td>
-                            <td className="px-4 py-4 text-center">
-                                <button type="button" onClick={(e) => handleAssignProject(e, item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 hover:scale-105 transition-all border border-blue-100 shadow-sm">
-                                   <HardHat size={14} /> Gestionar
-                                </button>
-                            </td>
-                        </>
-                    )}
+                      {/* 3. Cargo / Categoría */}
+                      <td className="px-4 py-4">
+                          <span className={`text-xs font-bold px-2 py-1 rounded-md border ${cargoClass}`}>
+                             {cargo}
+                          </span>
+                      </td>
 
-                    {activeTab === 'workers' && (
-                        <>
-                            <td className="px-4 py-4"><span className="text-xs font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded-md border border-orange-200">{item.category}</span></td>
-                            <td className="px-4 py-4 text-sm text-slate-600 font-mono">{item.custom_daily_rate ? `S/. ${item.custom_daily_rate}` : 'Tablar'}</td>
-                            <td className="px-4 py-4 text-sm text-slate-600">{item.start_date || '-'}</td>
-                            <td className="px-4 py-4 text-center"><span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${item.status === 'Activo' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{item.status}</span></td>
-                            <td className="px-4 py-4 text-sm text-slate-600 truncate max-w-[150px]" title={item.project_assigned}>{item.project_assigned || 'Sin Asignar'}</td>
-                        </>
-                    )}
+                      {/* 4. Oficina / Proyecto */}
+                      <td className="px-4 py-4 text-sm text-slate-600">
+                          <div className="flex items-center gap-1.5">
+                             <Building2 size={14} className="text-slate-400"/> {oficina}
+                          </div>
+                      </td>
 
-                    <td className="px-4 py-4 text-center">
-                       <div className="flex items-center justify-center gap-2">
-                          <button 
-                             type="button" 
-                             onClick={(e) => handleEdit(e, item)} 
-                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
-                             title="Editar"
-                          >
-                             <Edit size={18} />
+                      {/* 5. Fecha Ingreso */}
+                      <td className="px-4 py-4 text-sm text-slate-600">{fechaFormat}</td>
+
+                      {/* 6. Estado */}
+                      <td className="px-4 py-4 text-center">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${item.status === 'Activo' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                             {item.status}
+                          </span>
+                      </td>
+
+                      {/* 7. Distrito */}
+                      <td className="px-4 py-4 text-sm text-slate-600">{item.district || '-'}</td>
+
+                      {/* 8. Celular */}
+                      <td className="px-4 py-4 text-sm text-slate-600">
+                          {item.phone ? (
+                             <div className="flex items-center gap-1"><Phone size={14} className="text-slate-400"/> {item.phone}</div>
+                          ) : '-'}
+                      </td>
+
+                      {/* 9. Obra Asignada (Gestionar) */}
+                      <td className="px-4 py-4 text-center">
+                          <button type="button" onClick={(e) => handleAssignProject(e, item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 hover:scale-105 transition-all border border-blue-100 shadow-sm">
+                             <HardHat size={14} /> Gestionar
                           </button>
-                          {/* BOTÓN ELIMINAR AHORA ABRE EL MODAL DE CONFIRMACIÓN */}
-                          <button 
-                             type="button" 
-                             onClick={(e) => requestDelete(e, item.id, item.full_name)} 
-                             className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" 
-                             title="Eliminar"
-                          >
-                             <Trash2 size={18} />
-                          </button>
-                       </div>
-                    </td>
+                      </td>
 
-                  </tr>
-                ))
+                      {/* 10. Acciones */}
+                      <td className="px-4 py-4 text-center">
+                         <div className="flex items-center justify-center gap-2">
+                            <button 
+                               type="button" 
+                               onClick={(e) => handleEdit(e, item)} 
+                               className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
+                               title="Editar"
+                            >
+                               <Edit size={18} />
+                            </button>
+                            <button 
+                               type="button" 
+                               onClick={(e) => requestDelete(e, item.id, item.full_name)} 
+                               className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" 
+                               title="Eliminar"
+                            >
+                               <Trash2 size={18} />
+                            </button>
+                         </div>
+                      </td>
+
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -342,7 +361,7 @@ const HumanResourcesPage = () => {
         onDelete={(id) => { setIsAddWorkerModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }}
       />
 
-      {/* 3. Modal de Confirmación de Eliminación (EL BONITO) */}
+      {/* 3. Modal de Confirmación de Eliminación */}
       <AnimatePresence>
         {confirmDeleteModal.isOpen && (
            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={(e)=>e.stopPropagation()}>
