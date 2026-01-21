@@ -15,44 +15,47 @@ import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 // --- IMPORTAMOS EL BOTÓN FLOTANTE ---
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
 
-// --- CONFIGURACIÓN DE MENÚ ACTUALIZADA ---
+// --- CONFIGURACIÓN DE MENÚ (SEGÚN ROLES ESPECÍFICOS) ---
 const navItems = [
+  // 1. DASHBOARD
   { 
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_obras', 'oficina_rrhh', 'oficina_admin_logistica', 
-      'oficina_contabilidad', 'oficina_tesoreria', 'oficina_licitaciones', 
-      'oficina_ssoma', 'oficina_calidad'
-    ]
-  },
-  
-  // 1. EJECUCIÓN DE OBRAS
-  { 
-    label: 'Ejecución de Obras', 
-    icon: Building2, 
-    allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_obras', 'oficina_ssoma', 'oficina_calidad', 
-      'oficina_admin_logistica', 'residente_obra', 'encargado_obra'
-    ],
-    children: [
-      { path: '/proyectos', label: 'Panel de Obras' },
-      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck },
-      { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas', // 1-9
+      'contador', 'analista_contable', // 1-5
+      'asistente_contabilidad', // 1-2
+      'administrador', // 1-6
+      'asistente_administrativo', // <--- AGREGADO AQUÍ (1 y 3)
+      'servicios_generales', 'transportista', 'personal_limpieza', // 1
+      'jefe_rrhh',
+      'tesorera', // 1-9
+      'gerente_proyectos', 'coordinador_proyectos', // 1-9
+      'residente_obra', 'encargado_obra', // 1 y 7
+      'asistente_residente', 'ingeniero_campo', 'arquitecto_campo', 'ingeniero_instalaciones', // 1
+      'jefe_licitaciones', // 1 y 8
+      'asistente_costos', // 1
+      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos', // 1 y 9
+      'jefe_calidad'
+       // 1 y 7
     ]
   },
 
-  // 2. LICITACIONES
+  // 2. CONTABILIDAD
   { 
-    path: '/licitaciones', 
-    icon: FileSpreadsheet, 
-    label: 'Licitaciones',
+    path: '/finanzas', 
+    icon: Landmark, 
+    label: 'Contabilidad',
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_licitaciones', 'jefe_licitaciones'
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'contador', 'analista_contable',
+      'asistente_contabilidad',
+      'administrador',
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos'
     ]
   },
 
@@ -62,8 +65,13 @@ const navItems = [
     icon: Briefcase,
     label: 'Administración',
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_admin_logistica'
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'contador', 'analista_contable',
+      'administrador',
+      'asistente_administrativo', // Solo 3
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos'
     ]
   },
 
@@ -73,41 +81,29 @@ const navItems = [
     icon: Truck,
     label: 'Logística',
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_admin_logistica', 'asistente_logistica', 'encargado_almacen'
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'contador', 'analista_contable',
+      'administrador',
+      'asistente_logistica', 'encargado_almacen', // Solo 4
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos'
     ]
   },
 
-  // 5. TESORERÍA
-  {
-    path: '/tesoreria',
-    icon: Wallet,
-    label: 'Tesorería',
-    allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_tesoreria', 'oficina_contabilidad', 'tesorera'
-    ]
-  },
-
-  // 6. CONTABILIDAD
-  { 
-    path: '/finanzas', 
-    icon: Landmark, 
-    label: 'Contabilidad',
-    allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_contabilidad', 'oficina_tesoreria', 'oficina_admin_logistica',
-      'contador', 'analista_contable'
-    ]
-  },
-
-  // 7. RECURSOS HUMANOS
+  // 5. RECURSOS HUMANOS
   { 
     label: 'Recursos Humanos', 
     icon: Users,
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_rrhh', 'oficina_admin_logistica', 'jefe_rrhh', 'asistente_rrhh'
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'contador', 'analista_contable',
+      'administrador',
+      'jefe_rrhh', 
+      'asistente_rrhh', // Solo 5
+      'gerente_proyectos', 'coordinador_proyectos',
+      'residente_obra', 'encargado_obra' // 1 y 5
     ],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -117,14 +113,65 @@ const navItems = [
     ]
   },
 
-  // 8. SSOMA
+  // 6. TESORERÍA
+  {
+    path: '/tesoreria',
+    icon: Wallet,
+    label: 'Tesorería',
+    allowed: [
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'administrador',
+      'jefe_rrhh', 
+      'tesorera', // Solo 6
+      'gerente_proyectos', 'coordinador_proyectos'
+    ]
+  },
+
+  // 7. EJECUCIÓN DE OBRAS
+  { 
+    label: 'Ejecución de Obras', 
+    icon: Building2, 
+    allowed: [
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos',
+      'residente_obra', 'encargado_obra', // 1 y 7
+      'jefe_calidad' // 1 y 7
+    ],
+    children: [
+      { path: '/proyectos', label: 'Panel de Obras' },
+      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck },
+      { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
+    ]
+  },
+
+  // 8. LICITACIONES
+  { 
+    path: '/licitaciones', 
+    icon: FileSpreadsheet, 
+    label: 'Licitaciones',
+    allowed: [
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos',
+      'jefe_licitaciones' // 1 y 8
+    ]
+  },
+
+  // 9. SSOMA
   {
     path: '/ssoma',
     icon: ShieldCheck,
     label: 'SSOMA',
     allowed: [
-      'admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos',
-      'oficina_ssoma', 'oficina_obras', 'jefe_ssoma'
+      'admin', 
+      'gerente_general', 'gerente_admin_finanzas',
+      'jefe_rrhh', 
+      'gerente_proyectos', 'coordinador_proyectos',
+      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos' // 1 y 9
     ]
   },
 ];

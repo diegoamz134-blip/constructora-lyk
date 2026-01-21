@@ -26,6 +26,7 @@ const UserProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   
   // --- PESTAÑA ACTIVA ---
   const [activeTab, setActiveTab] = useState('general'); 
@@ -77,7 +78,6 @@ const UserProfilePage = () => {
       if (error) throw error;
 
       if (data) {
-        // CORRECCIÓN CRÍTICA: Aseguramos que onboarding_data sea un objeto
         const safeOnboardingData = (data.onboarding_data && typeof data.onboarding_data === 'object') 
             ? data.onboarding_data 
             : {};
@@ -102,10 +102,9 @@ const UserProfilePage = () => {
 
   useEffect(() => { fetchProfile(); }, [user]);
 
-  // 2. MANEJO DE CAMBIOS (SEGURO PARA EVITAR ERROR DE OBJETO)
+  // 2. MANEJO DE CAMBIOS
   const handleChange = (e, section, index, subfield) => {
     const { name, value } = e.target;
-    // Forzamos que sea string o vacío
     const safeValue = value === null || value === undefined ? '' : value;
 
     if (!section && !subfield) {
@@ -152,7 +151,6 @@ const UserProfilePage = () => {
         setIsEditing(false);
         setNotification({ isOpen: true, type: 'success', title: 'Guardado', message: 'Perfil actualizado correctamente.' });
         
-        // Actualizar localStorage
         const stored = JSON.parse(localStorage.getItem('lyk_session') || '{}');
         if(stored.user) {
             stored.user.onboarding_data = profile.onboarding_data;
@@ -210,6 +208,24 @@ const UserProfilePage = () => {
     }
   };
 
+  // 6. MANEJADOR DE DESCARGA PDF (ASYNC)
+  const handleDownloadPDF = async () => {
+    setGeneratingPdf(true);
+    try {
+      await generateStaffPDF(profile);
+    } catch (error) {
+      console.error("Error capturado en UI:", error);
+      setNotification({
+        isOpen: true, 
+        type: 'error', 
+        title: 'Error PDF', 
+        message: 'No se pudo generar el PDF. Verifica la consola.'
+      });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   if (loading) return <div className="flex justify-center items-center h-full pt-20"><Loader2 className="w-10 h-10 animate-spin text-slate-400"/></div>;
   
   const avatarSrc = profile.avatar_url ? `${profile.avatar_url}?t=${cacheBuster}` : null;
@@ -218,29 +234,40 @@ const UserProfilePage = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto space-y-6 pb-20 p-4 md:p-6">
       
-      {/* HEADER CON BOTONES */}
+      {/* HEADER CON BOTONES MODERNOS */}
       <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
          <div>
             <h1 className="text-2xl font-bold text-slate-800">Mi Perfil</h1>
             <p className="text-slate-500 text-sm">Gestiona tu información personal y laboral</p>
          </div>
          
-         <div className="flex gap-3">
-             {/* BOTÓN PDF ARREGLADO */}
+         <div className="flex items-center gap-3">
+             {/* BOTÓN PDF: ESTILO ICONO LIMPIO */}
              <button 
-                onClick={() => generateStaffPDF(profile)} 
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold shadow-md transition-all hover:scale-105 active:scale-95"
+                onClick={handleDownloadPDF} 
+                disabled={generatingPdf}
+                title="Descargar Ficha PDF"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50 shadow-sm transition-all active:scale-95 disabled:opacity-50"
              >
-                <FileDown size={18} /> Descargar PDF
+                {generatingPdf ? <Loader2 className="animate-spin" size={20}/> : <FileDown size={20} />}
              </button>
 
-             {/* BOTÓN EDITAR */}
+             {/* BOTÓN EDITAR / GUARDAR: ESTILO ICONO DINÁMICO */}
              <button 
                 onClick={() => isEditing ? handleSaveAll() : setIsEditing(true)} 
                 disabled={saving} 
-                className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold shadow-md transition-all hover:scale-105 active:scale-95 ${isEditing ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-[#0F172A] text-white hover:bg-slate-800'}`}
+                title={isEditing ? "Guardar Cambios" : "Editar Información"}
+                className={`w-11 h-11 flex items-center justify-center rounded-full border shadow-sm transition-all active:scale-95 ${
+                    isEditing 
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100' 
+                    : 'bg-white border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50'
+                }`}
              >
-                {saving ? <Loader2 className="animate-spin" size={18}/> : (isEditing ? <><Save size={18}/> Guardar Cambios</> : <><Edit2 size={18}/> Editar Perfil</>)}
+                {saving ? (
+                    <Loader2 className="animate-spin" size={20}/>
+                ) : (
+                    isEditing ? <Save size={20}/> : <Edit2 size={20}/>
+                )}
              </button>
          </div>
       </div>
