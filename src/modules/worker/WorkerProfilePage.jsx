@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
-// CORRECCIÓN: Importamos 'supabase' directamente desde tu servicio, no desde un contexto inexistente
 import { supabase } from '../../services/supabase'; 
 import { motion, AnimatePresence } from "framer-motion";
 import { 
@@ -34,17 +33,25 @@ const WorkerProfilePage = () => {
   }, [worker]);
 
   const initializeFormData = () => {
+    // Intentamos obtener nombres separados si existen, sino usamos la lógica de split
     let firstName = worker.first_name || worker.nombres || '';
     let lastName = worker.last_name || worker.apellidos || '';
 
-    if (!lastName && worker.full_name) {
-        const parts = worker.full_name.split(' ');
-        if (parts.length > 1) {
+    // Si no hay nombres separados, intentamos separar el full_name
+    if ((!firstName || !lastName) && worker.full_name) {
+        const parts = worker.full_name.trim().split(' ');
+        if (parts.length >= 1) {
              if (parts.length > 2) {
+                 // Si hay más de 2 palabras (ej: Juan Carlos Perez Lopez)
+                 // Asumimos las 2 últimas son apellidos
                  lastName = parts.slice(-2).join(' ');
                  firstName = parts.slice(0, -2).join(' ');
-             } else {
+             } else if (parts.length === 2) {
+                 // Ej: Juan Perez
+                 firstName = parts[0];
                  lastName = parts[1];
+             } else {
+                 // Solo una palabra
                  firstName = parts[0];
              }
         }
@@ -110,7 +117,7 @@ const WorkerProfilePage = () => {
       });
   }
 
-  // --- LÓGICA DE SUBIDA DE FOTO COMPRIMIDA ---
+  // --- LÓGICA DE SUBIDA DE FOTO ---
   const handlePhotoUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -122,35 +129,27 @@ const WorkerProfilePage = () => {
 
     setUploadingPhoto(true);
     try {
-        // 1. Configuración de Compresión
         const options = {
-            maxSizeMB: 0.5, // Máximo 500KB
-            maxWidthOrHeight: 800, // Redimensionar si es muy grande
+            maxSizeMB: 0.5,
+            maxWidthOrHeight: 800,
             useWebWorker: true,
             fileType: 'image/jpeg'
         };
 
-        // 2. Comprimir la imagen
         const compressedFile = await imageCompression(file, options);
-        
-        // 3. Preparar subida a Supabase
         const fileExt = 'jpg';
-        // Usamos worker.id para crear una carpeta única o nombre único
         const fileName = `${worker.id}/avatar_${Date.now()}.${fileExt}`;
         
-        // 4. Subir al bucket 'avatars' usando el cliente importado directamente
         let { error: uploadError } = await supabase.storage
             .from('avatars')
             .upload(fileName, compressedFile, { upsert: true });
 
         if (uploadError) throw uploadError;
 
-        // 5. Obtener URL pública
         const { data: { publicUrl } } = supabase.storage
             .from('avatars')
             .getPublicUrl(fileName);
 
-        // 6. Actualizar perfil en base de datos
         const success = await updateProfile({ avatar_url: publicUrl });
         
         if (success) {
@@ -173,10 +172,26 @@ const WorkerProfilePage = () => {
     }
   };
 
+  // --- LÓGICA DE GUARDADO SEGURA ---
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const success = await updateProfile(formData);
+      // 1. CONSTRUIR PAYLOAD LIMPIO
+      // Combinamos first_name y last_name en full_name porque la BD no tiene columnas separadas
+      const fullNameCombined = `${formData.first_name} ${formData.last_name}`.trim();
+      
+      const payload = {
+          full_name: fullNameCombined,
+          phone: formData.phone,
+          email: formData.email,
+          details: formData.details
+          // NOTA: NO enviamos 'first_name', 'last_name', 'nombres' ni 'apellidos' 
+          // para evitar errores de columna no encontrada en Supabase.
+      };
+
+      // 2. ENVIAR A SUPABASE
+      const success = await updateProfile(payload);
+      
       if (success) {
         setIsEditing(false);
         Swal.fire({
@@ -188,10 +203,12 @@ const WorkerProfilePage = () => {
             toast: true,
             position: 'top-end'
         });
+      } else {
+        throw new Error("La actualización falló en el servidor");
       }
     } catch (error) {
-        console.error(error);
-        Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo guardar.' });
+        console.error("Error al guardar:", error);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo guardar los cambios. Intenta nuevamente.' });
     } finally {
       setIsSaving(false);
     }
@@ -235,7 +252,7 @@ const WorkerProfilePage = () => {
          </div>
       </div>
 
-      {/* BARRA DE PESTAÑAS (SCROLLABLE EN MÓVIL) */}
+      {/* BARRA DE PESTAÑAS */}
       <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 overflow-x-auto no-scrollbar">
         <TabBtn id="personal" label="Personal" icon={User} active={activeTab} onClick={setActiveTab} />
         <TabBtn id="contacto" label="Contacto" icon={Phone} active={activeTab} onClick={setActiveTab} />
@@ -250,7 +267,6 @@ const WorkerProfilePage = () => {
         <div className="lg:col-span-1">
             <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center sticky top-24">
                 
-                {/* SECCIÓN DE FOTO DE PERFIL */}
                 <div className="relative mb-4 group">
                     <div className="w-32 h-32 rounded-full border-4 border-white bg-slate-200 shadow-xl overflow-hidden flex items-center justify-center relative">
                         {uploadingPhoto ? (
@@ -268,7 +284,6 @@ const WorkerProfilePage = () => {
                         )}
                     </div>
 
-                    {/* Botón de subir foto (solo visible al editar) */}
                     <AnimatePresence>
                         {isEditing && !uploadingPhoto && (
                             <motion.label 
