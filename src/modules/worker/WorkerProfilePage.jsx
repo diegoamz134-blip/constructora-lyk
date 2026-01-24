@@ -1,564 +1,485 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
-import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
-import { motion, AnimatePresence } from 'framer-motion';
-// IMPORTANTE: Trash2 agregado para evitar el error de pantalla blanca
-import { 
-  Save, LogOut, Clock, ChevronRight, ChevronLeft, 
-  SkipForward, CheckCircle, AlertCircle, User, MapPin, 
-  Briefcase, Users, Heart, CreditCard, Trash2, GraduationCap, Plus 
+import { useWorkerAuth } from '../../context/WorkerAuthContext';
+import {
+  Tabs, Tab, Card, CardBody, Input, Button, Avatar, Select, SelectItem, Chip, Divider, Spacer
+} from "@heroui/react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  User, MapPin, CreditCard, Briefcase, Phone,
+  GraduationCap, ShieldAlert, Mail, Pencil, Save, X, Camera, ChevronLeft, AlertTriangle
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { useNavigate } from 'react-router-dom';
 
-const steps = [
-  { id: 1, title: 'Datos Personales', icon: <User size={20}/> },
-  { id: 2, title: 'Ubicación y Contacto', icon: <MapPin size={20}/> },
-  { id: 3, title: 'Laboral y Tallas', icon: <Briefcase size={20}/> },
-  { id: 4, title: 'Formación y Exp.', icon: <GraduationCap size={20}/> },
-  { id: 5, title: 'Hijos', icon: <Users size={20}/> },
-  { id: 6, title: 'Familiares L&K', icon: <Heart size={20}/> },
-  { id: 7, title: 'Emergencia y Pagos', icon: <CreditCard size={20}/> },
-];
-
-const WorkerOnboardingPage = () => {
-  const { currentUser: user, logout } = useUnifiedAuth();
+const WorkerProfilePage = () => {
+  const { worker, loading, updateProfile } = useWorkerAuth();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-  const [timeLeft, setTimeLeft] = useState(20 * 60);
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formData, setFormData] = useState(null);
+  const [selectedTab, setSelectedTab] = useState("personal");
 
-  // --- PREVENCIÓN DE ERRORES ---
-  if (!user) {
+  useEffect(() => {
+    if (worker) {
+      initializeFormData();
+    }
+  }, [worker]);
+
+  const initializeFormData = () => {
+    let firstName = worker.first_name || worker.nombres || '';
+    let lastName = worker.last_name || worker.apellidos || '';
+
+    // Intento de rescate si apellidos está vacío pero full_name tiene datos
+    if (!lastName && worker.full_name) {
+        const parts = worker.full_name.split(' ');
+        if (parts.length > 1) {
+             // Asumimos simple: Últimas dos palabras son apellidos si hay más de 2 palabras
+             if (parts.length > 2) {
+                 lastName = parts.slice(-2).join(' ');
+                 firstName = parts.slice(0, -2).join(' ');
+             } else {
+                 lastName = parts[1];
+                 firstName = parts[0];
+             }
+        }
+    }
+
+    setFormData({
+        first_name: firstName,
+        last_name: lastName,
+        phone: worker.phone || '',
+        email: worker.email || '',
+        details: {
+            nationality: worker.details?.nationality || 'Peruana',
+            gender: worker.details?.gender || 'Masculino',
+            marital_status: worker.details?.marital_status || 'Soltero(a)',
+            address: {
+                street: worker.details?.address?.street || '',
+                district: worker.details?.address?.district || '',
+                province: worker.details?.address?.province || '',
+                department: worker.details?.address?.department || 'Ica',
+            },
+            sizes: {
+                shirt: worker.details?.sizes?.shirt || '',
+                pant: worker.details?.sizes?.pant || '',
+                shoe: worker.details?.sizes?.shoe || '',
+            },
+            cuspp: worker.details?.cuspp || '',
+            emergency_contacts: worker.details?.emergency_contacts || [{ name: '', phone_cell: '', relationship: '' }],
+             education: {
+                level: worker.details?.education?.level || '',
+                status: worker.details?.education?.status || '',
+                institution: worker.details?.education?.institution || ''
+            },
+        },
+        bank_name: worker.bank_name || '',
+        bank_account: worker.bank_account || '',
+        cci: worker.cci || ''
+    });
+  };
+
+  const handleChange = (field, value, nestedCategory = null, nestedField = null) => {
+    setFormData(prev => {
+      if (nestedCategory && nestedField) {
+        return {
+          ...prev,
+          details: {
+            ...prev.details,
+            [nestedCategory]: { ...prev.details[nestedCategory], [nestedField]: value }
+          }
+        };
+      } else if (nestedCategory) {
+        return {
+            ...prev,
+            details: { ...prev.details, [nestedCategory]: value }
+        }
+      } else {
+        return { ...prev, [field]: value };
+      }
+    });
+  };
+
+  const handleEmergencyChange = (field, value) => {
+      setFormData(prev => {
+          const newContacts = [...(prev.details.emergency_contacts || [])];
+          if(newContacts.length === 0) newContacts.push({});
+          newContacts[0] = { ...newContacts[0], [field]: value };
+          return {
+              ...prev,
+              details: { ...prev.details, emergency_contacts: newContacts }
+          }
+      });
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const success = await updateProfile(formData);
+      if (success) {
+        setIsEditing(false);
+        Swal.fire({
+            icon: 'success',
+            title: 'Perfil Actualizado',
+            text: 'Tus datos se guardaron correctamente.',
+            timer: 1500,
+            showConfirmButton: false,
+            toast: true,
+            position: 'top-end'
+        });
+      }
+    } catch (error) {
+        console.error(error);
+        Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo guardar.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    initializeFormData();
+    setIsEditing(false);
+  };
+
+  if (loading || !worker || !formData) {
     return (
-       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-400"></div>
-       </div>
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#003366]"></div>
+      </div>
     );
   }
 
-  // --- TEMPORIZADOR ---
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleTimeOut();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // --- COMPONENTES INTERNOS PARA ORDENAR EL CÓDIGO ---
+  
+  const InputField = ({ label, value, onChange, type = "text", icon, disabled = false }) => (
+    <div className="w-full">
+        {isEditing && !disabled ? (
+            <Input
+                label={label}
+                value={value || ''}
+                onValueChange={onChange}
+                type={type}
+                variant="faded"
+                color="primary"
+                labelPlacement="outside"
+                size="lg"
+                startContent={icon ? <span className="text-slate-400">{icon}</span> : null}
+                classNames={{ 
+                    label: "font-bold text-slate-600 mb-1", 
+                    inputWrapper: "bg-white border-slate-300 shadow-sm hover:border-blue-400 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-200" 
+                }}
+            />
+        ) : (
+            <div className="group">
+                <span className="text-xs font-bold text-slate-400 uppercase mb-1 block">{label}</span>
+                <div className={`text-base font-semibold border-b border-transparent py-1 ${disabled ? 'text-slate-400 italic' : 'text-slate-800'}`}>
+                    {value || <span className="text-slate-300">--</span>}
+                </div>
+                {isEditing && disabled && (
+                   <span className="text-[10px] text-orange-400 flex items-center gap-1"><AlertTriangle size={10}/> No editable</span>
+                )}
+            </div>
+        )}
+    </div>
+  );
 
-  const handleTimeOut = () => {
-    Swal.fire({
-      icon: 'error',
-      title: 'Tiempo Agotado',
-      text: 'La sesión se cerró por seguridad.',
-      confirmButtonColor: '#003366'
-    }).then(() => {
-      logout();
-      navigate('/login');
-    });
-  };
-
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  // --- ESTADO DEL FORMULARIO ---
-  const [formData, setFormData] = useState({
-    // DATOS BÁSICOS
-    birth_date: '',
-    email: user?.email || '',
-    phone: '',
-    has_children: false,
-    bank_name: 'BCP',
-    bank_account: '',
-    cci: '',
-    pension_system: 'ONP',
-    nationality: 'Peruana',
-    gender: 'Masculino',
-    marital_status: 'Soltero',
-    spouse_name: '',
-    father_name: '',
-    mother_name: '',
-    address: '',
-    district: '',
-    province: '',
-    department: '',
-    secondary_phone: '',
-    secondary_email: '',
-    
-    // TALLAS
-    shirt_size: '',
-    pant_size: '',
-    shoe_size: '',
-
-    // FORMACIÓN
-    education_level: '', 
-    education_status: '', 
-    education_year: '',
-    education_institution: '',
-    courses_list: [], 
-
-    // EXPERIENCIA
-    work_experience: [],
-
-    // ARRAYS
-    children_list: [],
-    emergency_contacts: [{ name: '', phone_fixed: '', phone_cell: '' }],
-    family_in_company: [],
-    
-    requires_change_or_first_job: '',
-    observations: ''
-  });
-
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-  };
-
-  // --- HELPERS ARRAY ---
-  const handleAddChild = () => setFormData(p => ({ ...p, children_list: [...p.children_list, { name: '', age: '' }] }));
-  const handleChildChange = (idx, field, val) => {
-      const copy = [...formData.children_list]; copy[idx][field] = val; setFormData(p => ({ ...p, children_list: copy }));
-  };
-  const handleRemoveChild = (idx) => {
-      const copy = [...formData.children_list]; copy.splice(idx, 1); setFormData(p => ({ ...p, children_list: copy }));
-  };
-
-  const handleAddFamily = () => setFormData(p => ({ ...p, family_in_company: [...p.family_in_company, { name: '', position: '' }] }));
-  const handleFamilyChange = (idx, field, val) => {
-      const copy = [...formData.family_in_company]; copy[idx][field] = val; setFormData(p => ({ ...p, family_in_company: copy }));
-  };
-  const handleRemoveFamily = (idx) => {
-      const copy = [...formData.family_in_company]; copy.splice(idx, 1); setFormData(p => ({ ...p, family_in_company: copy }));
-  };
-
-  const handleEmergChange = (idx, field, val) => {
-      const copy = [...formData.emergency_contacts]; 
-      if (!copy[idx]) copy[idx] = { name: '', phone_fixed: '', phone_cell: '' };
-      copy[idx][field] = val; 
-      setFormData(p => ({ ...p, emergency_contacts: copy }));
-  };
-
-  // --- HELPERS CURSOS Y TRABAJO ---
-  const handleAddCourse = () => setFormData(p => ({ ...p, courses_list: [...p.courses_list, { name: '', date: '' }] }));
-  const handleCourseChange = (idx, field, val) => {
-      const copy = [...formData.courses_list]; copy[idx][field] = val; setFormData(p => ({ ...p, courses_list: copy }));
-  };
-  const handleRemoveCourse = (idx) => {
-      const copy = [...formData.courses_list]; copy.splice(idx, 1); setFormData(p => ({ ...p, courses_list: copy }));
-  };
-
-  const handleAddJob = () => setFormData(p => ({ ...p, work_experience: [...p.work_experience, { company: '', position: '', rubro: '', start: '', end: '', boss_name: '', boss_phone: '', functions: '' }] }));
-  const handleJobChange = (idx, field, val) => {
-      const copy = [...formData.work_experience]; copy[idx][field] = val; setFormData(p => ({ ...p, work_experience: copy }));
-  };
-  const handleRemoveJob = (idx) => {
-      const copy = [...formData.work_experience]; copy.splice(idx, 1); setFormData(p => ({ ...p, work_experience: copy }));
-  };
-
-  // --- VALIDACIÓN DE PASOS ---
-  const validateStep = (step) => {
-    const errors = [];
-    
-    if (step === 1) {
-        if (!formData.birth_date) errors.push("Fecha de Nacimiento");
-        if (!formData.nationality) errors.push("Nacionalidad");
-    }
-    if (step === 2) {
-        if (!formData.address) errors.push("Dirección");
-        if (!formData.district) errors.push("Distrito");
-        if (!formData.phone) errors.push("Celular Principal");
-    }
-    if (step === 3) {
-        if (!formData.pension_system) errors.push("Régimen Pensionario");
-        if (!formData.shirt_size) errors.push("Talla de Camisa");
-        if (!formData.pant_size) errors.push("Talla de Pantalón");
-        if (!formData.shoe_size) errors.push("Talla de Zapatos");
-    }
-    
-    // PASO 7: VALIDACIÓN ESTRICTA
-    if (step === 7) { 
-        if (!formData.emergency_contacts[0]?.name) errors.push("Nombre de contacto de emergencia");
-        if (!formData.emergency_contacts[0]?.phone_cell) errors.push("Celular de emergencia");
-        if (!formData.bank_account) errors.push("Número de cuenta");
-        if (!formData.cci) errors.push("CCI");
-    }
-
-    if (errors.length > 0) {
-        Swal.fire({
-            icon: 'warning',
-            title: 'Faltan datos',
-            html: `Por favor completa los siguientes campos obligatorios:<br/><ul class="text-left mt-2 text-sm text-red-600 list-disc pl-5">${errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-            confirmButtonColor: '#003366'
-        });
-        return false;
-    }
-    return true;
-  };
-
-  const handleNext = () => {
-    if (validateStep(currentStep)) {
-        setCurrentStep(prev => Math.min(prev + 1, 7));
-        window.scrollTo(0, 0);
-    }
-  };
-
-  const handlePrev = () => {
-    setCurrentStep(prev => Math.max(prev - 1, 1));
-    window.scrollTo(0, 0);
-  };
-
-  const updateLocalSession = () => {
-    try {
-        const storedSession = localStorage.getItem('lyk_session');
-        if (storedSession) {
-            const sessionData = JSON.parse(storedSession);
-            if (sessionData.user) {
-                sessionData.user.onboarding_completed = true;
-                localStorage.setItem('lyk_session', JSON.stringify(sessionData));
-            }
-        }
-    } catch (e) {
-        console.error("Error actualizando sesión local:", e);
-    }
-  };
-
-  // --- SUBMIT CONTROLADO ---
-  const handleSubmit = async (e, skipped = false) => {
-    if (e && e.preventDefault) e.preventDefault(); 
-
-    // VALIDACIÓN FINAL ANTES DE ENVIAR
-    if (!skipped) {
-        if (!validateStep(7)) return; // Si falla, SE DETIENE AQUÍ.
-    }
-
-    setLoading(true);
-
-    try {
-      const detailsPayload = {
-        nationality: formData.nationality,
-        gender: formData.gender,
-        marital_status: formData.marital_status,
-        spouse_name: formData.spouse_name,
-        parents: { father: formData.father_name, mother: formData.mother_name },
-        address: { street: formData.address, district: formData.district, province: formData.province, department: formData.department },
-        contact_extra: { secondary_phone: formData.secondary_phone, secondary_email: formData.secondary_email },
-        sizes: { shirt: formData.shirt_size, pant: formData.pant_size, shoe: formData.shoe_size },
-        
-        education: {
-            level: formData.education_level,
-            status: formData.education_status,
-            year: formData.education_year,
-            institution: formData.education_institution,
-            courses: formData.courses_list
-        },
-        work_experience: formData.work_experience,
-
-        children_list: formData.children_list,
-        emergency_contacts: formData.emergency_contacts,
-        family_in_company: formData.family_in_company,
-        job_details: { requires_change_first_job: formData.requires_change_or_first_job, observations: formData.observations },
-        skipped_onboarding: skipped
-      };
-
-      const { error } = await supabase
-        .from('workers')
-        .update({
-          birth_date: formData.birth_date || null,
-          email: formData.email,
-          phone: formData.phone,
-          has_children: formData.children_list.length > 0,
-          children_count: formData.children_list.length,
-          bank_name: formData.bank_name,
-          bank_account: formData.bank_account,
-          cci: formData.cci,
-          pension_system: formData.pension_system,
-          details: detailsPayload,
-          onboarding_completed: true 
-        })
-        .eq('id', user.id);
-
-      if (error) throw error;
-
-      updateLocalSession();
-
-      Swal.fire({
-        icon: skipped ? 'info' : 'success',
-        title: skipped ? 'Registro Omitido' : '¡Registro Completado!',
-        text: skipped ? 'Podrás completar tus datos más tarde desde tu perfil.' : 'Bienvenido al panel de obreros.',
-        confirmButtonColor: '#003366',
-        allowOutsideClick: false
-      }).then(() => {
-        window.location.href = '/worker/dashboard';
-      });
-
-    } catch (error) {
-      console.error(error);
-      Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo guardar la información.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSkip = () => {
-    Swal.fire({
-        title: '¿Estás seguro?',
-        text: "Podrás ingresar ahora, pero deberás completar tu ficha de datos personales más adelante.",
-        icon: 'question',
-        showCancelButton: true,
-        confirmButtonColor: '#003366',
-        cancelButtonColor: '#d33',
-        confirmButtonText: 'Sí, omitir por ahora',
-        cancelButtonText: 'Cancelar'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            handleSubmit(null, true);
-        }
-    });
-  };
+  const SelectField = ({ label, value, onChange, children }) => (
+     <div className="w-full">
+        {isEditing ? (
+            <Select
+                label={label}
+                selectedKeys={value ? [value] : []}
+                onChange={(e) => onChange(e.target.value)}
+                variant="faded"
+                color="primary"
+                labelPlacement="outside"
+                size="lg"
+                classNames={{ 
+                    label: "font-bold text-slate-600 mb-1", 
+                    trigger: "bg-white border-slate-300 shadow-sm" 
+                }}
+            >
+                {children}
+            </Select>
+        ) : (
+            <div>
+                <span className="text-xs font-bold text-slate-400 uppercase mb-1 block">{label}</span>
+                <div className="text-base font-semibold text-slate-800 py-1">
+                    {value || <span className="text-slate-300">--</span>}
+                </div>
+            </div>
+        )}
+     </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8 font-sans">
-      <div className="max-w-3xl mx-auto">
-        
-        {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 sticky top-2 z-40">
-          <div className="mb-2 md:mb-0">
-            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <span className="bg-[#003366] text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm">{currentStep}/7</span>
-                Ficha de Datos
-            </h1>
-            <p className="text-xs text-slate-500 ml-10">Obreros / Construcción Civil</p>
-          </div>
-          <div className="flex gap-3">
-             <button onClick={handleSkip} className="px-3 py-1.5 rounded-lg text-slate-500 hover:bg-slate-100 text-xs font-bold border border-transparent hover:border-slate-200 transition-all flex items-center gap-1">
-                <SkipForward size={14}/> Omitir
-             </button>
-             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono font-bold text-sm ${timeLeft < 300 ? 'bg-red-100 text-red-600' : 'bg-blue-50 text-blue-800'}`}>
-                <Clock size={16} />
-                {formatTime(timeLeft)}
+    // overflow-x-hidden es CRUCIAL para evitar scroll lateral
+    <div className="min-h-screen bg-slate-50 w-full overflow-x-hidden pb-32">
+      
+      {/* --- HEADER FIJO --- */}
+      <div className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+         <div className="flex justify-between items-center px-4 py-3 max-w-lg mx-auto">
+             <div className="flex items-center gap-3">
+                <Button isIconOnly variant="light" size="sm" onPress={() => navigate(-1)} className="text-slate-500">
+                    <ChevronLeft size={24} />
+                </Button>
+                <h1 className="text-lg font-bold text-slate-800">Mi Perfil</h1>
              </div>
-          </div>
-        </div>
-
-        {/* PROGRESS BAR */}
-        <div className="flex justify-between mb-6 px-2 relative">
-            <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 rounded-full"></div>
-            <div className="absolute top-1/2 left-0 h-1 bg-[#003366] -z-10 rounded-full transition-all duration-500" style={{ width: `${((currentStep - 1) / 6) * 100}%` }}></div>
-            {steps.map((s) => (
-                <div key={s.id} className={`flex flex-col items-center gap-1 transition-all duration-300 ${currentStep >= s.id ? 'opacity-100' : 'opacity-50'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 z-10 bg-white transition-all ${currentStep >= s.id ? 'border-[#003366] text-[#003366]' : 'border-slate-300 text-slate-300'}`}>
-                        {currentStep > s.id ? <CheckCircle size={16}/> : s.icon}
-                    </div>
-                    <span className="text-[9px] font-bold text-slate-600 hidden md:block bg-white px-1 whitespace-nowrap">{s.title}</span>
-                </div>
-            ))}
-        </div>
-
-        {/* --- FORMULARIO CONVERTIDO A DIV PARA EVITAR SUBMIT AUTOMÁTICO --- */}
-        <div className="relative min-h-[400px]">
-           <AnimatePresence mode='wait'>
-             <motion.div
-                key={currentStep}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.3 }}
-                className="bg-white p-6 md:p-8 rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100"
-             >
-                <h2 className="text-xl font-bold text-[#003366] mb-6 border-b pb-3 flex items-center gap-2">
-                    {steps[currentStep-1].icon}
-                    {steps[currentStep-1].title}
-                </h2>
-
-                {currentStep === 1 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Fecha de Nacimiento *</label><input required type="date" name="birth_date" value={formData.birth_date} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-100 outline-none" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Nacionalidad *</label><input type="text" name="nationality" value={formData.nationality} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Sexo</label><select name="gender" value={formData.gender} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"><option>Masculino</option><option>Femenino</option></select></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Estado Civil</label><select name="marital_status" value={formData.marital_status} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"><option>Soltero</option><option>Casado</option><option>Conviviente</option><option>Divorciado</option><option>Viudo</option></select></div>
-                         <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-600 mb-1">Cónyuge</label><input type="text" name="spouse_name" value={formData.spouse_name} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Nombre del Papá</label><input type="text" name="father_name" value={formData.father_name} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Nombre de la Mamá</label><input type="text" name="mother_name" value={formData.mother_name} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                    </div>
-                )}
-
-                {currentStep === 2 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                         <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-600 mb-1">Dirección Actual *</label><input required type="text" name="address" value={formData.address} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" placeholder="Av. Calle, Nro, Urb..." /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Distrito *</label><input required type="text" name="district" value={formData.district} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Provincia</label><input type="text" name="province" value={formData.province} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Departamento</label><input type="text" name="department" value={formData.department} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Celular Principal *</label><input required type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" placeholder="999 999 999" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Celular Adicional</label><input type="tel" name="secondary_phone" value={formData.secondary_phone} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Correo Personal</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                         <div><label className="block text-xs font-bold text-slate-600 mb-1">Correo Adicional</label><input type="email" name="secondary_email" value={formData.secondary_email} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" placeholder="Opcional" /></div>
-                    </div>
-                )}
-
-                {currentStep === 3 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-600 mb-1">Régimen Pensionario *</label><select name="pension_system" value={formData.pension_system} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"><option value="ONP">ONP</option><option value="AFP Integra">AFP Integra</option><option value="AFP Prima">AFP Prima</option><option value="AFP Profuturo">AFP Profuturo</option><option value="AFP Habitat">AFP Habitat</option><option value="Sin Régimen">Sin Régimen</option></select></div>
-                        <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-600 mb-1">¿Cambio de régimen o 1° empleo?</label><input type="text" name="requires_change_or_first_job" value={formData.requires_change_or_first_job} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                        <div><label className="block text-xs font-bold text-slate-600 mb-1">Talla Camisa/Polo *</label><select name="shirt_size" value={formData.shirt_size} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"><option value="">Seleccione</option><option value="S">S</option><option value="M">M</option><option value="L">L</option><option value="XL">XL</option><option value="XXL">XXL</option></select></div>
-                        <div><label className="block text-xs font-bold text-slate-600 mb-1">Talla Pantalón *</label><input type="text" name="pant_size" placeholder="Ej. 30, 32" value={formData.pant_size} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                        <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-600 mb-1">Talla de Calzado (Zapatos) <span className="text-red-500">*</span></label><input type="text" name="shoe_size" placeholder="Ej. 40, 42" value={formData.shoe_size} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-                    </div>
-                )}
-
-                {/* PASO 4: FORMACIÓN Y EXPERIENCIA */}
-                {currentStep === 4 && (
-                    <div className="space-y-8 animate-fadeIn">
-                        <div>
-                            <h3 className="text-sm font-bold text-[#003366] border-b pb-2 mb-4">Nivel de Estudios Logrados</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">Nivel</label>
-                                    <select name="education_level" value={formData.education_level} onChange={handleChange} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                                        <option value="">Seleccione</option>
-                                        <option value="Secundaria">Secundaria</option>
-                                        <option value="Técnico Superior">Técnico Superior</option>
-                                        <option value="Universitario">Universitario</option>
-                                        <option value="Bachiller">Bachiller</option>
-                                        <option value="Titulado">Titulado</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">Estado</label>
-                                    <select name="education_status" value={formData.education_status} onChange={handleChange} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-                                        <option value="">Seleccione</option>
-                                        <option value="Completo">Completo</option>
-                                        <option value="Incompleto">Incompleto</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">Año de Egreso</label>
-                                    <input type="number" name="education_year" value={formData.education_year} onChange={handleChange} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm" placeholder="Ej. 2015" />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">Institución Formativa</label>
-                                    <input type="text" name="education_institution" value={formData.education_institution} onChange={handleChange} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm uppercase" />
-                                </div>
-                            </div>
-
-                            <div className="mt-4">
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs font-bold text-slate-500">Cursos Adicionales</label>
-                                    <button type="button" onClick={handleAddCourse} className="text-xs text-blue-600 flex items-center gap-1 font-bold hover:bg-blue-50 px-2 py-1 rounded"><Plus size={14}/> Agregar Curso</button>
-                                </div>
-                                {formData.courses_list.map((course, idx) => (
-                                    <div key={idx} className="flex gap-2 mb-2">
-                                        <input type="text" placeholder="Nombre del curso" value={course.name} onChange={(e) => handleCourseChange(idx, 'name', e.target.value)} className="flex-1 p-2 bg-slate-50 border rounded-lg text-sm uppercase" />
-                                        <input type="date" value={course.date} onChange={(e) => handleCourseChange(idx, 'date', e.target.value)} className="w-32 p-2 bg-slate-50 border rounded-lg text-sm" />
-                                        <button type="button" onClick={() => handleRemoveCourse(idx)} className="text-red-500 p-2 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div>
-                            <div className="flex justify-between items-center border-b pb-2 mb-4">
-                                <h3 className="text-sm font-bold text-[#003366]">Experiencia Laboral (3 últimas)</h3>
-                                <button type="button" onClick={handleAddJob} className="text-xs bg-[#003366] text-white px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold shadow-sm hover:bg-blue-900"><Plus size={14}/> Agregar Trabajo</button>
-                            </div>
-                            
-                            {formData.work_experience.length === 0 ? (
-                                <p className="text-center text-slate-400 text-xs py-4 bg-slate-50 rounded-xl border border-dashed">No ha registrado experiencia laboral.</p>
-                            ) : (
-                                <div className="space-y-4 max-h-60 overflow-y-auto pr-1">
-                                    {formData.work_experience.map((job, idx) => (
-                                        <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-xl relative">
-                                            <button type="button" onClick={() => handleRemoveJob(idx)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                                <input type="text" placeholder="Empresa" value={job.company} onChange={(e) => handleJobChange(idx, 'company', e.target.value)} className="p-2 bg-white border rounded text-sm uppercase font-bold" />
-                                                <input type="text" placeholder="Puesto/Cargo" value={job.position} onChange={(e) => handleJobChange(idx, 'position', e.target.value)} className="p-2 bg-white border rounded text-sm uppercase" />
-                                                <input type="text" placeholder="Rubro" value={job.rubro} onChange={(e) => handleJobChange(idx, 'rubro', e.target.value)} className="p-2 bg-white border rounded text-sm uppercase" />
-                                                <div className="flex gap-2">
-                                                    <input type="date" placeholder="Inicio" value={job.start} onChange={(e) => handleJobChange(idx, 'start', e.target.value)} className="w-1/2 p-2 bg-white border rounded text-xs" />
-                                                    <input type="date" placeholder="Fin" value={job.end} onChange={(e) => handleJobChange(idx, 'end', e.target.value)} className="w-1/2 p-2 bg-white border rounded text-xs" />
-                                                </div>
-                                                <input type="text" placeholder="Jefe Inmediato" value={job.boss_name} onChange={(e) => handleJobChange(idx, 'boss_name', e.target.value)} className="p-2 bg-white border rounded text-sm uppercase" />
-                                                <input type="text" placeholder="Tel. Jefe" value={job.boss_phone} onChange={(e) => handleJobChange(idx, 'boss_phone', e.target.value)} className="p-2 bg-white border rounded text-sm" />
-                                            </div>
-                                            <textarea placeholder="Descripción de funciones principales..." value={job.functions} onChange={(e) => handleJobChange(idx, 'functions', e.target.value)} rows="2" className="w-full p-2 bg-white border rounded text-sm"></textarea>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {currentStep === 5 && (
-                    <div>
-                        <div className="flex justify-between items-center mb-4"><p className="text-sm text-slate-500">Agregue sus hijos menores o dependientes.</p><button type="button" onClick={handleAddChild} className="text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-100 transition-colors"><div className="w-5 h-5 bg-blue-200 rounded-full flex items-center justify-center"><span className="text-lg leading-none mb-0.5">+</span></div> Agregar</button></div>
-                        {formData.children_list.length === 0 ? <div className="bg-slate-50 p-8 rounded-xl border border-dashed border-slate-300 text-center"><Users className="mx-auto text-slate-300 mb-2" size={32}/><p className="text-slate-400 text-sm">No ha registrado hijos.</p></div> : <div className="space-y-3">{formData.children_list.map((child, idx) => (<div key={idx} className="flex items-end gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100 animate-fadeIn"><div className="flex-1"><label className="block text-[10px] font-bold text-slate-400 uppercase">Nombre</label><input type="text" value={child.name} onChange={(e) => handleChildChange(idx, 'name', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg uppercase text-sm" placeholder="Nombre del hijo" /></div><div className="w-24"><label className="block text-[10px] font-bold text-slate-400 uppercase">Edad</label><input type="number" value={child.age} onChange={(e) => handleChildChange(idx, 'age', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm" /></div><button type="button" onClick={() => handleRemoveChild(idx)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button></div>))}</div>}
-                    </div>
-                )}
-
-                {currentStep === 6 && (
-                    <div>
-                        <div className="flex justify-between items-center mb-4"><p className="text-sm text-slate-500">Familiares en la empresa.</p><button type="button" onClick={handleAddFamily} className="text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-100 transition-colors"><div className="w-5 h-5 bg-blue-200 rounded-full flex items-center justify-center"><span className="text-lg leading-none mb-0.5">+</span></div> Agregar</button></div>
-                        {formData.family_in_company.length === 0 ? <div className="bg-slate-50 p-8 rounded-xl border border-dashed border-slate-300 text-center"><Heart className="mx-auto text-slate-300 mb-2" size={32}/><p className="text-slate-400 text-sm">No reporta familiares.</p></div> : <div className="space-y-3">{formData.family_in_company.map((fam, idx) => (<div key={idx} className="flex items-end gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100 animate-fadeIn"><div className="flex-1"><label className="block text-[10px] font-bold text-slate-400 uppercase">Nombre</label><input type="text" value={fam.name} onChange={(e) => handleFamilyChange(idx, 'name', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg uppercase text-sm" /></div><div className="flex-1"><label className="block text-[10px] font-bold text-slate-400 uppercase">Cargo</label><input type="text" value={fam.position} onChange={(e) => handleFamilyChange(idx, 'position', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg uppercase text-sm" /></div><button type="button" onClick={() => handleRemoveFamily(idx)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18} /></button></div>))}</div>}
-                    </div>
-                )}
-
-                {currentStep === 7 && (
-                    <div className="space-y-6">
-                        <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                             <h3 className="text-sm font-bold text-red-800 mb-3 flex items-center gap-2"><AlertCircle size={16}/> Contacto de Emergencia (Obligatorio)</h3>
-                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="md:col-span-3"><label className="block text-xs font-bold text-red-400">Nombre Completo <span className="text-red-600">*</span></label><input required type="text" value={formData.emergency_contacts[0].name} onChange={(e) => handleEmergChange(0, 'name', e.target.value)} className="w-full p-2 bg-white border border-red-200 rounded-lg uppercase" /></div>
-                                <div><label className="block text-xs font-bold text-red-400">Celular <span className="text-red-600">*</span></label><input required type="tel" value={formData.emergency_contacts[0].phone_cell} onChange={(e) => handleEmergChange(0, 'phone_cell', e.target.value)} className="w-full p-2 bg-white border border-red-200 rounded-lg" /></div>
-                                <div className="md:col-span-2"><label className="block text-xs font-bold text-red-400">Tel. Fijo</label><input type="tel" value={formData.emergency_contacts[0].phone_fixed} onChange={(e) => handleEmergChange(0, 'phone_fixed', e.target.value)} className="w-full p-2 bg-white border border-red-200 rounded-lg" /></div>
-                             </div>
-                        </div>
-                        <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                            <h3 className="text-sm font-bold text-green-800 mb-3 flex items-center gap-2"><CreditCard size={16}/> Datos Bancarios</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div><label className="block text-xs font-bold text-green-600">Banco</label><select name="bank_name" value={formData.bank_name} onChange={handleChange} className="w-full p-2 bg-white border border-green-200 rounded-lg outline-none"><option value="BCP">BCP (Banco de Crédito)</option><option value="Interbank">Interbank</option><option value="BBVA">BBVA</option><option value="Scotiabank">Scotiabank</option><option value="Banco de la Nación">Banco de la Nación</option></select></div>
-                                <div><label className="block text-xs font-bold text-green-600">N° de Cuenta <span className="text-red-500">*</span></label><input required type="text" name="bank_account" value={formData.bank_account} onChange={handleChange} className="w-full p-2 bg-white border border-green-200 rounded-lg font-mono" /></div>
-                                <div className="md:col-span-2"><label className="block text-xs font-bold text-green-600">CCI (Interbancaria) <span className="text-red-500">*</span></label><input required type="text" name="cci" value={formData.cci} onChange={handleChange} className="w-full p-2 bg-white border border-green-200 rounded-lg font-mono" placeholder="20 dígitos" /></div>
-                                <div className="md:col-span-2"><textarea name="observations" value={formData.observations} onChange={handleChange} rows="2" className="w-full p-2 bg-white border border-green-200 rounded-lg text-sm" placeholder="Observaciones bancarias (opcional)..."></textarea></div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-             </motion.div>
-           </AnimatePresence>
-           
-           <div className="mt-6 flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-slate-100 sticky bottom-4 z-40">
-                {currentStep > 1 ? <button type="button" onClick={handlePrev} className="px-5 py-2.5 rounded-xl text-slate-600 font-bold hover:bg-slate-100 flex items-center gap-2 border border-slate-200"><ChevronLeft size={20}/> Atrás</button> : <button type="button" onClick={logout} className="px-5 py-2.5 rounded-xl text-red-500 font-bold hover:bg-red-50 flex items-center gap-2 border border-transparent"><LogOut size={20}/> Salir</button>}
-                
-                {/* BOTONES DE CONTROL MANUAL */}
-                {currentStep < 7 ? (
-                    <button type="button" onClick={handleNext} className="px-6 py-2.5 rounded-xl bg-[#003366] text-white font-bold hover:bg-blue-900 shadow-lg flex items-center gap-2">
-                        Siguiente <ChevronRight size={20}/>
-                    </button>
-                ) : (
-                    // ESTE ES EL CAMBIO CLAVE: type="button"
-                    <button 
-                        type="button" 
-                        onClick={(e) => handleSubmit(e, false)} 
-                        disabled={loading} 
-                        className="px-8 py-2.5 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 shadow-lg flex items-center gap-2"
+             
+             {/* BOTONES DE ACCIÓN */}
+             <div>
+                {!isEditing ? (
+                    <Button 
+                        size="sm" 
+                        variant="flat" 
+                        color="primary" 
+                        className="bg-blue-50 text-[#003366] font-bold"
+                        startContent={<Pencil size={16} />}
+                        onPress={() => setIsEditing(true)}
                     >
-                        {loading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Save size={20} />} 
-                        Finalizar Registro
-                    </button>
+                        Editar
+                    </Button>
+                ) : (
+                    <div className="flex gap-2">
+                        <Button isIconOnly radius="full" color="danger" variant="flat" onPress={handleCancel}>
+                            <X size={20} />
+                        </Button>
+                        <Button isIconOnly radius="full" className="bg-[#003366] text-white shadow-lg shadow-blue-900/20" onPress={handleSave} isLoading={isSaving}>
+                            <Save size={20} />
+                        </Button>
+                    </div>
                 )}
-           </div>
-        </div>
+             </div>
+         </div>
+
+         {/* --- TABS (PESTAÑAS) FIJAS --- */}
+         <div className="w-full overflow-x-auto no-scrollbar border-t border-slate-100 bg-white">
+             <div className="max-w-lg mx-auto px-4">
+                <Tabs 
+                    variant="underlined" 
+                    color="primary"
+                    selectedKey={selectedTab}
+                    onSelectionChange={setSelectedTab}
+                    classNames={{
+                        tabList: "gap-6 w-full relative rounded-none p-0 border-b border-divider",
+                        cursor: "w-full bg-[#003366] h-1",
+                        tab: "max-w-fit px-2 h-12",
+                        tabContent: "group-data-[selected=true]:text-[#003366] font-bold text-slate-500 text-sm"
+                    }}
+                >
+                    <Tab key="personal" title="Personal" />
+                    <Tab key="contacto" title="Contacto" />
+                    <Tab key="laboral" title="Laboral" />
+                    <Tab key="bancario" title="Pagos" />
+                    <Tab key="formacion" title="Formación" />
+                </Tabs>
+             </div>
+         </div>
       </div>
+
+      {/* --- CONTENIDO SCROLLEABLE --- */}
+      <div className="max-w-lg mx-auto px-4 mt-6 space-y-6">
+        
+        {/* TARJETA DE RESUMEN (Siempre visible arriba del contenido) */}
+        {!isEditing && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center text-center relative overflow-hidden">
+                <div className="absolute top-0 w-full h-16 bg-gradient-to-b from-slate-100 to-white -z-0"></div>
+                <div className="relative z-10">
+                    <Avatar 
+                        src={worker.avatar_url}
+                        name={worker.first_name?.charAt(0)}
+                        className="w-24 h-24 text-3xl font-bold bg-[#003366] text-white border-4 border-white shadow-lg mb-3"
+                    />
+                    <h2 className="text-xl font-bold text-slate-800 leading-tight">
+                        {formData.first_name} {formData.last_name}
+                    </h2>
+                    <p className="text-sm text-slate-500 font-medium mb-2">{worker.category}</p>
+                    <div className="flex gap-2 justify-center">
+                        <Chip size="sm" variant="flat" className="bg-slate-100 text-slate-600">
+                            {worker.document_number}
+                        </Chip>
+                        <Chip size="sm" variant="dot" color="success" className="border-0">
+                            Activo
+                        </Chip>
+                    </div>
+                </div>
+            </motion.div>
+        )}
+
+        {/* ÁREA DE FORMULARIOS */}
+        <AnimatePresence mode='wait'>
+            <motion.div 
+                key={selectedTab}
+                initial={{ opacity: 0, x: -5 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 5 }}
+                transition={{ duration: 0.2 }}
+                className="pb-10"
+            >
+                {selectedTab === 'personal' && (
+                    <div className="flex flex-col gap-6">
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                    <User size={16}/> Información Básica
+                                </h3>
+                                
+                                <InputField label="Nombres" value={formData.first_name} onChange={(v) => handleChange('first_name', v)} />
+                                <InputField label="Apellidos" value={formData.last_name} onChange={(v) => handleChange('last_name', v)} />
+                                <InputField label="Fecha Nacimiento" value={worker.birth_date} type="date" disabled={true} />
+                                
+                                <div className="grid grid-cols-1 gap-5">
+                                    <SelectField label="Sexo" value={formData.details.gender} onChange={(v) => handleChange(null, v, 'gender')}>
+                                        <SelectItem key="Masculino">Masculino</SelectItem>
+                                        <SelectItem key="Femenino">Femenino</SelectItem>
+                                    </SelectField>
+                                    
+                                    <SelectField label="Estado Civil" value={formData.details.marital_status} onChange={(v) => handleChange(null, v, 'marital_status')}>
+                                        <SelectItem key="Soltero(a)">Soltero(a)</SelectItem>
+                                        <SelectItem key="Casado(a)">Casado(a)</SelectItem>
+                                        <SelectItem key="Conviviente">Conviviente</SelectItem>
+                                    </SelectField>
+
+                                    <SelectField label="Nacionalidad" value={formData.details.nationality} onChange={(v) => handleChange(null, v, 'nationality')}>
+                                        <SelectItem key="Peruana">Peruana</SelectItem>
+                                        <SelectItem key="Venezolana">Venezolana</SelectItem>
+                                        <SelectItem key="Otra">Otra</SelectItem>
+                                    </SelectField>
+                                </div>
+                             </CardBody>
+                         </Card>
+                    </div>
+                )}
+
+                {selectedTab === 'contacto' && (
+                    <div className="flex flex-col gap-6">
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                    <Phone size={16}/> Contacto Directo
+                                </h3>
+                                <InputField label="Celular" value={formData.phone} onChange={(v) => handleChange('phone', v)} type="tel" icon={<Phone size={16}/>} />
+                                <InputField label="Email" value={formData.email} onChange={(v) => handleChange('email', v)} type="email" icon={<Mail size={16}/>} />
+                             </CardBody>
+                         </Card>
+
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                    <MapPin size={16}/> Dirección
+                                </h3>
+                                <InputField label="Dirección / Calle" value={formData.details.address.street} onChange={(v) => handleChange(null, v, 'address', 'street')} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <InputField label="Distrito" value={formData.details.address.district} onChange={(v) => handleChange(null, v, 'address', 'district')} />
+                                    <InputField label="Provincia" value={formData.details.address.province} onChange={(v) => handleChange(null, v, 'address', 'province')} />
+                                </div>
+                                <InputField label="Departamento" value={formData.details.address.department} onChange={(v) => handleChange(null, v, 'address', 'department')} />
+                             </CardBody>
+                         </Card>
+                    </div>
+                )}
+
+                {selectedTab === 'laboral' && (
+                    <div className="flex flex-col gap-6">
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                    <Briefcase size={16}/> Contrato
+                                </h3>
+                                <div className="p-3 bg-slate-50 rounded-lg space-y-3">
+                                    <div className="flex justify-between border-b border-slate-200 pb-2">
+                                        <span className="text-xs text-slate-500">Régimen</span>
+                                        <span className="text-sm font-bold text-slate-800">{worker.pension_system}</span>
+                                    </div>
+                                    {worker.pension_system !== 'ONP' && (
+                                        <div className="flex justify-between border-b border-slate-200 pb-2">
+                                            <span className="text-xs text-slate-500">CUSPP</span>
+                                            <span className="text-sm font-bold text-slate-800">{formData.details.cuspp || '--'}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between">
+                                        <span className="text-xs text-slate-500">Proyecto</span>
+                                        <span className="text-sm font-bold text-[#003366] text-right truncate max-w-[150px]">{worker.project_assigned}</span>
+                                    </div>
+                                </div>
+                             </CardBody>
+                         </Card>
+
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl bg-orange-50/20">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-orange-800 uppercase border-b border-orange-100 pb-2 mb-1 flex items-center gap-2">
+                                    <ShieldAlert size={16}/> Tallas (EPP)
+                                </h3>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <InputField label="Camisa" value={formData.details.sizes.shirt} onChange={(v) => handleChange(null, v, 'sizes', 'shirt')} />
+                                    <InputField label="Pantalón" value={formData.details.sizes.pant} onChange={(v) => handleChange(null, v, 'sizes', 'pant')} />
+                                    <InputField label="Calzado" value={formData.details.sizes.shoe} onChange={(v) => handleChange(null, v, 'sizes', 'shoe')} />
+                                </div>
+                             </CardBody>
+                         </Card>
+                    </div>
+                )}
+
+                {selectedTab === 'bancario' && (
+                     <div className="flex flex-col gap-6">
+                        <Card className="shadow-sm border border-red-100 bg-red-50/20 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-red-700 uppercase border-b border-red-100 pb-2 mb-1 flex items-center gap-2">
+                                    <ShieldAlert size={16}/> En caso de Emergencia
+                                </h3>
+                                <InputField label="Nombre Contacto" value={formData.details.emergency_contacts[0]?.name} onChange={(v) => handleEmergencyChange('name', v)} />
+                                <InputField label="Celular" value={formData.details.emergency_contacts[0]?.phone_cell} onChange={(v) => handleEmergencyChange('phone_cell', v)} type="tel"/>
+                                <InputField label="Parentesco" value={formData.details.emergency_contacts[0]?.relationship} onChange={(v) => handleEmergencyChange('relationship', v)} />
+                             </CardBody>
+                         </Card>
+
+                         <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                             <CardBody className="p-5 flex flex-col gap-5">
+                                <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                    <CreditCard size={16}/> Cuenta Bancaria
+                                </h3>
+                                <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-lg mb-2">
+                                    <p className="text-xs text-yellow-800 flex gap-2">
+                                        <AlertTriangle size={14} className="shrink-0"/>
+                                        Por seguridad, estos datos no son editables. Contacta a administración para cambios.
+                                    </p>
+                                </div>
+                                <InputField label="Banco" value={formData.bank_name} disabled={true} />
+                                <InputField label="Cuenta" value={formData.bank_account} disabled={true} />
+                                <InputField label="CCI" value={formData.cci} disabled={true} />
+                             </CardBody>
+                         </Card>
+                     </div>
+                )}
+
+                {selectedTab === 'formacion' && (
+                     <Card className="shadow-sm border border-slate-200 rounded-2xl">
+                         <CardBody className="p-5 flex flex-col gap-5">
+                            <h3 className="text-sm font-bold text-[#003366] uppercase border-b border-slate-100 pb-2 mb-1 flex items-center gap-2">
+                                <GraduationCap size={16}/> Formación
+                            </h3>
+                            <SelectField label="Nivel Educativo" value={formData.details.education.level} onChange={(v) => handleChange(null, v, 'education', 'level')}>
+                                <SelectItem key="Primaria">Primaria</SelectItem>
+                                <SelectItem key="Secundaria">Secundaria</SelectItem>
+                                <SelectItem key="Técnico">Técnico</SelectItem>
+                                <SelectItem key="Universitario">Universitario</SelectItem>
+                            </SelectField>
+                            <SelectField label="Estado" value={formData.details.education.status} onChange={(v) => handleChange(null, v, 'education', 'status')}>
+                                <SelectItem key="Incompleto">Incompleto</SelectItem>
+                                <SelectItem key="Completo">Completo</SelectItem>
+                                <SelectItem key="En Curso">En Curso</SelectItem>
+                            </SelectField>
+                            <InputField label="Institución / Carrera" value={formData.details.education.institution} onChange={(v) => handleChange(null, v, 'education', 'institution')} />
+                         </CardBody>
+                     </Card>
+                )}
+
+            </motion.div>
+        </AnimatePresence>
+      </div>
+
     </div>
   );
 };
-export default WorkerOnboardingPage;
+
+export default WorkerProfilePage;
