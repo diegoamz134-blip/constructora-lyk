@@ -11,6 +11,9 @@ import {
 } from 'lucide-react';
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
+// --- IMPORTAMOS EL BOTÓN FLOTANTE ---
+import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn';
+
 const WorkerLayout = () => {
   // Extraemos currentUser y loading
   const { logout, currentUser, isLoading } = useUnifiedAuth();
@@ -35,31 +38,31 @@ const WorkerLayout = () => {
       path: '/worker/dashboard', 
       label: 'Inicio', 
       icon: LayoutDashboard,
-      restricted: false // <--- CAMBIO: AHORA VISIBLE PARA TODOS
+      restricted: false 
     },
     { 
       path: '/worker/asistencia', 
       label: 'Asistencia', 
       icon: CalendarCheck, 
-      restricted: false // VISIBLE PARA TODOS
+      restricted: false 
     },
     { 
       path: '/worker/bitacora', 
       label: 'Bitácora', 
       icon: ClipboardList, 
-      restricted: true // SOLO OPERARIO
+      restricted: true 
     },
     { 
       path: '/worker/proyecto', 
       label: 'Mi Obra', 
       icon: Building2, 
-      restricted: true // SOLO OPERARIO
+      restricted: true 
     },
     { 
       path: '/worker/profile', 
       label: 'Perfil', 
       icon: UserCircle, 
-      restricted: false // VISIBLE PARA TODOS
+      restricted: false 
     },
   ];
 
@@ -78,7 +81,6 @@ const WorkerLayout = () => {
       // Si el usuario NO tiene acceso total...
       if (!hasFullAccess) {
         // ... y está intentando entrar a una ruta PROHIBIDA
-        // NOTA: Ya no incluimos dashboard aquí, porque ahora sí pueden verlo.
         const restrictedPaths = ['/worker/bitacora', '/worker/proyecto'];
         const currentPath = location.pathname;
 
@@ -170,6 +172,10 @@ const WorkerLayout = () => {
       {/* === 3. CONTENIDO PRINCIPAL === */}
       <main className="flex-1 md:ml-64 p-4 md:p-8 pb-24 md:pb-8 animate-fade-in">
         <Outlet />
+        
+        {/* === AQUÍ ESTÁ EL BOTÓN FLOTANTE === */}
+        {/* Solo aparecerá si el obrero dio click en "Omitir" */}
+        <OnboardingFloatingBtn />
       </main>
 
       {/* === 4. MENÚ INFERIOR (Solo visible en Celular) === */}

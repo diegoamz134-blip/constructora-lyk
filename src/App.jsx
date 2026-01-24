@@ -6,7 +6,8 @@ import { CompanyProvider } from './context/CompanyContext';
 import MainLayout from './components/layout/MainLayout';
 import WorkerLayout from './components/layout/WorkerLayout';
 import RoleProtectedRoute from './components/layout/RoleProtectedRoute';
-import OnboardingGuard from './components/layout/OnboardingGuard'; // <--- NUEVO IMPORT
+import OnboardingGuard from './components/layout/OnboardingGuard';
+import WorkerOnboardingGuard from './components/layout/WorkerOnboardingGuard'; // <--- IMPORTANTE
 
 // Páginas Públicas
 const ClientLandingPage = React.lazy(() => import('./modules/landing/ClientLandingPage'));
@@ -28,8 +29,9 @@ const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetai
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
 
-// NUEVA PÁGINA DE ONBOARDING
+// PÁGINAS DE ONBOARDING
 const StaffOnboardingPage = React.lazy(() => import('./modules/onboarding/StaffOnboardingPage'));
+const WorkerOnboardingPage = React.lazy(() => import('./modules/onboarding/WorkerOnboardingPage')); // <--- NUEVA PÁGINA
 
 // PÁGINA DE MANTENIMIENTO
 const MaintenancePage = React.lazy(() => import('./components/common/MaintenancePage'));
@@ -58,14 +60,14 @@ function App() {
         <Route path="/libro-reclamaciones" element={<ComplaintsBookPage />} />
         <Route path="/login" element={<LoginPage />} />
 
-        {/* --- RUTA DE ONBOARDING (ACCESIBLE PARA COMPLETAR EL REGISTRO) --- */}
+        {/* --- ONBOARDING STAFF --- */}
         <Route path="/onboarding" element={<StaffOnboardingPage />} />
 
-        {/* --- RUTAS PROTEGIDAS CON ONBOARDING GUARD --- */}
-        {/* Este guardia verifica si el staff ya completó sus datos. Si no, lo manda a /onboarding */}
+        {/* --- ONBOARDING OBREROS (IMPORTANTE: Definida explícitamente) --- */}
+        <Route path="/worker/onboarding" element={<WorkerOnboardingPage />} />
+
+        {/* --- RUTAS PROTEGIDAS STAFF --- */}
         <Route element={<OnboardingGuard />}>
-          
-          {/* DASHBOARD Y PERFIL (TODOS TIENEN ACCESO) */}
           <Route element={<RoleProtectedRoute allowedRoles={[
               ...MANAGERS, 
               'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 
@@ -143,16 +145,18 @@ function App() {
             </Route>
           </Route>
 
-        </Route> {/* FIN DEL ONBOARDING GUARD */}
+        </Route> {/* FIN DEL ONBOARDING GUARD STAFF */}
 
-        {/* WORKERS */}
-        {/* Nota: No aplicamos el OnboardingGuard aquí porque los obreros tienen un flujo distinto o no se especificó */}
-        <Route path="/worker" element={<WorkerLayout />}>
-          <Route path="dashboard" element={<WorkerDashboard />} />
-          <Route path="asistencia" element={<WorkerAttendance />} />
-          <Route path="bitacora" element={<WorkerProjectLog />} />
-          <Route path="proyecto" element={<WorkerProjectView />} />
-          <Route path="profile" element={<WorkerProfilePage />} />
+        {/* --- RUTAS DE OBREROS (WORKERS) --- */}
+        {/* Envolvemos con WorkerOnboardingGuard */}
+        <Route element={<WorkerOnboardingGuard />}>
+          <Route path="/worker" element={<WorkerLayout />}>
+            <Route path="dashboard" element={<WorkerDashboard />} />
+            <Route path="asistencia" element={<WorkerAttendance />} />
+            <Route path="bitacora" element={<WorkerProjectLog />} />
+            <Route path="proyecto" element={<WorkerProjectView />} />
+            <Route path="profile" element={<WorkerProfilePage />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<div className="p-10 text-center font-bold text-slate-600 mt-20">Página no encontrada (404)</div>} />

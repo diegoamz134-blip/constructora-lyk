@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 import { motion, AnimatePresence } from 'framer-motion';
-// IMPORTANTE: Trash2 agregado para evitar el error de pantalla blanca
 import { 
   Save, LogOut, Clock, ChevronRight, ChevronLeft, 
   SkipForward, CheckCircle, AlertCircle, User, MapPin, 
@@ -15,7 +14,7 @@ const steps = [
   { id: 1, title: 'Datos Personales', icon: <User size={20}/> },
   { id: 2, title: 'Ubicación y Contacto', icon: <MapPin size={20}/> },
   { id: 3, title: 'Laboral y Tallas', icon: <Briefcase size={20}/> },
-  { id: 4, title: 'Formación y Exp.', icon: <GraduationCap size={20}/> },
+  { id: 4, title: 'Formación y Exp.', icon: <GraduationCap size={20}/> }, // NUEVO PASO
   { id: 5, title: 'Hijos', icon: <Users size={20}/> },
   { id: 6, title: 'Familiares L&K', icon: <Heart size={20}/> },
   { id: 7, title: 'Emergencia y Pagos', icon: <CreditCard size={20}/> },
@@ -28,7 +27,6 @@ const WorkerOnboardingPage = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [timeLeft, setTimeLeft] = useState(20 * 60);
 
-  // --- PREVENCIÓN DE ERRORES ---
   if (!user) {
     return (
        <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -37,7 +35,6 @@ const WorkerOnboardingPage = () => {
     );
   }
 
-  // --- TEMPORIZADOR ---
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -70,9 +67,8 @@ const WorkerOnboardingPage = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // --- ESTADO DEL FORMULARIO ---
   const [formData, setFormData] = useState({
-    // DATOS BÁSICOS
+    // --- DATOS BÁSICOS ---
     birth_date: '',
     email: user?.email || '',
     phone: '',
@@ -92,24 +88,24 @@ const WorkerOnboardingPage = () => {
     province: '',
     department: '',
     secondary_phone: '',
-    secondary_email: '',
+    secondary_email: '', // Correo adicional
     
-    // TALLAS
+    // --- TALLAS ---
     shirt_size: '',
     pant_size: '',
     shoe_size: '',
 
-    // FORMACIÓN
-    education_level: '', 
-    education_status: '', 
+    // --- FORMACIÓN (NUEVO) ---
+    education_level: '', // Secundaria, Técnico, etc.
+    education_status: '', // Completo/Incompleto
     education_year: '',
     education_institution: '',
-    courses_list: [], 
+    courses_list: [], // [{ name, date }]
 
-    // EXPERIENCIA
-    work_experience: [],
+    // --- EXPERIENCIA (NUEVO) ---
+    work_experience: [], // [{ company, position, rubro, start, end, boss_name, boss_phone, functions }]
 
-    // ARRAYS
+    // --- ARRAYS ---
     children_list: [],
     emergency_contacts: [{ name: '', phone_fixed: '', phone_cell: '' }],
     family_in_company: [],
@@ -141,13 +137,10 @@ const WorkerOnboardingPage = () => {
   };
 
   const handleEmergChange = (idx, field, val) => {
-      const copy = [...formData.emergency_contacts]; 
-      if (!copy[idx]) copy[idx] = { name: '', phone_fixed: '', phone_cell: '' };
-      copy[idx][field] = val; 
-      setFormData(p => ({ ...p, emergency_contacts: copy }));
+      const copy = [...formData.emergency_contacts]; copy[idx][field] = val; setFormData(p => ({ ...p, emergency_contacts: copy }));
   };
 
-  // --- HELPERS CURSOS Y TRABAJO ---
+  // --- NUEVOS HELPERS: CURSOS Y TRABAJO ---
   const handleAddCourse = () => setFormData(p => ({ ...p, courses_list: [...p.courses_list, { name: '', date: '' }] }));
   const handleCourseChange = (idx, field, val) => {
       const copy = [...formData.courses_list]; copy[idx][field] = val; setFormData(p => ({ ...p, courses_list: copy }));
@@ -164,10 +157,9 @@ const WorkerOnboardingPage = () => {
       const copy = [...formData.work_experience]; copy.splice(idx, 1); setFormData(p => ({ ...p, work_experience: copy }));
   };
 
-  // --- VALIDACIÓN DE PASOS ---
+  // --- VALIDACIÓN ---
   const validateStep = (step) => {
     const errors = [];
-    
     if (step === 1) {
         if (!formData.birth_date) errors.push("Fecha de Nacimiento");
         if (!formData.nationality) errors.push("Nacionalidad");
@@ -183,11 +175,11 @@ const WorkerOnboardingPage = () => {
         if (!formData.pant_size) errors.push("Talla de Pantalón");
         if (!formData.shoe_size) errors.push("Talla de Zapatos");
     }
+    // Paso 4: Formación (Opcional pero recomendado llenar algo)
     
-    // PASO 7: VALIDACIÓN ESTRICTA
-    if (step === 7) { 
-        if (!formData.emergency_contacts[0]?.name) errors.push("Nombre de contacto de emergencia");
-        if (!formData.emergency_contacts[0]?.phone_cell) errors.push("Celular de emergencia");
+    if (step === 7) { // Ahora es paso 7
+        if (!formData.emergency_contacts[0].name) errors.push("Nombre de contacto de emergencia");
+        if (!formData.emergency_contacts[0].phone_cell) errors.push("Celular de emergencia");
         if (!formData.bank_account) errors.push("Número de cuenta");
         if (!formData.cci) errors.push("CCI");
     }
@@ -231,15 +223,8 @@ const WorkerOnboardingPage = () => {
     }
   };
 
-  // --- SUBMIT CONTROLADO ---
   const handleSubmit = async (e, skipped = false) => {
-    if (e && e.preventDefault) e.preventDefault(); 
-
-    // VALIDACIÓN FINAL ANTES DE ENVIAR
-    if (!skipped) {
-        if (!validateStep(7)) return; // Si falla, SE DETIENE AQUÍ.
-    }
-
+    if (e) e.preventDefault();
     setLoading(true);
 
     try {
@@ -253,6 +238,7 @@ const WorkerOnboardingPage = () => {
         contact_extra: { secondary_phone: formData.secondary_phone, secondary_email: formData.secondary_email },
         sizes: { shirt: formData.shirt_size, pant: formData.pant_size, shoe: formData.shoe_size },
         
+        // --- NUEVOS DATOS GUARDADOS EN JSON ---
         education: {
             level: formData.education_level,
             status: formData.education_status,
@@ -261,6 +247,7 @@ const WorkerOnboardingPage = () => {
             courses: formData.courses_list
         },
         work_experience: formData.work_experience,
+        // --------------------------------------
 
         children_list: formData.children_list,
         emergency_contacts: formData.emergency_contacts,
@@ -328,8 +315,6 @@ const WorkerOnboardingPage = () => {
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8 font-sans">
       <div className="max-w-3xl mx-auto">
-        
-        {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 sticky top-2 z-40">
           <div className="mb-2 md:mb-0">
             <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -349,7 +334,6 @@ const WorkerOnboardingPage = () => {
           </div>
         </div>
 
-        {/* PROGRESS BAR */}
         <div className="flex justify-between mb-6 px-2 relative">
             <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 rounded-full"></div>
             <div className="absolute top-1/2 left-0 h-1 bg-[#003366] -z-10 rounded-full transition-all duration-500" style={{ width: `${((currentStep - 1) / 6) * 100}%` }}></div>
@@ -363,8 +347,7 @@ const WorkerOnboardingPage = () => {
             ))}
         </div>
 
-        {/* --- FORMULARIO CONVERTIDO A DIV PARA EVITAR SUBMIT AUTOMÁTICO --- */}
-        <div className="relative min-h-[400px]">
+        <form onSubmit={(e) => handleSubmit(e, false)} className="relative min-h-[400px]">
            <AnimatePresence mode='wait'>
              <motion.div
                 key={currentStep}
@@ -398,6 +381,7 @@ const WorkerOnboardingPage = () => {
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Provincia</label><input type="text" name="province" value={formData.province} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Departamento</label><input type="text" name="department" value={formData.department} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl uppercase" /></div>
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Celular Principal *</label><input required type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" placeholder="999 999 999" /></div>
+                         {/* CORREO ADICIONAL AGREGADO AQUI */}
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Celular Adicional</label><input type="tel" name="secondary_phone" value={formData.secondary_phone} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Correo Personal</label><input type="email" name="email" value={formData.email} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" /></div>
                          <div><label className="block text-xs font-bold text-slate-600 mb-1">Correo Adicional</label><input type="email" name="secondary_email" value={formData.secondary_email} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" placeholder="Opcional" /></div>
@@ -414,9 +398,10 @@ const WorkerOnboardingPage = () => {
                     </div>
                 )}
 
-                {/* PASO 4: FORMACIÓN Y EXPERIENCIA */}
+                {/* --- NUEVO PASO 4: FORMACIÓN Y EXPERIENCIA --- */}
                 {currentStep === 4 && (
                     <div className="space-y-8 animate-fadeIn">
+                        {/* ESTUDIOS */}
                         <div>
                             <h3 className="text-sm font-bold text-[#003366] border-b pb-2 mb-4">Nivel de Estudios Logrados</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -449,6 +434,7 @@ const WorkerOnboardingPage = () => {
                                 </div>
                             </div>
 
+                            {/* CURSOS */}
                             <div className="mt-4">
                                 <div className="flex justify-between items-center mb-2">
                                     <label className="text-xs font-bold text-slate-500">Cursos Adicionales</label>
@@ -464,6 +450,7 @@ const WorkerOnboardingPage = () => {
                             </div>
                         </div>
 
+                        {/* EXPERIENCIA LABORAL */}
                         <div>
                             <div className="flex justify-between items-center border-b pb-2 mb-4">
                                 <h3 className="text-sm font-bold text-[#003366]">Experiencia Laboral (3 últimas)</h3>
@@ -537,26 +524,9 @@ const WorkerOnboardingPage = () => {
            
            <div className="mt-6 flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-slate-100 sticky bottom-4 z-40">
                 {currentStep > 1 ? <button type="button" onClick={handlePrev} className="px-5 py-2.5 rounded-xl text-slate-600 font-bold hover:bg-slate-100 flex items-center gap-2 border border-slate-200"><ChevronLeft size={20}/> Atrás</button> : <button type="button" onClick={logout} className="px-5 py-2.5 rounded-xl text-red-500 font-bold hover:bg-red-50 flex items-center gap-2 border border-transparent"><LogOut size={20}/> Salir</button>}
-                
-                {/* BOTONES DE CONTROL MANUAL */}
-                {currentStep < 7 ? (
-                    <button type="button" onClick={handleNext} className="px-6 py-2.5 rounded-xl bg-[#003366] text-white font-bold hover:bg-blue-900 shadow-lg flex items-center gap-2">
-                        Siguiente <ChevronRight size={20}/>
-                    </button>
-                ) : (
-                    // ESTE ES EL CAMBIO CLAVE: type="button"
-                    <button 
-                        type="button" 
-                        onClick={(e) => handleSubmit(e, false)} 
-                        disabled={loading} 
-                        className="px-8 py-2.5 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 shadow-lg flex items-center gap-2"
-                    >
-                        {loading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Save size={20} />} 
-                        Finalizar Registro
-                    </button>
-                )}
+                {currentStep < 7 ? <button type="button" onClick={handleNext} className="px-6 py-2.5 rounded-xl bg-[#003366] text-white font-bold hover:bg-blue-900 shadow-lg flex items-center gap-2">Siguiente <ChevronRight size={20}/></button> : <button type="submit" disabled={loading} className="px-8 py-2.5 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 shadow-lg flex items-center gap-2">{loading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : <Save size={20} />} Finalizar</button>}
            </div>
-        </div>
+        </form>
       </div>
     </div>
   );

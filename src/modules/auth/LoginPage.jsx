@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-// IMPORTAMOS LOS CONTEXTOS ORIGINALES PARA TENER ACCESO A LAS FUNCIONES DE LOGIN
+// IMPORTAMOS LOS CONTEXTOS
 import { useAuth } from '../../context/AuthContext';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
-import { useUnifiedAuth } from '../../hooks/useUnifiedAuth'; // Usamos este solo para redirección
+import { useUnifiedAuth } from '../../hooks/useUnifiedAuth'; 
 
 import { Eye, EyeOff, Loader2, HardHat, Briefcase, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,11 +14,8 @@ import bgImage from '../../assets/images/fondo-login.jpg';
 const LoginPage = () => {
   const navigate = useNavigate();
   
-  // 1. OBTENEMOS LAS FUNCIONES REALES DE LOS CONTEXTOS
-  const { login: loginStaff } = useAuth(); // Renombramos a loginStaff para claridad
+  const { login: loginStaff } = useAuth();
   const { loginWorker } = useWorkerAuth();
-  
-  // Usamos el hook unificado solo para detectar si ya hay alguien logueado
   const { currentUser } = useUnifiedAuth(); 
 
   const [activeTab, setActiveTab] = useState('staff'); 
@@ -31,12 +28,15 @@ const LoginPage = () => {
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
 
-  // --- REDIRECCIÓN AUTOMÁTICA ---
+  // --- REDIRECCIÓN AUTOMÁTICA CORREGIDA ---
   useEffect(() => {
-    // Si ya hay usuario y no estamos cargando ni en animación de éxito, redirigir
     if (!loading && !loginSuccess && currentUser) {
-       console.log("🚀 Usuario detectado, redirigiendo...");
-       const targetPath = currentUser.role === 'obrero' ? '/worker/dashboard' : '/dashboard';
+       console.log("🚀 Usuario detectado:", currentUser.role);
+       
+       // CORRECCIÓN: Aceptamos 'worker' u 'obrero' para enviarlo al panel correcto
+       const isWorker = currentUser.role === 'worker' || currentUser.role === 'obrero';
+       const targetPath = isWorker ? '/worker/dashboard' : '/dashboard';
+       
        navigate(targetPath, { replace: true });
     }
   }, [currentUser, navigate, loading, loginSuccess]);
@@ -59,30 +59,22 @@ const LoginPage = () => {
       const password = formData.password;
 
       if (activeTab === 'staff') {
-         // --- LOGIN ADMINISTRATIVO (STAFF) ---
-         // El AuthContext ya maneja la lógica de buscar por Email o DNI internamente
          const response = await loginStaff(identifier, password);
-         
-         // Si no lanza error, es exitoso
          const nameToShow = response.user.full_name?.split(' ')[0] || response.user.first_name || 'Colaborador';
          triggerSuccess('/dashboard', nameToShow);
-
       } else {
-         // --- LOGIN OBRERO ---
          const response = await loginWorker(identifier, password);
          
          if (response.success) {
             const nameToShow = response.data.full_name?.split(' ')[0] || 'Compañero';
             triggerSuccess('/worker/dashboard', nameToShow);
          } else {
-            // El contexto de obreros devuelve un objeto con error, no lanza excepción
             throw new Error(response.error || 'Error al iniciar sesión.');
          }
       }
 
     } catch (err) {
       console.error("Login Error:", err);
-      // Manejo de errores amigable
       let msg = err.message || 'Error de conexión.';
       if (msg.includes('PGRST116')) msg = 'Error de datos duplicados. Contacte soporte.';
       setError(msg);
