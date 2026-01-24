@@ -20,8 +20,7 @@ export const WorkerAuthProvider = ({ children }) => {
           // Cargamos los datos visualmente rápido
           setWorker(parsedWorker);
 
-          // 2. REFRESCAMOS LOS DATOS DESDE LA BASE DE DATOS (SOLUCIÓN)
-          // Esto busca si le asignaron una obra nueva o cambiaron su estado
+          // 2. REFRESCAMOS LOS DATOS DESDE LA BASE DE DATOS
           const { data: freshData, error } = await supabase
             .from('workers')
             .select('*')
@@ -29,18 +28,14 @@ export const WorkerAuthProvider = ({ children }) => {
             .single();
 
           if (!error && freshData) {
-             // Verificamos si sigue activo
              if (freshData.status !== 'Activo') {
                 alert("Tu cuenta ha sido desactivada. Contacta a RRHH.");
                 logoutWorker();
              } else {
-                // Actualizamos el estado y el localStorage con los DATOS NUEVOS
                 setWorker(freshData);
                 localStorage.setItem('lyk_worker_session', JSON.stringify(freshData));
-                console.log("Datos de obrero actualizados:", freshData.project_assigned);
              }
           } else if (error) {
-             // Si el usuario fue borrado de la BD, cerramos sesión
              console.warn("Usuario no encontrado en BD, cerrando sesión.");
              logoutWorker();
           }
@@ -60,7 +55,6 @@ export const WorkerAuthProvider = ({ children }) => {
     try {
       console.log("Intentando login obrero:", documentNumber);
 
-      // 1. Buscar al obrero por DNI
       const { data: workerData, error } = await supabase
         .from('workers')
         .select('*')
@@ -75,17 +69,13 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Cuenta inactiva.' };
       }
 
-      // 2. Verificar Contraseña
       let isValidPassword = false;
-      
       try {
-         // Intento 1: Comparar como hash (bcrypt)
          isValidPassword = await bcrypt.compare(password, workerData.password);
       } catch (e) {
          console.warn("No es un hash válido, probando texto plano...");
       }
 
-      // Intento 2: Comparar como texto plano (Legacy)
       if (!isValidPassword && workerData.password === password) {
           isValidPassword = true;
       }
@@ -94,7 +84,6 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Contraseña incorrecta.' };
       }
 
-      // 3. Login Exitoso
       setWorker(workerData);
       localStorage.setItem('lyk_worker_session', JSON.stringify(workerData));
       
@@ -109,12 +98,43 @@ export const WorkerAuthProvider = ({ children }) => {
   const logoutWorker = () => {
     setWorker(null);
     localStorage.removeItem('lyk_worker_session');
-    // Opcional: Redirigir al login si fuera necesario
     // window.location.href = '/login'; 
   };
 
+  // --- NUEVA FUNCIÓN AGREGADA: UPDATE PROFILE ---
+  const updateProfile = async (updates) => {
+    if (!worker) return false;
+
+    try {
+      console.log("Actualizando perfil obrero...", updates);
+
+      // 1. Actualizar en Supabase
+      const { data, error } = await supabase
+        .from('workers')
+        .update(updates)
+        .eq('id', worker.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error de Supabase:", error);
+        throw error;
+      }
+
+      // 2. Actualizar estado local y localStorage inmediatamente
+      setWorker(data);
+      localStorage.setItem('lyk_worker_session', JSON.stringify(data));
+      
+      return true;
+    } catch (error) {
+      console.error("Error actualizando perfil:", error);
+      return false;
+    }
+  };
+
   return (
-    <WorkerAuthContext.Provider value={{ worker, loginWorker, logoutWorker, loading }}>
+    // IMPORTANTE: Agregamos updateProfile al value del Provider
+    <WorkerAuthContext.Provider value={{ worker, loginWorker, logoutWorker, loading, updateProfile }}>
       {children}
     </WorkerAuthContext.Provider>
   );
