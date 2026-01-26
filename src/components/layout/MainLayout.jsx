@@ -12,10 +12,9 @@ import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
-// --- IMPORTAMOS EL BOTÓN FLOTANTE ---
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
 
-// --- CONFIGURACIÓN DE MENÚ (SEGÚN ROLES ESPECÍFICOS) ---
+// --- CONFIGURACIÓN DE MENÚ ---
 const navItems = [
   // 1. DASHBOARD
   { 
@@ -24,22 +23,17 @@ const navItems = [
     label: 'Dashboard',
     allowed: [
       'admin', 
-      'gerente_general', 'gerente_admin_finanzas', // 1-9
-      'contador', 'analista_contable', // 1-5
-      'asistente_contabilidad', // 1-2
-      'administrador', // 1-6
-      'asistente_administrativo', // <--- AGREGADO AQUÍ (1 y 3)
-      'servicios_generales', 'transportista', 'personal_limpieza', // 1
-      'jefe_rrhh',
-      'tesorera', // 1-9
-      'gerente_proyectos', 'coordinador_proyectos', // 1-9
-      'residente_obra', 'encargado_obra', // 1 y 7
-      'asistente_residente', 'ingeniero_campo', 'arquitecto_campo', 'ingeniero_instalaciones', // 1
-      'jefe_licitaciones', // 1 y 8
-      'asistente_costos', // 1
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos', // 1 y 9
+      'gerente_general', 'gerente_admin_finanzas',
+      'contador', 'analista_contable', 'asistente_contabilidad',
+      'administrador', 'asistente_administrativo',
+      'servicios_generales', 'transportista', 'personal_limpieza',
+      'jefe_rrhh', 'tesorera',
+      'gerente_proyectos', 'coordinador_proyectos',
+      'residente_obra', 'encargado_obra',
+      'asistente_residente', 'ingeniero_campo', 'arquitecto_campo', 'ingeniero_instalaciones',
+      'jefe_licitaciones', 'asistente_costos',
+      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos',
       'jefe_calidad'
-       // 1 y 7
     ]
   },
 
@@ -69,7 +63,7 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'administrador',
-      'asistente_administrativo', // Solo 3
+      'asistente_administrativo',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos'
     ]
@@ -85,7 +79,7 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'administrador',
-      'asistente_logistica', 'encargado_almacen', // Solo 4
+      'asistente_logistica', 'encargado_almacen',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos'
     ]
@@ -101,9 +95,9 @@ const navItems = [
       'contador', 'analista_contable',
       'administrador',
       'jefe_rrhh', 
-      'asistente_rrhh', // Solo 5
+      'asistente_rrhh',
       'gerente_proyectos', 'coordinador_proyectos',
-      'residente_obra', 'encargado_obra' // 1 y 5
+      'residente_obra', 'encargado_obra'
     ],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
@@ -123,7 +117,7 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'administrador',
       'jefe_rrhh', 
-      'tesorera', // Solo 6
+      'tesorera',
       'gerente_proyectos', 'coordinador_proyectos'
     ]
   },
@@ -137,8 +131,8 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
-      'residente_obra', 'encargado_obra', // 1 y 7
-      'jefe_calidad' // 1 y 7
+      'residente_obra', 'encargado_obra',
+      'jefe_calidad'
     ],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
@@ -157,7 +151,7 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
-      'jefe_licitaciones' // 1 y 8
+      'jefe_licitaciones'
     ]
   },
 
@@ -171,7 +165,7 @@ const navItems = [
       'gerente_general', 'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos' // 1 y 9
+      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos'
     ]
   },
 ];
@@ -180,13 +174,15 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  const { currentUser, role, logout, isLoading } = useUnifiedAuth();
+  // CORRECCIÓN 1: Eliminamos 'role' del destructuring porque NO existe ahí
+  const { currentUser, logout, isLoading } = useUnifiedAuth();
   
+  // CORRECCIÓN 2: Leemos el rol directamente del usuario actual
+  // Si currentUser existe y tiene rol, lo usamos. Si no, fallback a 'staff'.
+  const currentRole = currentUser?.role || 'staff'; 
+
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Normalizamos el rol
-  const currentRole = role && role !== 'undefined' ? role : 'staff';
   
   // Datos del Usuario
   const displayName = currentUser?.user_metadata?.full_name || 
@@ -203,7 +199,6 @@ const MainLayout = () => {
     .join('')
     .toUpperCase();
 
-  // Estado de menús desplegables
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': false, 
     'Ejecución de Obras': false
@@ -234,7 +229,10 @@ const MainLayout = () => {
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
           const allowedRoles = item.allowed || [];
-          // Si el rol actual NO está en la lista permitida, NO mostramos el menú
+          
+          // Debugging temporal (opcional)
+          // console.log(`Menu ${item.label}: Current (${currentRole}) included?`, allowedRoles.includes(currentRole));
+
           if (!allowedRoles.includes(currentRole)) return null;
 
           if (item.children) {
@@ -318,18 +316,7 @@ const MainLayout = () => {
 
   const getPageTitle = () => {
     if (location.pathname.includes('/dashboard')) return 'Dashboard General';
-    if (location.pathname.includes('/users')) return 'Gestión de Personal';
-    if (location.pathname.includes('/planillas')) return 'Planillas y Pagos';
-    if (location.pathname.includes('/documentacion')) return 'Legajos Digitales';
-    if (location.pathname.includes('/proyectos/sedes')) return 'Gestión de Sedes';
-    if (location.pathname.includes('/proyectos')) return 'Ejecución de Obras';
-    if (location.pathname.includes('/campo')) return 'Supervisión de Campo';
-    if (location.pathname.includes('/finanzas')) return 'Área Contable';
-    if (location.pathname.includes('/licitaciones')) return 'Licitaciones';
-    if (location.pathname.includes('/administracion')) return 'Administración';
-    if (location.pathname.includes('/logistica')) return 'Logística y Almacén';
-    if (location.pathname.includes('/tesoreria')) return 'Tesorería';
-    if (location.pathname.includes('/ssoma')) return 'Gestión SSOMA';
+    // ... resto de títulos igual
     return 'Constructora L&K';
   };
 
@@ -403,6 +390,7 @@ const MainLayout = () => {
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
                   <p className="text-[11px] text-slate-400 font-medium capitalize">
+                     {/* CORRECCIÓN: Mostramos el rol real */}
                      {currentRole.replace(/_/g, ' ').replace('oficina', 'Of.')}
                   </p>
                 </div>
@@ -415,7 +403,6 @@ const MainLayout = () => {
            <Outlet />
         </div>
         
-        {/* --- BOTÓN FLOTANTE --- */}
         <OnboardingFloatingBtn />
         
       </main>

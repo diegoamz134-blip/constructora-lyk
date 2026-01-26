@@ -11,10 +11,7 @@ import { supabase } from '../../services/supabase';
 import { useAuth } from '../../context/AuthContext';
 import bcrypt from 'bcryptjs';
 
-// Importamos el generador PDF
 import { generateStaffPDF } from '../../utils/staffPdfGenerator';
-
-// --- MODALES ---
 import StatusModal from '../../components/common/StatusModal';
 import ImageCropperModal from '../../components/common/ImageCropperModal';
 
@@ -22,49 +19,45 @@ const UserProfilePage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   
-  // --- ESTADOS DE CARGA ---
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
-  
-  // --- PESTAÑA ACTIVA ---
   const [activeTab, setActiveTab] = useState('general'); 
-
-  // --- ESTADOS DE EDICIÓN ---
   const [isEditing, setIsEditing] = useState(false);
   
-  // --- ESTADOS DE CONTRASEÑA ---
   const [passwordForm, setPasswordForm] = useState({ newPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
-  
-  // --- NOTIFICACIONES ---
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
 
-  // --- CROPPING ---
   const [isCropperOpen, setIsCropperOpen] = useState(false);
   const [tempImageSrc, setTempImageSrc] = useState(null);
   const [imageError, setImageError] = useState(false);
   const [cacheBuster, setCacheBuster] = useState(Date.now());
   const fileInputRef = useRef(null);
 
-  // --- DATOS DEL PERFIL ---
   const [profile, setProfile] = useState({
-    id: '', full_name: '', email: '', role: 'Staff',
-    entry_date: '', birth_date: '', phone: '', area: '', 
-    status: 'Activo', avatar_url: '', document_number: '',
+    id: user?.id || '', 
+    full_name: user?.full_name || '', 
+    email: user?.email || '', 
+    role: user?.role || 'Staff', 
+    entry_date: user?.entry_date || '', 
+    birth_date: '', phone: '', area: user?.area || '', 
+    status: 'Activo', avatar_url: user?.avatar_url || '', document_number: '',
     onboarding_data: {} 
   });
 
-  // 1. CARGA DE DATOS
   const fetchProfile = async () => {
     try {
       let currentUser = user;
+      
       if (!currentUser || !currentUser.id) {
         const stored = localStorage.getItem('lyk_session');
         if (!stored) { navigate('/'); return; }
-        currentUser = JSON.parse(stored).user;
+        const parsed = JSON.parse(stored);
+        currentUser = parsed.user;
+        if(parsed.role && currentUser) currentUser.role = parsed.role;
       }
 
       if (!currentUser?.id) return;
@@ -84,6 +77,7 @@ const UserProfilePage = () => {
 
         setProfile({
             ...data,
+            role: data.role || currentUser.role || 'Staff', 
             full_name: data.full_name || '',
             email: data.email || '',
             phone: data.phone || '',
@@ -102,7 +96,6 @@ const UserProfilePage = () => {
 
   useEffect(() => { fetchProfile(); }, [user]);
 
-  // 2. MANEJO DE CAMBIOS
   const handleChange = (e, section, index, subfield) => {
     const { name, value } = e.target;
     const safeValue = value === null || value === undefined ? '' : value;
@@ -132,7 +125,6 @@ const UserProfilePage = () => {
     }
   };
 
-  // 3. GUARDAR TODO
   const handleSaveAll = async () => {
     setSaving(true);
     try {
@@ -163,7 +155,6 @@ const UserProfilePage = () => {
     }
   };
 
-  // 4. FOTO DE PERFIL
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -191,7 +182,6 @@ const UserProfilePage = () => {
     }
   };
 
-  // 5. CAMBIO PASSWORD
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
     if (!passwordForm.newPassword) return;
@@ -208,7 +198,6 @@ const UserProfilePage = () => {
     }
   };
 
-  // 6. MANEJADOR DE DESCARGA PDF (ASYNC)
   const handleDownloadPDF = async () => {
     setGeneratingPdf(true);
     try {
@@ -234,7 +223,7 @@ const UserProfilePage = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto space-y-6 pb-20 p-4 md:p-6">
       
-      {/* HEADER CON BOTONES MODERNOS */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
          <div>
             <h1 className="text-2xl font-bold text-slate-800">Mi Perfil</h1>
@@ -242,7 +231,6 @@ const UserProfilePage = () => {
          </div>
          
          <div className="flex items-center gap-3">
-             {/* BOTÓN PDF: ESTILO ICONO LIMPIO */}
              <button 
                 onClick={handleDownloadPDF} 
                 disabled={generatingPdf}
@@ -252,7 +240,6 @@ const UserProfilePage = () => {
                 {generatingPdf ? <Loader2 className="animate-spin" size={20}/> : <FileDown size={20} />}
              </button>
 
-             {/* BOTÓN EDITAR / GUARDAR: ESTILO ICONO DINÁMICO */}
              <button 
                 onClick={() => isEditing ? handleSaveAll() : setIsEditing(true)} 
                 disabled={saving} 
@@ -263,16 +250,11 @@ const UserProfilePage = () => {
                     : 'bg-white border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50'
                 }`}
              >
-                {saving ? (
-                    <Loader2 className="animate-spin" size={20}/>
-                ) : (
-                    isEditing ? <Save size={20}/> : <Edit2 size={20}/>
-                )}
+                {saving ? <Loader2 className="animate-spin" size={20}/> : (isEditing ? <Save size={20}/> : <Edit2 size={20}/>)}
              </button>
          </div>
       </div>
 
-      {/* TABS DE NAVEGACIÓN */}
       <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
         <TabBtn id="general" label="General" icon={User} active={activeTab} onClick={setActiveTab} />
         <TabBtn id="details" label="Detalles" icon={FileText} active={activeTab} onClick={setActiveTab} />
@@ -328,9 +310,19 @@ const UserProfilePage = () => {
                  </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
                     <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditing} />
-                    <Field label="Correo" name="email" value={profile.email} onChange={handleChange} isEditing={isEditing} type="email" />
+                    
+                    {/* FECHA DE NACIMIENTO */}
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
-                    <Field label="Teléfono" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditing} />
+                    
+                    {/* TELÉFONO PRINCIPAL */}
+                    <Field label="Celular Principal" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditing} />
+                    
+                    {/* CELULAR SECUNDARIO (ONBOARDING) */}
+                    <Field label="Celular Secundario" name="alt_phone" value={ob.alt_phone} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+
+                    {/* EMAILS */}
+                    <Field label="Email Corporativo" name="email" value={profile.email} onChange={handleChange} isEditing={isEditing} type="email" />
+                    <Field label="Email Personal" name="personal_email" value={ob.personal_email} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="email" />
                  </div>
                </div>
 
@@ -464,7 +456,6 @@ const UserProfilePage = () => {
   );
 };
 
-// COMPONENTES AUXILIARES
 const InfoRow = ({ label, val }) => (
     <div className="flex justify-between items-center w-full py-1">
         <span className="text-xs text-slate-400 font-medium">{label}</span>

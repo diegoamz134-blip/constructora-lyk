@@ -6,17 +6,11 @@ import {
   User, Heart, Briefcase, GraduationCap, 
   CreditCard, CheckCircle2, ArrowRight, ArrowLeft, Save,
   ShieldCheck, Home, Phone, Mail,
-  Building, Menu, Sparkles, Clock, LogOut
+  Building, Menu, LogOut, Loader2, Calendar
 } from 'lucide-react';
 
-// Si tu logo está en public:
 const LOGO_URL = "/logo-lk-full.png"; 
 
-// CLAVE PARA GUARDAR EL TIEMPO EN EL NAVEGADOR
-const TIMER_KEY = 'onboarding_target_time';
-const TIME_LIMIT_SECONDS = 250;
-
-// LISTA DE BANCOS PERÚ
 const BANKS_PERU = [
   'BCP (Banco de Crédito)', 'BBVA', 'Interbank', 'Scotiabank', 
   'Banco de la Nación', 'BanBif', 'Banco Pichincha', 'MiBanco', 
@@ -24,7 +18,6 @@ const BANKS_PERU = [
   'Caja Trujillo', 'Compartamos Financiera', 'Otro'
 ];
 
-// --- CONFIGURACIÓN DE PASOS ---
 const STEPS = [
   { id: 1, title: 'Perfil Personal', subtitle: 'Datos básicos', icon: User },
   { id: 2, title: 'Familia', subtitle: 'Emergencias', icon: Heart },
@@ -38,46 +31,6 @@ const StaffOnboardingPage = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   
-  // --- TEMPORIZADOR INTELIGENTE (Persiste al recargar) ---
-  const [timeLeft, setTimeLeft] = useState(TIME_LIMIT_SECONDS); 
-
-  useEffect(() => {
-    // 1. Al cargar, verificamos si ya hay un tiempo guardado
-    const storedTargetTime = localStorage.getItem(TIMER_KEY);
-    const now = Date.now();
-
-    let targetTime;
-
-    if (storedTargetTime) {
-      // Si existe, usamos ese tiempo objetivo
-      targetTime = parseInt(storedTargetTime, 10);
-    } else {
-      // Si no existe, creamos uno nuevo (Ahora + 250 segundos)
-      targetTime = now + (TIME_LIMIT_SECONDS * 1000);
-      localStorage.setItem(TIMER_KEY, targetTime.toString());
-    }
-
-    // Función de actualización
-    const updateTimer = () => {
-      const currentTime = Date.now();
-      const difference = Math.ceil((targetTime - currentTime) / 1000);
-
-      if (difference <= 0) {
-        setTimeLeft(0);
-        handleLogoutForce("El tiempo ha expirado.");
-      } else {
-        setTimeLeft(difference);
-      }
-    };
-
-    // Ejecutar inmediatamente y luego cada segundo
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // --- ESTADO MOUSE ---
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   useEffect(() => {
     if (window.innerWidth > 768) {
@@ -87,27 +40,19 @@ const StaffOnboardingPage = () => {
     }
   }, []);
 
-  // --- SALIDA FORZADA ---
-  const handleLogoutForce = async (msg = null) => {
-    if (msg) alert(msg);
-    localStorage.removeItem(TIMER_KEY); // Limpiamos el timer
-    localStorage.removeItem('user_session'); // Limpiamos sesión local por seguridad
+  const handleLogoutForce = async () => {
     try { await logout(); } catch (e) { /**/ }
     window.location.href = '/login';
   };
 
-  // FORMATO DE TIEMPO (MM:SS)
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  // ESTADO DEL FORMULARIO
+  // --- ESTADO DEL FORMULARIO (CORREGIDO) ---
   const [formData, setFormData] = useState({
-    nationality: 'Peruana', age: '', gender: '', civil_status: '',
+    nationality: 'Peruana', 
+    birth_date: '', // CAMBIO: Antes 'age', ahora Fecha Nacimiento
+    gender: '', civil_status: '',
     spouse_name: '', father_name: '', mother_name: '',
     address: '', district: '', province: '', department: 'Lima',
+    phone: '', // CAMBIO: Celular Principal
     alt_phone: '', personal_email: '', alt_email: '',
     afp_status: '', shirt_size: '', shoe_size: '', pants_size: '',
     has_dependents: 'NO', dependents_details: '', 
@@ -139,31 +84,33 @@ const StaffOnboardingPage = () => {
     setFormData({ ...formData, [name]: value });
   };
 
-  // --- SUBMIT FINAL (LÓGICA ACTUALIZADA) ---
   const handleSubmit = async (skip = false) => {
     setLoading(true);
     try {
       if (!currentUser?.id) {
-         handleLogoutForce("Sesión no detectada. Por favor ingrese nuevamente.");
+         handleLogoutForce(); 
          return;
       }
 
-      // 1. Preparamos los datos
-      // Si es SKIP, guardamos lo que tenga + la bandera skipped: true
-      // Si es FINALIZAR (skip=false), guardamos todo + la bandera skipped: false
-      // Así sabemos si mostrar o no el botón flotante después
       const dataToSave = {
           ...formData,
           skipped: skip ? true : false, 
           updated_at: new Date().toISOString()
       };
 
+      // --- CORRECCIÓN CLAVE: ACTUALIZAR COLUMNAS ROOT ---
+      // Además de guardar el JSON, actualizamos las columnas principales
+      // para que aparezcan en el perfil inmediatamente.
       const updatePayload = {
-        onboarding_completed: true, // Siempre true para dejarlo entrar al dashboard
-        onboarding_data: dataToSave
+        onboarding_completed: true, 
+        onboarding_data: dataToSave,
+        // Mapeamos los campos críticos a las columnas de la tabla employees
+        birth_date: formData.birth_date || null,
+        phone: formData.phone || null,
+        // Opcional: Si quieres guardar la dirección en columnas root si existen
+        district: formData.district || null
       };
 
-      // 2. Guardar en Supabase
       const { error } = await supabase
         .from('employees')
         .update(updatePayload)
@@ -171,28 +118,24 @@ const StaffOnboardingPage = () => {
 
       if (error) throw error;
 
-      // 3. ACTUALIZAR LA SESIÓN LOCAL
-      // Esto es clave para que el botón flotante aparezca/desaparezca instantáneamente
+      // ACTUALIZAR SESIÓN LOCAL
       const storedSession = localStorage.getItem('lyk_session');
       if (storedSession) {
         try {
             const sessionData = JSON.parse(storedSession);
-            
             if (sessionData.user) {
               sessionData.user.onboarding_completed = true;
-              sessionData.user.onboarding_data = dataToSave; // Guardamos la data actualizada en local
+              sessionData.user.onboarding_data = dataToSave;
+              // Actualizamos también localmente para reflejo inmediato
+              sessionData.user.birth_date = formData.birth_date;
+              sessionData.user.phone = formData.phone;
             }
-
             localStorage.setItem('lyk_session', JSON.stringify(sessionData));
         } catch (e) {
             console.error("Error actualizando sesión local:", e);
         }
       }
 
-      // 4. Limpieza final
-      localStorage.removeItem(TIMER_KEY);
-
-      // 5. Redirección Forzada al Dashboard
       window.location.href = '/dashboard';
 
     } catch (error) {
@@ -205,7 +148,6 @@ const StaffOnboardingPage = () => {
   const nextStep = () => { if (currentStep < STEPS.length) setCurrentStep(prev => prev + 1); };
   const prevStep = () => { if (currentStep > 1) setCurrentStep(prev => prev - 1); };
 
-  // Renderizado del contenido
   const renderContent = () => {
     const props = { formData, handleChange, handleSelection };
     switch (currentStep) {
@@ -221,7 +163,6 @@ const StaffOnboardingPage = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 relative overflow-hidden font-sans text-slate-800">
       
-      {/* FONDO */}
       <div 
         className="fixed inset-0 pointer-events-none transition-opacity duration-500"
         style={{
@@ -233,7 +174,6 @@ const StaffOnboardingPage = () => {
       />
       <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#003366 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
 
-      {/* --- TARJETA PRINCIPAL --- */}
       <motion.div 
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -243,19 +183,12 @@ const StaffOnboardingPage = () => {
         
         {/* SIDEBAR */}
         <div className="w-full md:w-80 bg-white/60 border-r border-white/50 p-8 flex flex-col relative">
-          
-          {/* HEADER SIDEBAR */}
           <div className="mb-8 flex flex-col items-center md:items-start">
              <div className="h-12 mb-4 flex items-center justify-center bg-white/50 px-4 py-2 rounded-xl border border-white shadow-sm">
                 <img src={LOGO_URL} alt="L&K Logo" className="h-full object-contain" onError={(e) => { e.target.style.display = 'none'; e.target.parentNode.innerHTML = '<span class="font-bold text-[#003366]">L&K</span>' }} />
              </div>
              <h2 className="text-2xl font-black text-[#003366] tracking-tight">Ficha de Personal</h2>
-             
-             {/* TEMPORIZADOR VISUAL */}
-             <div className={`mt-4 flex items-center gap-2 px-4 py-2 rounded-lg font-mono font-bold text-sm border transition-colors duration-300 ${timeLeft < 60 ? 'bg-red-50 text-red-600 border-red-200 animate-pulse' : 'bg-blue-50 text-[#003366] border-blue-200'}`}>
-                <Clock size={16} />
-                <span>{formatTime(timeLeft)}</span>
-             </div>
+             <p className="text-sm text-slate-500 mt-2 font-medium">Complete su información para finalizar el registro.</p>
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto pr-2 scrollbar-hide">
@@ -292,7 +225,6 @@ const StaffOnboardingPage = () => {
            
            <div className="md:hidden p-4 border-b border-white/50 bg-white/60 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center">
               <span className="font-bold text-[#003366]">Paso {currentStep}</span>
-              <span className={`text-xs font-mono font-bold ${timeLeft < 60 ? 'text-red-500' : 'text-slate-500'}`}>{formatTime(timeLeft)}</span>
            </div>
 
            <div className="flex-1 overflow-y-auto p-6 md:p-12 relative scroll-smooth">
@@ -313,8 +245,6 @@ const StaffOnboardingPage = () => {
               </button>
               
               <div className="flex items-center gap-4">
-                 
-                 {/* BOTÓN SALIR */}
                  <button onClick={() => handleLogoutForce()} className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-red-500 uppercase tracking-wider px-4">
                     <LogOut size={14} /> Salir
                  </button>
@@ -325,24 +255,22 @@ const StaffOnboardingPage = () => {
                     </button>
                  ) : (
                     <>
-                       {/* BOTÓN OMITIR */}
                        <button 
                            type="button" 
-                           onClick={() => handleSubmit(true)} // True = Omitir (skipped: true)
+                           onClick={() => handleSubmit(true)}
                            disabled={loading}
                            className="hidden sm:block px-5 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 hover:text-[#003366] transition-all"
                        >
                            Omitir
                        </button>
 
-                       {/* BOTÓN FINALIZAR (GUARDAR) */}
                        <button 
                           type="button" 
-                          onClick={() => handleSubmit(false)} // False = Guardar (skipped: false)
+                          onClick={() => handleSubmit(false)}
                           disabled={loading || !currentUser} 
                           className={`group flex items-center gap-3 px-8 py-3 rounded-xl font-bold shadow-xl transition-all ${loading ? 'bg-slate-300 cursor-not-allowed text-slate-500' : 'bg-[#f0c419] text-[#003366] hover:shadow-yellow-500/30 hover:scale-[1.02] active:scale-95'}`}
                        >
-                          {loading ? 'Guardando...' : <><Save size={18} /> Finalizar</>}
+                          {loading ? <><Loader2 className="animate-spin" size={18}/> Guardando...</> : <><Save size={18} /> Finalizar</>}
                        </button>
                     </>
                  )}
@@ -355,15 +283,30 @@ const StaffOnboardingPage = () => {
   );
 };
 
-/* --- SUB-COMPONENTES DE FORMULARIO --- */
-
+/* --- PASO 1 CORREGIDO: FECHA DE NACIMIENTO + CELULAR PRINCIPAL --- */
 const StepPersonal = ({ formData, handleChange }) => (
    <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
          <FloatingInput label="Nacionalidad" name="nationality" val={formData.nationality} onChange={handleChange} />
-         <FloatingInput label="Edad" name="age" type="number" val={formData.age} onChange={handleChange} />
+         
+         {/* CAMBIO: INPUT DE FECHA DE NACIMIENTO */}
+         <FloatingInput label="F. Nacimiento" name="birth_date" type="date" val={formData.birth_date} onChange={handleChange} icon={Calendar} />
+         
          <Select label="Sexo" name="gender" val={formData.gender} onChange={handleChange} options={['Masculino', 'Femenino']} />
       </div>
+      
+      {/* CONTACTO PRINCIPAL */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+         <h4 className="text-sm font-bold text-[#003366] uppercase tracking-wider mb-4 border-b pb-2">Contacto Principal</h4>
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+             {/* CAMBIO: CELULAR PRINCIPAL */}
+             <FloatingInput label="Celular Principal" name="phone" type="tel" val={formData.phone} onChange={handleChange} icon={Phone} placeholder="Ej: 999 888 777" />
+             
+             <FloatingInput label="Email Personal" name="personal_email" type="email" val={formData.personal_email} onChange={handleChange} icon={Mail} />
+             <FloatingInput label="Celular Secundario" name="alt_phone" type="tel" val={formData.alt_phone} onChange={handleChange} icon={Phone} />
+         </div>
+      </div>
+
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
          <h4 className="text-sm font-bold text-[#003366] uppercase tracking-wider mb-4 border-b pb-2">Estado Civil y Familia</h4>
          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -382,14 +325,10 @@ const StepPersonal = ({ formData, handleChange }) => (
             <FloatingInput label="Distrito" name="district" val={formData.district} onChange={handleChange} />
          </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-         <FloatingInput label="Celular Extra" name="alt_phone" type="tel" val={formData.alt_phone} onChange={handleChange} icon={Phone} />
-         <FloatingInput label="Email Personal" name="personal_email" type="email" val={formData.personal_email} onChange={handleChange} icon={Mail} />
-         <FloatingInput label="Email Secundario" name="alt_email" type="email" val={formData.alt_email} onChange={handleChange} icon={Mail} />
-      </div>
    </div>
 );
 
+// ... (Resto de componentes auxiliares StepFamily, StepEducation, etc. iguales que antes)
 const StepFamily = ({ formData, handleChange, handleSelection }) => (
    <div className="space-y-8">
       <SectionBox title="Carga Familiar">

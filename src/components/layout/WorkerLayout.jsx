@@ -15,8 +15,8 @@ import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn';
 
 const WorkerLayout = () => {
-  // Extraemos currentUser y loading
-  const { logout, currentUser, isLoading } = useUnifiedAuth();
+  // CORRECCIÓN: Usamos 'loading' (que es lo que devuelve el hook) en lugar de 'isLoading'
+  const { logout, currentUser, loading } = useUnifiedAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -25,11 +25,10 @@ const WorkerLayout = () => {
   const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
   const displayRole = currentUser?.category || 'Construcción Civil';
   
-  // Normalizamos la categoría (todo a minúsculas para comparar fácil)
+  // Normalizamos la categoría
   const userCategory = (currentUser?.category || '').toLowerCase().trim();
 
   // DEFINIMOS QUIÉN TIENE "CONTROL TOTAL"
-  // Si es 'operario' O 'capataz', tiene permisos VIP.
   const hasFullAccess = userCategory === 'operario' || userCategory === 'capataz';
 
   // Configuración del Menú
@@ -69,7 +68,6 @@ const WorkerLayout = () => {
   // Filtramos los items según el rol
   const visibleNavItems = navItems.filter(item => {
     if (item.restricted) {
-      // Si es restringido, solo lo mostramos si tiene Full Access
       return hasFullAccess;
     }
     return true;
@@ -77,34 +75,36 @@ const WorkerLayout = () => {
 
   // --- PROTECCIÓN DE RUTAS (SEGURIDAD) ---
   useEffect(() => {
-    if (!isLoading && currentUser) {
-      // Si el usuario NO tiene acceso total...
+    if (!loading && currentUser) {
       if (!hasFullAccess) {
-        // ... y está intentando entrar a una ruta PROHIBIDA
         const restrictedPaths = ['/worker/bitacora', '/worker/proyecto'];
         const currentPath = location.pathname;
 
-        // Si intenta entrar a bitácora u obra a la fuerza:
         if (restrictedPaths.some(path => currentPath.includes(path))) {
-           navigate('/worker/asistencia'); // Lo mandamos a asistencia
+           navigate('/worker/asistencia');
         }
       }
     }
-  }, [isLoading, currentUser, hasFullAccess, location.pathname, navigate]);
+  }, [loading, currentUser, hasFullAccess, location.pathname, navigate]);
 
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  // --- FUNCIÓN DE LOGOUT MEJORADA ---
+  const handleLogout = async () => {
+    try {
+      await logout(); // Aseguramos que el logout termine
+      navigate('/login', { replace: true }); // Redirigimos y reemplazamos historial
+    } catch (error) {
+      console.error("Error al cerrar sesión:", error);
+      navigate('/login'); // Redirigir de todas formas
+    }
   };
 
-  if (isLoading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center">Cargando...</div>;
+  if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center font-bold text-[#003366]">Cargando panel...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
       
       {/* === 1. SIDEBAR (Solo visible en Computadora) === */}
-      <aside className="hidden md:flex flex-col w-64 bg-[#003366] text-white min-h-screen fixed left-0 top-0 z-50">
+      <aside className="hidden md:flex flex-col w-64 bg-[#003366] text-white min-h-screen fixed left-0 top-0 z-50 shadow-2xl">
         
         {/* HEADER DEL SIDEBAR CON FOTO */}
         <div className="p-6 flex items-center gap-3 border-b border-blue-900 bg-[#002855]">
@@ -135,7 +135,7 @@ const WorkerLayout = () => {
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
                     isActive
-                      ? 'bg-[#f0c419] text-[#003366] font-bold shadow-lg'
+                      ? 'bg-[#f0c419] text-[#003366] font-bold shadow-lg transform scale-105'
                       : 'text-slate-300 hover:bg-white/10 hover:text-white'
                   }`
                 }
@@ -147,39 +147,44 @@ const WorkerLayout = () => {
           })}
         </nav>
 
-        <div className="p-4 border-t border-blue-900">
+        {/* --- BOTÓN DE LOGOUT (Corregido) --- */}
+        <div className="p-4 border-t border-blue-900 bg-[#002855]">
           <button
+            type="button"
             onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-200 hover:bg-red-900/30 hover:text-red-100 transition-all text-sm font-bold"
+            className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-200 hover:bg-red-600 hover:text-white transition-all text-sm font-bold cursor-pointer group"
           >
-            <LogOut size={20} />
+            <LogOut size={20} className="group-hover:rotate-180 transition-transform duration-300" />
             <span>Cerrar Sesión</span>
           </button>
         </div>
       </aside>
 
       {/* === 2. HEADER MOVIL (Solo visible en Celular) === */}
-      <header className="md:hidden bg-[#003366] text-white p-4 sticky top-0 z-40 shadow-md flex justify-between items-center">
+      <header className="md:hidden bg-[#003366] text-white p-4 sticky top-0 z-40 shadow-md flex justify-between items-center safe-area-top">
         <div className="flex items-center gap-2">
            <HardHat size={24} className="text-[#f0c419]" />
            <span className="font-bold text-lg">LYK Obreros</span>
         </div>
-        <button onClick={handleLogout} className="p-2 text-slate-300 active:text-white">
-           <LogOut size={20} />
+        <button 
+          onClick={handleLogout} 
+          className="p-2 text-slate-300 active:text-white active:scale-95 transition-transform"
+          aria-label="Cerrar sesión"
+        >
+           <LogOut size={22} />
         </button>
       </header>
 
       {/* === 3. CONTENIDO PRINCIPAL === */}
-      <main className="flex-1 md:ml-64 p-4 md:p-8 pb-24 md:pb-8 animate-fade-in">
+      <main className="flex-1 md:ml-64 p-4 md:p-8 pb-24 md:pb-8 animate-fade-in relative">
         <Outlet />
         
-        {/* === AQUÍ ESTÁ EL BOTÓN FLOTANTE === */}
-        {/* Solo aparecerá si el obrero dio click en "Omitir" */}
+        {/* === BOTÓN FLOTANTE (Solo si onboarding incompleto) === */}
         <OnboardingFloatingBtn />
       </main>
 
       {/* === 4. MENÚ INFERIOR (Solo visible en Celular) === */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-50 flex justify-around items-center px-2 py-2 pb-safe">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-50 flex justify-around items-center px-2 py-2 pb-safe safe-area-bottom">
         {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
@@ -192,11 +197,11 @@ const WorkerLayout = () => {
               }`}
             >
               <div className={`p-1.5 rounded-full mb-1 transition-all ${
-                 isActive ? 'bg-blue-50 transform -translate-y-1' : ''
+                 isActive ? 'bg-blue-50 transform -translate-y-1 shadow-sm' : ''
               }`}>
                  <Icon size={isActive ? 22 : 20} strokeWidth={isActive ? 2.5 : 2} />
               </div>
-              <span className={`text-[10px] font-bold ${isActive ? 'scale-110' : ''}`}>
+              <span className={`text-[10px] font-bold ${isActive ? 'scale-105' : ''}`}>
                 {item.label}
               </span>
             </NavLink>

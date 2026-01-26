@@ -2,7 +2,6 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import { supabase } from '../services/supabase';
 import bcrypt from 'bcryptjs';
 
-// 1. Creamos el contexto con un valor por defecto para evitar el error "undefined"
 const AuthContext = createContext({
   user: null,
   role: null,
@@ -17,14 +16,16 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Al cargar, verificamos si hay sesión en localStorage (Login Autónomo)
+    // LOGIN AUTÓNOMO: Recuperar sesión al recargar
     const initSession = () => {
       try {
         const storedSession = localStorage.getItem('lyk_session');
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
           if (parsedSession.user && parsedSession.role) {
-            setUser(parsedSession.user);
+            // CORRECCIÓN: Aseguramos que el usuario tenga el rol incrustado
+            const userWithRole = { ...parsedSession.user, role: parsedSession.role };
+            setUser(userWithRole);
             setRole(parsedSession.role);
           }
         }
@@ -40,7 +41,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (identifier, password) => {
-    console.log("Intentando login autónomo para:", identifier);
+    console.log("Intentando login (Staff/Admin) para:", identifier);
     
     // 1. Buscamos en 'employees'
     let { data: emp, error } = await supabase
@@ -51,7 +52,7 @@ export const AuthProvider = ({ children }) => {
 
     if (error) throw new Error('Error de conexión al buscar usuario.');
 
-    // 2. Si no es empleado, buscamos en 'workers'
+    // 2. Si no es empleado, buscamos en 'workers' (Fallback)
     let isWorker = false;
     if (!emp) {
         const { data: wor } = await supabase
@@ -79,22 +80,24 @@ export const AuthProvider = ({ children }) => {
         if (!isValid) throw new Error('Contraseña incorrecta.');
     }
 
-    // 4. Guardar sesión
+    // 4. DEFINIR ROL Y GUARDAR
     const userRole = isWorker ? 'worker' : (emp.role || 'staff');
-    const sessionData = { user: emp, role: userRole };
+    
+    // CORRECCIÓN CLAVE: Inyectamos el rol en el objeto usuario
+    const userWithRole = { ...emp, role: userRole };
+    const sessionData = { user: userWithRole, role: userRole };
 
-    setUser(sessionData.user);
-    setRole(sessionData.role);
+    setUser(userWithRole);
+    setRole(userRole);
     localStorage.setItem('lyk_session', JSON.stringify(sessionData));
 
-    return { user: sessionData.user, role: sessionData.role };
+    return { user: userWithRole, role: userRole };
   };
 
   const logout = async () => {
     setUser(null);
     setRole(null);
     localStorage.removeItem('lyk_session');
-    // Limpieza opcional de supabase auth por si acaso
     await supabase.auth.signOut().catch(() => {}); 
   };
 
@@ -105,7 +108,6 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-// Hook personalizado
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -114,5 +116,4 @@ export const useAuth = () => {
   return context;
 };
 
-// Exportación por defecto para asegurar compatibilidad
 export default AuthProvider;

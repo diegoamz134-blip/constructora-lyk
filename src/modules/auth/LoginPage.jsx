@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-// IMPORTAMOS LOS CONTEXTOS
 import { useAuth } from '../../context/AuthContext';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth'; 
@@ -24,17 +23,20 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Estados para bienvenida
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
 
-  // --- REDIRECCIÓN AUTOMÁTICA CORREGIDA ---
+  // --- REDIRECCIÓN AUTOMÁTICA MEJORADA ---
   useEffect(() => {
     if (!loading && !loginSuccess && currentUser) {
-       console.log("🚀 Usuario detectado:", currentUser.role);
+       console.log("🚀 Usuario detectado:", currentUser);
        
-       // CORRECCIÓN: Aceptamos 'worker' u 'obrero' para enviarlo al panel correcto
-       const isWorker = currentUser.role === 'worker' || currentUser.role === 'obrero';
+       // CORRECCIÓN: Verificamos 'type' (del hook unificado) O 'role' (del contexto)
+       const isWorker = 
+          currentUser.type === 'worker' || 
+          currentUser.role === 'worker' || 
+          currentUser.role === 'obrero';
+
        const targetPath = isWorker ? '/worker/dashboard' : '/dashboard';
        
        navigate(targetPath, { replace: true });
@@ -76,7 +78,7 @@ const LoginPage = () => {
     } catch (err) {
       console.error("Login Error:", err);
       let msg = err.message || 'Error de conexión.';
-      if (msg.includes('PGRST116')) msg = 'Error de datos duplicados. Contacte soporte.';
+      if (msg.includes('PGRST116')) msg = 'Error de datos duplicados.';
       setError(msg);
       setLoading(false);
     }

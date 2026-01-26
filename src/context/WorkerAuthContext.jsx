@@ -10,17 +10,16 @@ export const WorkerAuthProvider = ({ children }) => {
 
   useEffect(() => {
     const initSession = async () => {
-      // 1. Intentamos recuperar la sesión guardada
       const storedSession = localStorage.getItem('lyk_worker_session');
       
       if (storedSession) {
         try {
           const parsedWorker = JSON.parse(storedSession);
           
-          // Cargamos los datos visualmente rápido
-          setWorker(parsedWorker);
+          // CORRECCIÓN: Forzamos el rol en la carga inicial
+          setWorker({ ...parsedWorker, role: 'worker' });
 
-          // 2. REFRESCAMOS LOS DATOS DESDE LA BASE DE DATOS
+          // Refrescamos datos de BD
           const { data: freshData, error } = await supabase
             .from('workers')
             .select('*')
@@ -29,19 +28,18 @@ export const WorkerAuthProvider = ({ children }) => {
 
           if (!error && freshData) {
              if (freshData.status !== 'Activo') {
-                alert("Tu cuenta ha sido desactivada. Contacta a RRHH.");
                 logoutWorker();
              } else {
-                setWorker(freshData);
-                localStorage.setItem('lyk_worker_session', JSON.stringify(freshData));
+                // CORRECCIÓN: Forzamos el rol al actualizar desde BD
+                const workerWithRole = { ...freshData, role: 'worker' };
+                setWorker(workerWithRole);
+                localStorage.setItem('lyk_worker_session', JSON.stringify(workerWithRole));
              }
           } else if (error) {
-             console.warn("Usuario no encontrado en BD, cerrando sesión.");
              logoutWorker();
           }
 
         } catch (error) {
-          console.error("Error al recuperar sesión de obrero:", error);
           localStorage.removeItem('lyk_worker_session');
         }
       }
@@ -62,7 +60,7 @@ export const WorkerAuthProvider = ({ children }) => {
         .single();
 
       if (error || !workerData) {
-        return { success: false, error: 'DNI no encontrado en el sistema.' };
+        return { success: false, error: 'DNI no encontrado.' };
       }
 
       if (workerData.status !== 'Activo') {
@@ -73,7 +71,7 @@ export const WorkerAuthProvider = ({ children }) => {
       try {
          isValidPassword = await bcrypt.compare(password, workerData.password);
       } catch (e) {
-         console.warn("No es un hash válido, probando texto plano...");
+         // Fallback texto plano
       }
 
       if (!isValidPassword && workerData.password === password) {
@@ -84,10 +82,12 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Contraseña incorrecta.' };
       }
 
-      setWorker(workerData);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(workerData));
+      // CORRECCIÓN: Inyectamos el rol antes de guardar
+      const workerWithRole = { ...workerData, role: 'worker' };
+      setWorker(workerWithRole);
+      localStorage.setItem('lyk_worker_session', JSON.stringify(workerWithRole));
       
-      return { success: true, data: workerData };
+      return { success: true, data: workerWithRole };
 
     } catch (err) {
       console.error("Error login worker:", err);
@@ -98,17 +98,12 @@ export const WorkerAuthProvider = ({ children }) => {
   const logoutWorker = () => {
     setWorker(null);
     localStorage.removeItem('lyk_worker_session');
-    // window.location.href = '/login'; 
   };
 
-  // --- NUEVA FUNCIÓN AGREGADA: UPDATE PROFILE ---
   const updateProfile = async (updates) => {
     if (!worker) return false;
 
     try {
-      console.log("Actualizando perfil obrero...", updates);
-
-      // 1. Actualizar en Supabase
       const { data, error } = await supabase
         .from('workers')
         .update(updates)
@@ -116,14 +111,12 @@ export const WorkerAuthProvider = ({ children }) => {
         .select()
         .single();
 
-      if (error) {
-        console.error("Error de Supabase:", error);
-        throw error;
-      }
+      if (error) throw error;
 
-      // 2. Actualizar estado local y localStorage inmediatamente
-      setWorker(data);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(data));
+      // CORRECCIÓN: Mantenemos el rol al actualizar perfil
+      const updatedWorker = { ...data, role: 'worker' };
+      setWorker(updatedWorker);
+      localStorage.setItem('lyk_worker_session', JSON.stringify(updatedWorker));
       
       return true;
     } catch (error) {
@@ -133,7 +126,6 @@ export const WorkerAuthProvider = ({ children }) => {
   };
 
   return (
-    // IMPORTANTE: Agregamos updateProfile al value del Provider
     <WorkerAuthContext.Provider value={{ worker, loginWorker, logoutWorker, loading, updateProfile }}>
       {children}
     </WorkerAuthContext.Provider>

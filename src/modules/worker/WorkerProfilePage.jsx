@@ -5,11 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   User, MapPin, CreditCard, Briefcase, Phone, 
   GraduationCap, ShieldAlert, Save, Edit2, 
-  Loader2, Ruler, Heart, Camera
+  Loader2, Ruler, Heart, Camera, FileDown // <--- Importamos FileDown
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import imageCompression from 'browser-image-compression';
+// --- IMPORTAMOS EL NUEVO GENERADOR ---
+import { generateWorkerPDF } from '../../utils/workerPdfGenerator';
 
 const WorkerProfilePage = () => {
   const { worker, loading, updateProfile } = useWorkerAuth();
@@ -19,6 +21,7 @@ const WorkerProfilePage = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false); // <--- Nuevo estado PDF
   const [activeTab, setActiveTab] = useState("personal");
 
   // Estado del Formulario y Avatar
@@ -33,25 +36,19 @@ const WorkerProfilePage = () => {
   }, [worker]);
 
   const initializeFormData = () => {
-    // Intentamos obtener nombres separados si existen, sino usamos la lógica de split
     let firstName = worker.first_name || worker.nombres || '';
     let lastName = worker.last_name || worker.apellidos || '';
 
-    // Si no hay nombres separados, intentamos separar el full_name
     if ((!firstName || !lastName) && worker.full_name) {
         const parts = worker.full_name.trim().split(' ');
         if (parts.length >= 1) {
              if (parts.length > 2) {
-                 // Si hay más de 2 palabras (ej: Juan Carlos Perez Lopez)
-                 // Asumimos las 2 últimas son apellidos
                  lastName = parts.slice(-2).join(' ');
                  firstName = parts.slice(0, -2).join(' ');
              } else if (parts.length === 2) {
-                 // Ej: Juan Perez
                  firstName = parts[0];
                  lastName = parts[1];
              } else {
-                 // Solo una palabra
                  firstName = parts[0];
              }
         }
@@ -117,7 +114,6 @@ const WorkerProfilePage = () => {
       });
   }
 
-  // --- LÓGICA DE SUBIDA DE FOTO ---
   const handlePhotoUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -172,24 +168,17 @@ const WorkerProfilePage = () => {
     }
   };
 
-  // --- LÓGICA DE GUARDADO SEGURA ---
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      // 1. CONSTRUIR PAYLOAD LIMPIO
-      // Combinamos first_name y last_name en full_name porque la BD no tiene columnas separadas
       const fullNameCombined = `${formData.first_name} ${formData.last_name}`.trim();
-      
       const payload = {
           full_name: fullNameCombined,
           phone: formData.phone,
           email: formData.email,
           details: formData.details
-          // NOTA: NO enviamos 'first_name', 'last_name', 'nombres' ni 'apellidos' 
-          // para evitar errores de columna no encontrada en Supabase.
       };
 
-      // 2. ENVIAR A SUPABASE
       const success = await updateProfile(payload);
       
       if (success) {
@@ -214,6 +203,26 @@ const WorkerProfilePage = () => {
     }
   };
 
+  // --- FUNCIÓN PARA DESCARGAR PDF ---
+  const handleDownloadPDF = async () => {
+    setGeneratingPdf(true);
+    try {
+        // Combinamos datos actuales de BD + los que están en edición (formData) para que salga lo más reciente
+        const workerDataForPdf = {
+            ...worker,
+            ...formData, // Sobrescribimos con lo que se ve en pantalla
+            // Aseguramos que full_name esté correcto para el PDF
+            full_name: `${formData.first_name} ${formData.last_name}`.trim()
+        };
+        await generateWorkerPDF(workerDataForPdf);
+    } catch (error) {
+        console.error("Error generando PDF:", error);
+        Swal.fire('Error', 'No se pudo generar el PDF.', 'error');
+    } finally {
+        setGeneratingPdf(false);
+    }
+  };
+
   if (loading || !worker || !formData) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
@@ -233,6 +242,17 @@ const WorkerProfilePage = () => {
          </div>
          
          <div className="flex items-center gap-3 self-end md:self-auto">
+             
+             {/* --- BOTÓN DE DESCARGA PDF --- */}
+             <button 
+                onClick={handleDownloadPDF} 
+                disabled={generatingPdf || isEditing}
+                title="Descargar Ficha en PDF"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+             >
+                {generatingPdf ? <Loader2 className="animate-spin" size={20}/> : <FileDown size={20} />}
+             </button>
+
              <button 
                 onClick={() => isEditing ? handleSave() : setIsEditing(true)} 
                 disabled={isSaving || uploadingPhoto} 
