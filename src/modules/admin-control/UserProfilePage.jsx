@@ -310,17 +310,9 @@ const UserProfilePage = () => {
                  </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
                     <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditing} />
-                    
-                    {/* FECHA DE NACIMIENTO */}
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
-                    
-                    {/* TELÉFONO PRINCIPAL */}
                     <Field label="Celular Principal" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditing} />
-                    
-                    {/* CELULAR SECUNDARIO (ONBOARDING) */}
                     <Field label="Celular Secundario" name="alt_phone" value={ob.alt_phone} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
-
-                    {/* EMAILS */}
                     <Field label="Email Corporativo" name="email" value={profile.email} onChange={handleChange} isEditing={isEditing} type="email" />
                     <Field label="Email Personal" name="personal_email" value={ob.personal_email} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="email" />
                  </div>
@@ -366,12 +358,36 @@ const UserProfilePage = () => {
                         <Field label="Cónyuge" name="spouse_name" value={ob.spouse_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Hijos/Dependientes" name="has_dependents" value={ob.has_dependents} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     </div>
-                    <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                        <h4 className="text-xs font-bold text-red-800 uppercase mb-3">Contacto de Emergencia</h4>
-                        <div className="flex gap-4">
-                            <Field label="Nombre" name="emergency_contact_name" value={ob.emergency_contact_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
-                            <Field label="Teléfono" name="emergency_contact_phone" value={ob.emergency_contact_phone} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+
+                    {/* LISTA DE HIJOS */}
+                    {ob.children && ob.children.length > 0 && (
+                        <div className="mb-6 bg-slate-50 p-4 rounded-xl">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Detalle Hijos</h4>
+                            {ob.children.map((child, idx) => (
+                                <div key={idx} className="flex justify-between items-center text-sm py-1 border-b border-slate-100 last:border-0">
+                                    <span>{child.name}</span>
+                                    <span className="font-bold text-slate-600">{child.age} años</span>
+                                </div>
+                            ))}
                         </div>
+                    )}
+
+                    {/* LISTA DE EMERGENCIAS */}
+                    <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+                        <h4 className="text-xs font-bold text-red-800 uppercase mb-3">Contactos de Emergencia</h4>
+                        {ob.emergency_contacts && ob.emergency_contacts.length > 0 ? (
+                            ob.emergency_contacts.map((contact, idx) => (
+                                <div key={idx} className="mb-2 pb-2 border-b border-red-100 last:border-0 last:mb-0 last:pb-0">
+                                    <p className="font-bold text-slate-800 text-sm">{contact.name}</p>
+                                    <div className="flex gap-4 text-xs text-slate-600">
+                                        <span>Relación: {contact.relationship}</span>
+                                        <span>Tel: {contact.phone}</span>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-xs text-red-400 italic">Sin contactos registrados.</p>
+                        )}
                     </div>
                 </div>
 
@@ -394,6 +410,20 @@ const UserProfilePage = () => {
                         <Field label="Institución" name="institution" value={ob.institution} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Año Egreso" name="grad_year" value={ob.grad_year} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     </div>
+                    {/* LISTA CURSOS */}
+                    {ob.additional_courses && ob.additional_courses.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-slate-100">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Cursos Adicionales</h4>
+                            <ul className="space-y-1">
+                                {ob.additional_courses.map((course, idx) => (
+                                    <li key={idx} className="text-sm text-slate-700 flex justify-between">
+                                        <span>• {course.name}</span>
+                                        <span className="text-slate-400 text-xs">{course.date}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </div>
 
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
@@ -406,8 +436,18 @@ const UserProfilePage = () => {
                                     <Field label="Cargo" name="position" value={exp.position} onChange={e => handleChange(e, 'work_experience', idx, 'position')} isEditing={isEditing} />
                                     <Field label="Inicio" name="start" value={exp.start} onChange={e => handleChange(e, 'work_experience', idx, 'start')} isEditing={isEditing} type="date" />
                                     <Field label="Fin" name="end" value={exp.end} onChange={e => handleChange(e, 'work_experience', idx, 'end')} isEditing={isEditing} type="date" />
-                                    <div className="md:col-span-2">
-                                        <Field label="Funciones" name="functions" value={exp.functions} onChange={e => handleChange(e, 'work_experience', idx, 'functions')} isEditing={isEditing} />
+                                    
+                                    <div className="md:col-span-2 mt-2">
+                                        <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Funciones</label>
+                                        {Array.isArray(exp.functions) ? (
+                                            <ul className="list-disc pl-4 mt-1 text-sm text-slate-700 space-y-1">
+                                                {exp.functions.map((func, fIdx) => (
+                                                    <li key={fIdx}>{func}</li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <p className="text-sm text-slate-700">{exp.functions || '-'}</p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
