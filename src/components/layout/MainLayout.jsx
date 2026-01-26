@@ -6,12 +6,12 @@ import {
   LogOut, Briefcase, Bell, ChevronDown, FolderOpen,
   FileSpreadsheet, Menu, X, 
   DollarSign, ClipboardCheck,
-  Truck, Wallet, ShieldCheck, Landmark 
+  Truck, Wallet, ShieldCheck, Landmark,
+  CircleUser, BadgeCheck
 } from 'lucide-react';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
-
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
 
 // --- CONFIGURACIÓN DE MENÚ ---
@@ -22,8 +22,7 @@ const navItems = [
     icon: LayoutDashboard, 
     label: 'Dashboard',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'contador', 'analista_contable', 'asistente_contabilidad',
       'administrador', 'asistente_administrativo',
       'servicios_generales', 'transportista', 'personal_limpieza',
@@ -43,8 +42,7 @@ const navItems = [
     icon: Landmark, 
     label: 'Contabilidad',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'asistente_contabilidad',
       'administrador',
@@ -59,8 +57,7 @@ const navItems = [
     icon: Briefcase,
     label: 'Administración',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'administrador',
       'asistente_administrativo',
@@ -75,8 +72,7 @@ const navItems = [
     icon: Truck,
     label: 'Logística',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'administrador',
       'asistente_logistica', 'encargado_almacen',
@@ -90,8 +86,7 @@ const navItems = [
     label: 'Recursos Humanos', 
     icon: Users,
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'contador', 'analista_contable',
       'administrador',
       'jefe_rrhh', 
@@ -113,8 +108,7 @@ const navItems = [
     icon: Wallet,
     label: 'Tesorería',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'administrador',
       'jefe_rrhh', 
       'tesorera',
@@ -127,8 +121,7 @@ const navItems = [
     label: 'Ejecución de Obras', 
     icon: Building2, 
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
       'residente_obra', 'encargado_obra',
@@ -147,8 +140,7 @@ const navItems = [
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
       'jefe_licitaciones'
@@ -161,8 +153,7 @@ const navItems = [
     icon: ShieldCheck,
     label: 'SSOMA',
     allowed: [
-      'admin', 
-      'gerente_general', 'gerente_admin_finanzas',
+      'gerente_admin_finanzas',
       'jefe_rrhh', 
       'gerente_proyectos', 'coordinador_proyectos',
       'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos'
@@ -174,30 +165,23 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // CORRECCIÓN 1: Eliminamos 'role' del destructuring porque NO existe ahí
   const { currentUser, logout, isLoading } = useUnifiedAuth();
   
-  // CORRECCIÓN 2: Leemos el rol directamente del usuario actual
-  // Si currentUser existe y tiene rol, lo usamos. Si no, fallback a 'staff'.
-  const currentRole = currentUser?.role || 'staff'; 
+  // --- LÓGICA ROBUSTA DE ROL ---
+  const rawRole = currentUser?.role || currentUser?.position || 'staff';
+  const currentRole = rawRole.toLowerCase().replace(/ /g, '_');
+
+  // Super usuarios ven todo
+  const isSuperUser = ['admin', 'gerencia_general'].includes(currentRole);
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
-  // Datos del Usuario
-  const displayName = currentUser?.user_metadata?.full_name || 
-                      currentUser?.full_name || 
-                      currentUser?.email?.split('@')[0] || 
-                      'Usuario';
+  const displayName = currentUser?.full_name || currentUser?.email?.split('@')[0] || 'Usuario';
+  const displayPhoto = currentUser?.avatar_url || null;
   
-  const displayPhoto = currentUser?.photo_url || currentUser?.avatar_url || null;
-
-  const initials = displayName
-    .split(' ')
-    .map(n => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+  // Iniciales para el avatar si no hay foto
+  const initials = displayName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
   const [openMenus, setOpenMenus] = useState({
     'Recursos Humanos': false, 
@@ -220,6 +204,23 @@ const MainLayout = () => {
     }, 1000);
   };
 
+  // --- FUNCIÓN PARA MOSTRAR EL ROL BONITO ---
+  const formatRoleName = (roleKey) => {
+    const roles = {
+        'admin': 'Administrador del Sistema',
+        'gerencia_general': 'Gerencia General',
+        'gerente_admin_finanzas': 'Gerencia Adm. y Finanzas',
+        'jefe_rrhh': 'Jefatura de RR.HH.',
+        'asistente_rrhh': 'Asistente de RR.HH.',
+        'gerente_proyectos': 'Gerencia de Proyectos',
+        'residente_obra': 'Residente de Obra',
+        'jefe_ssoma': 'Jefatura SSOMA',
+        'jefe_licitaciones': 'Jefatura Licitaciones',
+        'jefe_calidad': 'Jefatura de Calidad'
+    };
+    return roles[roleKey] || roleKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   const SidebarContent = () => (
     <>
       <div className="p-6 flex justify-center items-center h-20 border-b border-white/5 bg-[#0b1120]">
@@ -228,12 +229,11 @@ const MainLayout = () => {
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item, index) => {
-          const allowedRoles = item.allowed || [];
-          
-          // Debugging temporal (opcional)
-          // console.log(`Menu ${item.label}: Current (${currentRole}) included?`, allowedRoles.includes(currentRole));
-
-          if (!allowedRoles.includes(currentRole)) return null;
+          if (!isSuperUser) {
+             const allowedRoles = item.allowed || [];
+             const normalizedAllowed = allowedRoles.map(r => r.toLowerCase());
+             if (!normalizedAllowed.includes(currentRole)) return null;
+          }
 
           if (item.children) {
             const isOpen = openMenus[item.label];
@@ -301,22 +301,50 @@ const MainLayout = () => {
         })}
       </nav>
 
-      <div className="p-4 border-t border-white/5 bg-[#0b1120]">
-         {['admin', 'gerencia_general', 'gerente_proyectos', 'coordinador_proyectos'].includes(currentRole) && (
-             <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 mb-2">
-                <Settings size={20} /> <span className="text-sm font-medium">Configuración</span>
-             </NavLink>
-         )}
-         <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl">
-            <LogOut size={20} /> <span className="text-sm font-medium">Cerrar Sesión</span>
-         </button>
+      {/* --- FOOTER DEL SIDEBAR MEJORADO --- */}
+      <div className="border-t border-white/5 bg-[#050912] p-4">
+         
+         {/* TARJETA DE USUARIO */}
+         <div className="flex items-center gap-3 mb-4 px-2">
+            <div className="shrink-0">
+               {displayPhoto ? (
+                  <img src={displayPhoto} alt="Perfil" className="w-10 h-10 rounded-full object-cover border-2 border-slate-700" />
+               ) : (
+                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold border-2 border-[#0b1120] shadow-lg">
+                     {initials}
+                  </div>
+               )}
+            </div>
+            <div className="overflow-hidden">
+               <p className="text-white text-xs font-bold truncate leading-tight mb-0.5">{displayName}</p>
+               <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_5px_rgba(16,185,129,0.5)]"></div>
+                  <span className="text-[9px] font-medium text-slate-400 uppercase tracking-wider truncate">
+                     {formatRoleName(currentRole)}
+                  </span>
+               </div>
+            </div>
+         </div>
+
+         {/* BOTONES DE ACCIÓN */}
+         <div className="space-y-1">
+            {isSuperUser && (
+                <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-2.5 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 w-full">
+                    <Settings size={18} /> <span className="text-xs font-bold">Configuración</span>
+                </NavLink>
+            )}
+            
+            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors rounded-xl">
+                <LogOut size={18} /> <span className="text-xs font-bold">Cerrar Sesión</span>
+            </button>
+         </div>
       </div>
     </>
   );
 
   const getPageTitle = () => {
     if (location.pathname.includes('/dashboard')) return 'Dashboard General';
-    // ... resto de títulos igual
+    // ... resto
     return 'Constructora L&K';
   };
 
@@ -389,9 +417,8 @@ const MainLayout = () => {
 
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
-                  <p className="text-[11px] text-slate-400 font-medium capitalize">
-                     {/* CORRECCIÓN: Mostramos el rol real */}
-                     {currentRole.replace(/_/g, ' ').replace('oficina', 'Of.')}
+                  <p className="text-[11px] text-slate-400 font-medium capitalize truncate max-w-[120px]">
+                     {formatRoleName(currentRole)}
                   </p>
                 </div>
                 <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors hidden md:block" />
