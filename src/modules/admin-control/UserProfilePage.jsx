@@ -125,6 +125,20 @@ const UserProfilePage = () => {
     }
   };
 
+  const handleArrayChange = (value, section, index, subIndex) => {
+      const list = [...(profile.onboarding_data[section] || [])];
+      if (!list[index]) return;
+      
+      const subList = [...(list[index].functions || [])];
+      subList[subIndex] = value;
+      list[index].functions = subList;
+
+      setProfile(prev => ({
+          ...prev,
+          onboarding_data: { ...prev.onboarding_data, [section]: list }
+      }));
+  };
+
   const handleSaveAll = async () => {
     setSaving(true);
     try {
@@ -310,9 +324,16 @@ const UserProfilePage = () => {
                  </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
                     <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditing} />
+                    
+                    {/* FECHA DE NACIMIENTO */}
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
+                    
+                    {/* AGREGADO: SEXO */}
+                    <Field label="Sexo" name="gender" value={ob.gender} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+
                     <Field label="Celular Principal" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditing} />
                     <Field label="Celular Secundario" name="alt_phone" value={ob.alt_phone} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+                    
                     <Field label="Email Corporativo" name="email" value={profile.email} onChange={handleChange} isEditing={isEditing} type="email" />
                     <Field label="Email Personal" name="personal_email" value={ob.personal_email} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="email" />
                  </div>
@@ -356,7 +377,8 @@ const UserProfilePage = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <Field label="Estado Civil" name="civil_status" value={ob.civil_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Cónyuge" name="spouse_name" value={ob.spouse_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
-                        <Field label="Hijos/Dependientes" name="has_dependents" value={ob.has_dependents} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+                        <Field label="Nombre Padre" name="father_name" value={ob.father_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+                        <Field label="Nombre Madre" name="mother_name" value={ob.mother_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     </div>
 
                     {/* LISTA DE HIJOS */}
@@ -410,7 +432,8 @@ const UserProfilePage = () => {
                         <Field label="Institución" name="institution" value={ob.institution} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Año Egreso" name="grad_year" value={ob.grad_year} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     </div>
-                    {/* LISTA CURSOS */}
+                    
+                    {/* VISUALIZAR CURSOS */}
                     {ob.additional_courses && ob.additional_courses.length > 0 && (
                         <div className="mt-4 pt-4 border-t border-slate-100">
                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Cursos Adicionales</h4>
@@ -437,14 +460,28 @@ const UserProfilePage = () => {
                                     <Field label="Inicio" name="start" value={exp.start} onChange={e => handleChange(e, 'work_experience', idx, 'start')} isEditing={isEditing} type="date" />
                                     <Field label="Fin" name="end" value={exp.end} onChange={e => handleChange(e, 'work_experience', idx, 'end')} isEditing={isEditing} type="date" />
                                     
+                                    {/* VISUALIZAR FUNCIONES */}
                                     <div className="md:col-span-2 mt-2">
                                         <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Funciones</label>
                                         {Array.isArray(exp.functions) ? (
-                                            <ul className="list-disc pl-4 mt-1 text-sm text-slate-700 space-y-1">
-                                                {exp.functions.map((func, fIdx) => (
-                                                    <li key={fIdx}>{func}</li>
-                                                ))}
-                                            </ul>
+                                            isEditing ? (
+                                                <div className="space-y-1 mt-1">
+                                                    {exp.functions.map((func, fIdx) => (
+                                                        <input 
+                                                            key={fIdx}
+                                                            className="w-full text-sm bg-white border border-slate-200 rounded px-2 py-1"
+                                                            value={func}
+                                                            onChange={(e) => handleArrayChange(e.target.value, 'work_experience', idx, fIdx)}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <ul className="list-disc pl-4 mt-1 text-sm text-slate-700 space-y-1">
+                                                    {exp.functions.map((func, fIdx) => (
+                                                        <li key={fIdx}>{func}</li>
+                                                    ))}
+                                                </ul>
+                                            )
                                         ) : (
                                             <p className="text-sm text-slate-700">{exp.functions || '-'}</p>
                                         )}
