@@ -4,7 +4,7 @@ import {
   X, Save, User, Briefcase, Loader2, 
   BookOpen, ChevronDown, Check,
   Calendar, Trash2, PieChart, Hash,
-  Lock, Eye, EyeOff, MapPin, Phone,
+  Lock, Eye, EyeOff, Phone,
   FileText, UploadCloud, CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
@@ -198,7 +198,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
         
         start_date: formData.start_date,
         category: formData.category,
-        project_assigned: formData.office || 'Sin asignar',
+        project_assigned: formData.office || 'Sin asignar', // Mantiene la lógica
         
         pension_system: formData.afp,
         commission_type: (formData.afp !== 'ONP' && formData.afp !== 'Sin Régimen') ? formData.commission_type : null,
@@ -307,7 +307,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     </div>
                   </div>
 
-                  {/* FECHA INGRESO Y CATEGORÍA (ARREGLADA) */}
+                  {/* FECHA INGRESO Y CATEGORÍA */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase">Fecha de Ingreso</label>
@@ -325,7 +325,6 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                             </button>
                             <AnimatePresence>
                                 {showCategoryMenu && (
-                                    // AQUI ESTA EL ARREGLO: top-full y mt-1 para que baje ordenado
                                     <motion.div 
                                         variants={dropdownVariants} 
                                         initial="hidden" 
@@ -351,18 +350,8 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     </div>
                   </div>
 
-                  {/* OFICINA Y RÉGIMEN PENSIONARIO */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* OFICINA (PROYECTO) */}
-                      <div className="space-y-1">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Oficina (Obra/Proyecto)</label>
-                          <div className="relative h-[48px]">
-                              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                              <input type="text" name="office" value={formData.office} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="Nombre de la Obra"/>
-                          </div>
-                      </div>
-
-                      {/* RÉGIMEN PENSIONARIO */}
+                  {/* RÉGIMEN PENSIONARIO (MODIFICADO: Sin Oficina, ocupando ancho completo) */}
+                  <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-1 relative" ref={afpRef}>
                           <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
                           <button type="button" onClick={() => setShowAfpMenu(!showAfpMenu)} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium flex items-center justify-between text-slate-700">
