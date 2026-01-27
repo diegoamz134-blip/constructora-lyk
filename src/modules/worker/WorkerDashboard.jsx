@@ -1,12 +1,33 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { 
   Clock, ChevronRight, MessageSquare, 
-  MapPin, CreditCard, Loader2, HardHat
+  MapPin, Loader2, HardHat, User
 } from 'lucide-react';
-import { Avatar } from "@heroui/react"; 
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
-import logoFull from '../../assets/images/logo-lk-full.png'; // Asegúrate que la ruta sea correcta
+import logoFull from '../../assets/images/logo-lk-full.png';
+
+// --- CONFIGURACIÓN DE ANIMACIONES ---
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.15,
+      delayChildren: 0.1
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { 
+    opacity: 1, 
+    y: 0,
+    transition: { type: "spring", stiffness: 300, damping: 24 }
+  }
+};
 
 const WorkerDashboard = () => {
   const { worker } = useWorkerAuth();
@@ -24,38 +45,81 @@ const WorkerDashboard = () => {
     return `S/. ${Number(amount).toFixed(2)}`;
   };
 
+  // Función segura para obtener iniciales
+  const getInitials = () => {
+    const name = worker.first_name || worker.full_name || '';
+    const lastName = worker.paternal_surname || '';
+    
+    if (name && lastName) {
+        return `${name[0]}${lastName[0]}`.toUpperCase();
+    }
+    // Fallback si solo hay un nombre completo string
+    return (name.split(' ').map(n => n[0]).slice(0, 2).join('') || 'WK').toUpperCase();
+  };
+
   return (
-    <div className="p-6 space-y-8 min-h-full"> 
+    <motion.div 
+      className="p-6 space-y-8 min-h-full"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    > 
       
-      {/* 1. HEADER: LOGO Y PERFIL */}
-      <div className="flex justify-between items-center pt-4">
+      {/* 1. HEADER: LOGO Y FOTO DE PERFIL */}
+      <motion.div variants={itemVariants} className="flex justify-between items-center pt-4">
+        {/* Logo de la empresa */}
         <img src={logoFull} alt="L&K" className="h-10 w-auto object-contain opacity-90" />
         
-        <button 
+        {/* BOTÓN DE PERFIL (IMPLEMENTACIÓN MANUAL ROBUSTA) */}
+        <motion.button 
+          whileTap={{ scale: 0.9 }}
           onClick={() => goTo('/worker/profile')} 
-          className="transition-transform active:scale-95 focus:outline-none"
+          className="focus:outline-none relative"
         >
-          <Avatar 
-            name={worker.full_name} 
-            className="w-10 h-10 text-sm font-bold bg-[#003366] text-white ring-2 ring-slate-100 shadow-sm" 
-          />
-        </button>
-      </div>
+          <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-100 shadow-md bg-[#003366] flex items-center justify-center text-white font-bold text-sm relative z-10">
+             {worker.avatar_url ? (
+                <>
+                  {/* Imagen de fondo (fallback de iniciales por si la imagen tarda) */}
+                  <span className="absolute inset-0 flex items-center justify-center bg-[#003366] z-0">
+                    {getInitials()}
+                  </span>
+                  {/* Imagen real */}
+                  <img 
+                    src={worker.avatar_url} 
+                    alt="Perfil" 
+                    className="w-full h-full object-cover relative z-10"
+                    onError={(e) => { e.target.style.display = 'none'; }} // Si falla, se ve el span de abajo
+                  />
+                </>
+             ) : (
+                // Si no hay URL, mostramos iniciales directamente
+                <span>{getInitials()}</span>
+             )}
+          </div>
+          
+          {/* Indicador de estado (opcional, adorno visual) */}
+          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full z-20"></div>
+        </motion.button>
+      </motion.div>
 
       {/* 2. SALUDO */}
-      <div>
+      <motion.div variants={itemVariants}>
         <h1 className="text-3xl font-bold text-slate-800 tracking-tight">
           Hola, <span className="text-[#003366]">{worker.first_name || 'Compañero'}</span>
         </h1>
         <p className="text-slate-500 text-sm font-medium mt-1">
           ¡Que tengas una excelente jornada!
         </p>
-      </div>
+      </motion.div>
 
       {/* 3. TARJETA DE ESTADO (INFO LABORAL) */}
-      <div className="bg-white rounded-[2rem] p-6 shadow-xl shadow-slate-200/50 border border-slate-100 relative overflow-hidden group">
-        {/* Decoración de fondo */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 group-hover:bg-blue-100 transition-colors"></div>
+      <motion.div 
+        variants={itemVariants}
+        whileHover={{ scale: 1.02 }}
+        className="bg-white rounded-[2rem] p-6 shadow-xl shadow-slate-200/50 border border-slate-100 relative overflow-hidden group"
+      >
+        {/* Decoración de fondo animada */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 group-hover:bg-blue-100 transition-colors duration-500"></div>
         
         <div className="relative z-10">
             <div className="flex justify-between items-start mb-6">
@@ -83,20 +147,23 @@ const WorkerDashboard = () => {
                 </div>
             </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* 4. ACCESOS RÁPIDOS (GRID LIMPIO) */}
-      <div>
+      <motion.div variants={itemVariants}>
         <h3 className="text-sm font-bold text-slate-400 uppercase mb-4 px-1 tracking-wider">Menú Principal</h3>
 
         <div className="grid grid-cols-2 gap-4">
           
           {/* BOTÓN ASISTENCIA (PRINCIPAL) */}
-          <div 
+          <motion.div 
+            variants={itemVariants}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
             onClick={() => goTo('/worker/asistencia')} 
-            className="col-span-2 bg-[#003366] p-5 rounded-[1.8rem] text-white shadow-lg shadow-blue-900/20 cursor-pointer active:scale-[0.98] transition-all relative overflow-hidden"
+            className="col-span-2 bg-[#003366] p-5 rounded-[1.8rem] text-white shadow-lg shadow-blue-900/20 cursor-pointer relative overflow-hidden group"
           >
-            <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-4 translate-y-4">
+            <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-4 translate-y-4 group-hover:scale-110 transition-transform duration-500">
                <Clock size={100} />
             </div>
             <div className="relative z-10 flex justify-between items-center">
@@ -104,36 +171,48 @@ const WorkerDashboard = () => {
                   <h4 className="text-lg font-bold mb-1">Marcar Asistencia</h4>
                   <p className="text-blue-200 text-xs">Entrada y Salida con GPS</p>
                </div>
-               <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm">
+               <div className="bg-white/20 p-2 rounded-full backdrop-blur-sm group-hover:bg-white/30 transition-colors">
                   <ChevronRight size={20}/>
                </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* BOTÓN BITÁCORA (CONDICIONAL) */}
           {canAccessLog && (
-            <div onClick={() => goTo('/worker/bitacora')} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm cursor-pointer active:scale-95 transition-all flex flex-col justify-between h-32 hover:border-blue-200">
+            <motion.div 
+              variants={itemVariants}
+              whileHover={{ y: -5 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => goTo('/worker/bitacora')} 
+              className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm cursor-pointer flex flex-col justify-between h-32 hover:border-blue-200 hover:shadow-md transition-all"
+            >
               <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl w-fit"><MessageSquare size={22} /></div>
               <div>
                 <h4 className="font-bold text-slate-800">Bitácora</h4>
                 <p className="text-slate-400 text-[10px] font-medium">Reportar Incidente</p>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* BOTÓN PROYECTO */}
-          <div onClick={() => goTo('/worker/proyecto')} className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm cursor-pointer active:scale-95 transition-all flex flex-col justify-between h-32 hover:border-blue-200">
+          <motion.div 
+            variants={itemVariants}
+            whileHover={{ y: -5 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => goTo('/worker/proyecto')} 
+            className="bg-white p-5 rounded-[1.5rem] border border-slate-100 shadow-sm cursor-pointer flex flex-col justify-between h-32 hover:border-blue-200 hover:shadow-md transition-all"
+          >
             <div className="p-3 bg-orange-50 text-orange-600 rounded-2xl w-fit"><MapPin size={22} /></div>
             <div>
               <h4 className="font-bold text-slate-800">Mi Obra</h4>
               <p className="text-slate-400 text-[10px] font-medium">Ver Ubicación</p>
             </div>
-          </div>
+          </motion.div>
 
         </div>
-      </div>
+      </motion.div>
 
-    </div>
+    </motion.div>
   );
 };
 
