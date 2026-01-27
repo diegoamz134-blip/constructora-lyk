@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, MapPin, Building2, Calendar, DollarSign, Activity, AlertCircle } from 'lucide-react';
+import { X, Save, MapPin, Building2, DollarSign, Activity, AlertCircle } from 'lucide-react';
 import { supabase } from '../../../services/supabase';
 
 // --- IMPORTACIONES DE MAPA (Leaflet) ---
@@ -23,10 +23,17 @@ L.Marker.prototype.options.icon = DefaultIcon;
 const LocationPicker = ({ position, onLocationSelect }) => {
   const map = useMapEvents({
     click(e) {
-      onLocationSelect(e.latlng); // Al hacer clic, enviamos coordenadas al padre
-      map.flyTo(e.latlng, map.getZoom()); // Animación suave hacia el punto
+      onLocationSelect(e.latlng);
+      map.flyTo(e.latlng, map.getZoom());
     },
   });
+
+  // Si cambiamos de proyecto y la posición cambia, centramos el mapa ahí
+  useEffect(() => {
+    if (position) {
+      map.flyTo(position, map.getZoom());
+    }
+  }, [position, map]);
 
   return position ? (
     <Marker position={position}>
@@ -35,43 +42,59 @@ const LocationPicker = ({ position, onLocationSelect }) => {
   ) : null;
 };
 
-const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
+const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
-  // Coordenadas por defecto (Lima, Perú) para centrar el mapa inicial
+  // Coordenadas por defecto (Lima, Perú)
   const defaultCenter = [-12.046374, -77.042793]; 
 
   const [formData, setFormData] = useState({
     name: '',
     project_code: '',
-    location: '', // Dirección escrita
-    latitude: '', // Coordenada Lat
-    longitude: '', // Coordenada Lng
+    location: '',
+    latitude: '',
+    longitude: '',
     start_date: '',
     end_date: '',
     budget: '',
-    status: 'En Ejecución' // Valor por defecto
+    status: 'En Ejecución'
   });
 
-  // Limpiar formulario al abrir/cerrar
+  // EFECTO: Cargar datos al abrir el modal
   useEffect(() => {
     if (isOpen) {
       setErrorMsg('');
-      setFormData({
-        name: '', project_code: '', location: '',
-        latitude: '', longitude: '',
-        start_date: '', end_date: '', budget: '', status: 'En Ejecución'
-      });
+      
+      if (projectToEdit) {
+        // MODO EDICIÓN: Cargar datos del proyecto existente
+        setFormData({
+          name: projectToEdit.name || '',
+          project_code: projectToEdit.project_code || '',
+          location: projectToEdit.location || '',
+          latitude: projectToEdit.latitude || '',
+          longitude: projectToEdit.longitude || '',
+          start_date: projectToEdit.start_date || '',
+          end_date: projectToEdit.end_date || '',
+          budget: projectToEdit.budget || '',
+          status: projectToEdit.status || 'En Ejecución'
+        });
+      } else {
+        // MODO CREACIÓN: Limpiar formulario
+        setFormData({
+          name: '', project_code: '', location: '',
+          latitude: '', longitude: '',
+          start_date: '', end_date: '', budget: '', status: 'En Ejecución'
+        });
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, projectToEdit]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // Función para manejar la selección en el mapa
   const handleMapClick = (latlng) => {
     setFormData(prev => ({
       ...prev,
@@ -91,32 +114,47 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
         throw new Error('Por favor completa los campos obligatorios (*)');
       }
 
-      // Validación de Coordenadas para la App del Obrero
+      // Validación de Coordenadas
       if (!formData.latitude || !formData.longitude) {
-        const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas crear el proyecto de todos modos?");
+        const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas continuar?");
         if (!confirmNoGps) {
           setLoading(false);
           return;
         }
       }
 
-      const { error } = await supabase
-        .from('projects')
-        .insert([{
-          name: formData.name,
-          project_code: formData.project_code,
-          location: formData.location,
-          latitude: formData.latitude || null,
-          longitude: formData.longitude || null,
-          start_date: formData.start_date,
-          end_date: formData.end_date || null,
-          budget: formData.budget || 0,
-          status: formData.status
-        }]);
+      // Preparar objeto de datos
+      const projectData = {
+        name: formData.name,
+        project_code: formData.project_code,
+        location: formData.location,
+        latitude: formData.latitude || null,
+        longitude: formData.longitude || null,
+        start_date: formData.start_date,
+        end_date: formData.end_date || null,
+        budget: formData.budget || 0,
+        status: formData.status
+      };
 
-      if (error) throw error;
+      if (projectToEdit) {
+        // --- ACTUALIZAR PROYECTO EXISTENTE ---
+        const { error } = await supabase
+          .from('projects')
+          .update(projectData)
+          .eq('id', projectToEdit.id);
 
-      onProjectCreated();
+        if (error) throw error;
+
+      } else {
+        // --- CREAR NUEVO PROYECTO ---
+        const { error } = await supabase
+          .from('projects')
+          .insert([projectData]);
+
+        if (error) throw error;
+      }
+
+      onProjectCreated(); // Recargar lista en el padre
       onClose();
     } catch (error) {
       console.error(error);
@@ -136,9 +174,12 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
         <div className="flex justify-between items-center p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
           <div>
             <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Building2 className="text-[#003366]" /> Crear Nuevo Proyecto
+              <Building2 className="text-[#003366]" /> 
+              {projectToEdit ? 'Editar Proyecto' : 'Crear Nuevo Proyecto'}
             </h2>
-            <p className="text-slate-500 text-sm">Ingresa los detalles y la ubicación de la obra.</p>
+            <p className="text-slate-500 text-sm">
+              {projectToEdit ? 'Modifica los detalles del proyecto seleccionado.' : 'Ingresa los detalles y la ubicación de la obra.'}
+            </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition">
             <X size={24} />
@@ -222,7 +263,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
 
                <div className="flex-1 min-h-[300px] rounded-xl overflow-hidden border-2 border-slate-200 relative shadow-inner">
                   <MapContainer 
-                    center={defaultCenter} 
+                    center={projectToEdit && projectToEdit.latitude ? [projectToEdit.latitude, projectToEdit.longitude] : defaultCenter} 
                     zoom={13} 
                     style={{ height: "100%", width: "100%" }}
                   >
@@ -256,7 +297,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
               Cancelar
             </button>
             <button type="submit" disabled={loading} className="px-6 py-2.5 bg-[#003366] text-white font-bold rounded-xl hover:bg-blue-900 transition shadow-lg flex items-center gap-2">
-              {loading ? 'Creando...' : <><Save size={18}/> Crear Proyecto</>}
+              {loading ? 'Guardando...' : <><Save size={18}/> {projectToEdit ? 'Actualizar' : 'Crear Proyecto'}</>}
             </button>
           </div>
         </form>
