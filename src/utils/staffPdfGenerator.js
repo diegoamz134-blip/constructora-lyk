@@ -1,7 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 
 // Función auxiliar para fechas
 const formatDate = (dateString) => {
@@ -24,7 +23,7 @@ export const generateStaffPDF = async (profile) => {
   const TEXT_DARK = [40, 40, 40];
 
   // ==========================================
-  // ENCABEZADO (NUEVO DISEÑO)
+  // ENCABEZADO
   // ==========================================
   
   // Línea 1: Recursos Humanos
@@ -53,25 +52,38 @@ export const generateStaffPDF = async (profile) => {
   let currentY = 45;
 
   // ==========================================
-  // 1. DATOS PERSONALES
+  // 1. DATOS PERSONALES, LABORALES Y TALLAS
   // ==========================================
   autoTable(doc, {
     startY: currentY,
-    head: [['DATOS PERSONALES Y CONTACTO']],
+    head: [['DATOS GENERALES Y LABORALES']],
     theme: 'grid',
     headStyles: { fillColor: PRIMARY, fontSize: 10, fontStyle: 'bold', halign: 'center' },
     margin: { left: 14, right: 14 }
   });
 
   const bodyPersonal = [
+    // Fila 1
     ['Nombres y Apellidos:', (profile.full_name || '').toUpperCase(), 'DNI:', profile.document_number || '---'],
+    // Fila 2
     ['Nacionalidad:', ob.nationality || '---', 'F. Nacimiento:', formatDate(profile.birth_date)],
-    ['Estado Civil:', ob.civil_status || '---', 'Sexo:', ob.gender || '---'], // Verificamos Gender aquí
-    ['Cónyuge:', ob.spouse_name || '---', 'Celular Princ.:', profile.phone || '---'],
-    ['Nombre Padre:', ob.father_name || '---', 'Nombre Madre:', ob.mother_name || '---'],
+    // Fila 3: Edad y Sexo
+    ['Edad:', ob.age ? `${ob.age} años` : '---', 'Sexo:', ob.gender || '---'],
+    // Fila 4: Estado Civil y Conyuge
+    ['Estado Civil:', ob.civil_status || '---', 'Cónyuge:', ob.spouse_name || '---'],
+    // Fila 5: Contacto
+    ['Celular Princ.:', profile.phone || '---', 'Celular Sec.:', ob.alt_phone || '---'],
+    // Fila 6: Ubicación
     ['Dirección:', ob.address || '---', 'Distrito:', ob.district || '---'],
     ['Prov/Depto:', `${ob.province || ''} - ${ob.department || ''}`, 'Email Corp:', profile.email || '---'],
-    ['Email Personal:', ob.personal_email || '---', 'Celular Sec.:', ob.alt_phone || '---']
+    
+    // --- DATOS LABORALES AGREGADOS ---
+    ['Cargo:', (profile.role || '---').replace(/_/g, ' ').toUpperCase(), 'F. Ingreso:', formatDate(profile.entry_date)],
+    ['Sistema Pensión:', ob.afp_status || '---', 'Parientes L&K:', ob.has_relatives_in_company || 'NO'],
+
+    // --- TALLAS AGREGADAS ---
+    ['Talla Polo:', ob.shirt_size || '---', 'Talla Pantalón:', ob.pants_size || '---'],
+    ['Talla Calzado:', ob.shoe_size || '---', '', ''] // Celda vacía para completar la fila
   ];
 
   autoTable(doc, {
@@ -117,6 +129,9 @@ export const generateStaffPDF = async (profile) => {
       doc.setTextColor(...PRIMARY);
       doc.setFont("helvetica", "bold");
       doc.text("CONTACTOS DE EMERGENCIA", 14, currentY + 3);
+      
+      // Padres también aquí por si acaso, o arriba. Dejamos los padres en datos personales arriba? 
+      // En el código anterior estaban arriba (Nombre Padre/Madre). Los dejé fuera de esta tabla dinámica para mantener estructura.
 
       autoTable(doc, {
         startY: currentY + 5,
@@ -237,13 +252,13 @@ export const generateStaffPDF = async (profile) => {
   }
 
   // ==========================================
-  // 6. DATOS BANCARIOS Y TALLAS
+  // 6. DATOS BANCARIOS (SOLO BANCO)
   // ==========================================
   if (currentY > 240) { doc.addPage(); currentY = 20; }
 
   autoTable(doc, {
     startY: currentY,
-    head: [['DATOS BANCARIOS Y TALLAS']],
+    head: [['DATOS BANCARIOS']], // Título actualizado
     theme: 'grid',
     headStyles: { fillColor: PRIMARY, fontSize: 10, fontStyle: 'bold', halign: 'center' },
     margin: { left: 14, right: 14 }
@@ -255,9 +270,7 @@ export const generateStaffPDF = async (profile) => {
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     body: [
       ['Banco:', ob.bank_name || '---', 'N° Cuenta:', ob.bbva_account || '---'],
-      ['CCI:', ob.interbank_account || '---', 'AFP/ONP:', ob.afp_status || '---'],
-      ['Talla Polo:', ob.shirt_size || '---', 'Talla Pantalón:', ob.pants_size || '---'],
-      ['Talla Calzado:', ob.shoe_size || '---', 'Parientes L&K:', ob.has_relatives_in_company || 'NO']
+      ['CCI:', ob.interbank_account || '---', 'Observaciones:', ob.bank_observations || '---']
     ],
     columnStyles: { 0: { fontStyle: 'bold', width: 25, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     margin: { left: 14, right: 14 }
@@ -266,10 +279,9 @@ export const generateStaffPDF = async (profile) => {
   currentY = doc.lastAutoTable.finalY + 10;
 
   // ==========================================
-  // CLÁUSULAS Y LEGAL (NUEVA SECCIÓN)
+  // CLÁUSULAS Y LEGAL
   // ==========================================
   
-  // Si queda poco espacio, saltamos página para las cláusulas
   if (currentY > 200) {
       doc.addPage();
       currentY = 20;
@@ -300,7 +312,7 @@ export const generateStaffPDF = async (profile) => {
 
   // Imprimir Cláusulas Internas
   doc.setFont("helvetica", "bold");
-  doc.text(clausesText[0], 14, currentY); // Título cláusulas
+  doc.text(clausesText[0], 14, currentY); 
   currentY += 4;
   
   doc.setFont("helvetica", "normal");
@@ -310,31 +322,27 @@ export const generateStaffPDF = async (profile) => {
           currentY += 2;
           continue;
       }
-      // Verificar si es la línea de la firma (la última) para ponerla en negrita
       if (i === clausesText.length - 1) doc.setFont("helvetica", "bolditalic");
       
       const splitLine = doc.splitTextToSize(line, 180);
       doc.text(splitLine, 14, currentY);
-      currentY += (splitLine.length * 3.5); // Espaciado entre items
+      currentY += (splitLine.length * 3.5);
   }
 
   // ==========================================
   // FIRMA Y HUELLA
   // ==========================================
-  currentY += 25; // Espacio antes de la firma
+  currentY += 25;
 
-  // Verificar si la firma cabe en la página, sino nueva página
   if (currentY + 40 > 290) {
       doc.addPage();
       currentY = 40;
   }
 
-  // Línea de firma
   doc.setDrawColor(0);
   doc.setLineWidth(0.5);
   doc.line(60, currentY, 120, currentY); 
   
-  // Texto firma
   doc.setFontSize(8);
   doc.setTextColor(0);
   doc.setFont("helvetica", "bold");
@@ -344,19 +352,16 @@ export const generateStaffPDF = async (profile) => {
   doc.text(`${(profile.full_name || '').toUpperCase()}`, 90, currentY + 10, { align: 'center' });
   doc.text(`DNI: ${profile.document_number || ''}`, 90, currentY + 14, { align: 'center' });
 
-  // Cuadro para huella (opcional visualmente)
   doc.setDrawColor(200);
-  doc.rect(130, currentY - 25, 25, 30); // Cuadro a la derecha de la firma
+  doc.rect(130, currentY - 25, 25, 30);
   doc.setFontSize(6);
   doc.setTextColor(150);
   doc.text("Huella", 142.5, currentY + 8, { align: 'center' });
 
-  // Pie de página (Fecha impresión)
   const pageHeight = doc.internal.pageSize.height;
   doc.setFontSize(7);
   doc.setTextColor(150);
   doc.text(`Fecha de impresión: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, pageHeight - 10);
 
-  // Guardar PDF
   doc.save(`Ficha_Personal_${profile.document_number || 'Staff'}.pdf`);
 };

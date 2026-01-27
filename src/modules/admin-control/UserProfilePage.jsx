@@ -325,11 +325,18 @@ const UserProfilePage = () => {
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
                     <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditing} />
                     
-                    {/* FECHA DE NACIMIENTO */}
+                    {/* FECHA DE NACIMIENTO Y EDAD */}
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
+                    <Field label="Edad" name="age" value={ob.age} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="number" />
                     
-                    {/* AGREGADO: SEXO */}
+                    {/* SEXO Y SISTEMA DE PENSIÓN (AUTOMÁTICO) */}
                     <Field label="Sexo" name="gender" value={ob.gender} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+                    {/* Se establece isEditing={false} para que Sistema Pensión sea de solo lectura */}
+                    <Field label="Sistema Pensión" name="afp_status" value={ob.afp_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={false} />
+
+                    {/* CARGO Y FECHA DE INGRESO */}
+                    <Field label="Cargo" name="role" value={profile.role} onChange={handleChange} isEditing={false} />
+                    <Field label="Fecha Ingreso" name="entry_date" value={profile.entry_date} onChange={handleChange} isEditing={isEditing} type="date" />
 
                     <Field label="Celular Principal" name="phone" value={profile.phone} onChange={handleChange} isEditing={isEditing} />
                     <Field label="Celular Secundario" name="alt_phone" value={ob.alt_phone} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
@@ -518,7 +525,6 @@ const UserProfilePage = () => {
                  </div>
 
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Field label="Sistema Pensión" name="afp_status" value={ob.afp_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     <Field label="Observaciones" name="bank_observations" value={ob.bank_observations} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                  </div>
               </motion.div>
