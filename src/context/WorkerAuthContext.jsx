@@ -9,50 +9,18 @@ export const WorkerAuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const initSession = async () => {
-      const storedSession = localStorage.getItem('lyk_worker_session');
-      
-      if (storedSession) {
-        try {
-          const parsedWorker = JSON.parse(storedSession);
-          
-          // CORRECCIÓN: Forzamos el rol en la carga inicial
-          setWorker({ ...parsedWorker, role: 'worker' });
-
-          // Refrescamos datos de BD
-          const { data: freshData, error } = await supabase
-            .from('workers')
-            .select('*')
-            .eq('id', parsedWorker.id)
-            .single();
-
-          if (!error && freshData) {
-             if (freshData.status !== 'Activo') {
-                logoutWorker();
-             } else {
-                // CORRECCIÓN: Forzamos el rol al actualizar desde BD
-                const workerWithRole = { ...freshData, role: 'worker' };
-                setWorker(workerWithRole);
-                localStorage.setItem('lyk_worker_session', JSON.stringify(workerWithRole));
-             }
-          } else if (error) {
-             logoutWorker();
-          }
-
-        } catch (error) {
-          localStorage.removeItem('lyk_worker_session');
-        }
-      }
-      setLoading(false);
-    };
-
-    initSession();
+    // 1. Cargar sesión al iniciar
+    const storedSession = localStorage.getItem('lyk_worker_session');
+    if (storedSession) {
+      setWorker(JSON.parse(storedSession));
+    }
+    setLoading(false);
   }, []);
 
+  // --- FUNCIÓN DE LOGIN ---
   const loginWorker = async (documentNumber, password) => {
     try {
-      console.log("Intentando login obrero:", documentNumber);
-
+      // 1. Buscar obrero
       const { data: workerData, error } = await supabase
         .from('workers')
         .select('*')
@@ -60,76 +28,85 @@ export const WorkerAuthProvider = ({ children }) => {
         .single();
 
       if (error || !workerData) {
-        return { success: false, error: 'DNI no encontrado.' };
+        return { success: false, error: 'Obrero no encontrado o DNI incorrecto.' };
       }
 
-      if (workerData.status !== 'Activo') {
-        return { success: false, error: 'Cuenta inactiva.' };
+      // 2. Verificar contraseña
+      // Si la contraseña es el mismo DNI (primer ingreso o reseteo)
+      let isValid = false;
+      if (password === workerData.document_number) {
+          isValid = true;
+      } else if (workerData.password) {
+          // Si tiene hash, comparamos
+          isValid = await bcrypt.compare(password, workerData.password);
       }
 
-      let isValidPassword = false;
-      try {
-         isValidPassword = await bcrypt.compare(password, workerData.password);
-      } catch (e) {
-         // Fallback texto plano
-      }
-
-      if (!isValidPassword && workerData.password === password) {
-          isValidPassword = true;
-      }
-
-      if (!isValidPassword) {
+      if (!isValid) {
         return { success: false, error: 'Contraseña incorrecta.' };
       }
 
-      // CORRECCIÓN: Inyectamos el rol antes de guardar
-      const workerWithRole = { ...workerData, role: 'worker' };
-      setWorker(workerWithRole);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(workerWithRole));
-      
-      return { success: true, data: workerWithRole };
+      // 3. Guardar sesión
+      const sessionData = { ...workerData, role: 'worker' };
+      setWorker(sessionData);
+      localStorage.setItem('lyk_worker_session', JSON.stringify(sessionData));
+
+      return { success: true, data: sessionData };
 
     } catch (err) {
-      console.error("Error login worker:", err);
+      console.error("Login Worker Error:", err);
       return { success: false, error: 'Error de conexión.' };
     }
   };
 
+  // --- FUNCIÓN PARA REFRESCAR DATOS (NUEVA) ---
+  const refreshWorker = async () => {
+    if (!worker?.id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('workers')
+        .select('*')
+        .eq('id', worker.id)
+        .single();
+
+      if (error) throw error;
+      
+      if (data) {
+        const updatedSession = { ...data, role: 'worker' };
+        setWorker(updatedSession);
+        localStorage.setItem('lyk_worker_session', JSON.stringify(updatedSession));
+        console.log("Perfil actualizado en contexto");
+      }
+    } catch (error) {
+      console.error("Error refrescando obrero:", error);
+    }
+  };
+
+  // --- LOGOUT ---
   const logoutWorker = () => {
     setWorker(null);
     localStorage.removeItem('lyk_worker_session');
   };
 
-  const updateProfile = async (updates) => {
-    if (!worker) return false;
-
-    try {
-      const { data, error } = await supabase
-        .from('workers')
-        .update(updates)
-        .eq('id', worker.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // CORRECCIÓN: Mantenemos el rol al actualizar perfil
-      const updatedWorker = { ...data, role: 'worker' };
-      setWorker(updatedWorker);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(updatedWorker));
-      
-      return true;
-    } catch (error) {
-      console.error("Error actualizando perfil:", error);
-      return false;
-    }
-  };
-
   return (
-    <WorkerAuthContext.Provider value={{ worker, loginWorker, logoutWorker, loading, updateProfile }}>
+    <WorkerAuthContext.Provider value={{ 
+        worker, 
+        loginWorker, 
+        logoutWorker, 
+        refreshWorker, // <--- AHORA SÍ ESTÁ EXPORTADA
+        loading 
+    }}>
       {children}
     </WorkerAuthContext.Provider>
   );
 };
 
-export const useWorkerAuth = () => useContext(WorkerAuthContext);
+export const useWorkerAuth = () => {
+  const context = useContext(WorkerAuthContext);
+  if (context === undefined) {
+    throw new Error('useWorkerAuth debe ser usado dentro de un WorkerAuthProvider');
+  }
+  return context;
+};
+
+export default WorkerAuthContext;
