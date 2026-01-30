@@ -7,6 +7,8 @@ const formatDate = (dateString) => {
   if (!dateString) return '---';
   try {
     const [year, month, day] = dateString.split('-');
+    // Validar formato
+    if(!year || !month || !day) return dateString;
     return `${day}/${month}/${year}`;
   } catch (e) {
     return dateString;
@@ -22,6 +24,8 @@ export const generateStaffPDF = async (profile) => {
   const SECONDARY = [245, 245, 245]; // Gris muy claro
   const TEXT_DARK = [40, 40, 40];
 
+  const checkVal = (val) => val || '---';
+
   // ==========================================
   // ENCABEZADO
   // ==========================================
@@ -36,7 +40,7 @@ export const generateStaffPDF = async (profile) => {
   doc.setFontSize(16);
   doc.setTextColor(...PRIMARY);
   doc.setFont("helvetica", "bold");
-  doc.text("FICHA DE REGISTRO DE INGRESO DE PERSONAL", 105, 23, { align: 'center' });
+  doc.text("FICHA DE REGISTRO DE PERSONAL - STAFF", 105, 23, { align: 'center' });
 
   // Línea 3: Nombre de la Empresa
   doc.setFontSize(12);
@@ -52,7 +56,7 @@ export const generateStaffPDF = async (profile) => {
   let currentY = 45;
 
   // ==========================================
-  // 1. DATOS PERSONALES, LABORALES Y TALLAS
+  // 1. DATOS GENERALES Y LABORALES
   // ==========================================
   autoTable(doc, {
     startY: currentY,
@@ -64,26 +68,27 @@ export const generateStaffPDF = async (profile) => {
 
   const bodyPersonal = [
     // Fila 1
-    ['Nombres y Apellidos:', (profile.full_name || '').toUpperCase(), 'DNI:', profile.document_number || '---'],
+    ['Nombres y Apellidos:', (profile.full_name || '').toUpperCase(), 'DNI / CE:', profile.document_number || '---'],
     // Fila 2
-    ['Nacionalidad:', ob.nationality || '---', 'F. Nacimiento:', formatDate(profile.birth_date)],
+    ['Nacionalidad:', checkVal(ob.nationality), 'F. Nacimiento:', formatDate(profile.birth_date)],
     // Fila 3: Edad y Sexo
-    ['Edad:', ob.age ? `${ob.age} años` : '---', 'Sexo:', ob.gender || '---'],
+    ['Edad:', ob.age ? `${ob.age} años` : '---', 'Sexo:', checkVal(ob.gender)],
     // Fila 4: Estado Civil y Conyuge
-    ['Estado Civil:', ob.civil_status || '---', 'Cónyuge:', ob.spouse_name || '---'],
+    ['Estado Civil:', checkVal(ob.civil_status), 'Cónyuge:', checkVal(ob.spouse_name)],
     // Fila 5: Contacto
-    ['Celular Princ.:', profile.phone || '---', 'Celular Sec.:', ob.alt_phone || '---'],
+    ['Celular Princ.:', checkVal(profile.phone), 'Celular Sec.:', checkVal(ob.alt_phone)],
     // Fila 6: Ubicación
-    ['Dirección:', ob.address || '---', 'Distrito:', ob.district || '---'],
-    ['Prov/Depto:', `${ob.province || ''} - ${ob.department || ''}`, 'Email Corp:', profile.email || '---'],
+    ['Dirección:', checkVal(ob.address), 'Distrito:', checkVal(ob.district)],
+    ['Prov/Depto:', `${checkVal(ob.province)} - ${checkVal(ob.department)}`, 'Email Corp:', checkVal(profile.email)],
+    ['Email Pers.:', checkVal(ob.personal_email), '', ''],
     
-    // --- DATOS LABORALES AGREGADOS ---
+    // --- DATOS LABORALES ---
     ['Cargo:', (profile.role || '---').replace(/_/g, ' ').toUpperCase(), 'F. Ingreso:', formatDate(profile.entry_date)],
-    ['Sistema Pensión:', ob.afp_status || '---', 'Parientes L&K:', ob.has_relatives_in_company || 'NO'],
+    ['Sistema Pensión:', checkVal(ob.afp_status), 'Parientes L&K:', checkVal(ob.has_relatives_in_company)],
 
-    // --- TALLAS AGREGADAS ---
-    ['Talla Polo:', ob.shirt_size || '---', 'Talla Pantalón:', ob.pants_size || '---'],
-    ['Talla Calzado:', ob.shoe_size || '---', '', ''] // Celda vacía para completar la fila
+    // --- TALLAS ---
+    ['Talla Polo:', checkVal(ob.shirt_size), 'Talla Pantalón:', checkVal(ob.pants_size)],
+    ['Talla Calzado:', checkVal(ob.shoe_size), '', '']
   ];
 
   autoTable(doc, {
@@ -130,9 +135,6 @@ export const generateStaffPDF = async (profile) => {
       doc.setFont("helvetica", "bold");
       doc.text("CONTACTOS DE EMERGENCIA", 14, currentY + 3);
       
-      // Padres también aquí por si acaso, o arriba. Dejamos los padres en datos personales arriba? 
-      // En el código anterior estaban arriba (Nombre Padre/Madre). Los dejé fuera de esta tabla dinámica para mantener estructura.
-
       autoTable(doc, {
         startY: currentY + 5,
         head: [['Nombre Contacto', 'Parentesco', 'Teléfono']],
@@ -164,8 +166,8 @@ export const generateStaffPDF = async (profile) => {
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     columnStyles: { 0: { fontStyle: 'bold', width: 30, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     body: [
-      ['Nivel:', ob.education_level || '---', 'Estado:', ob.education_status || '---'],
-      ['Institución:', ob.institution || '---', 'Año Egreso:', ob.grad_year || '---']
+      ['Nivel:', checkVal(ob.education_level), 'Estado:', checkVal(ob.education_status)],
+      ['Institución:', checkVal(ob.institution), 'F. Egreso:', formatDate(ob.grad_date)]
     ],
     margin: { left: 14, right: 14 }
   });
@@ -221,7 +223,8 @@ export const generateStaffPDF = async (profile) => {
           });
           currentY = doc.lastAutoTable.finalY;
 
-          if (exp.functions && exp.functions.length > 0) {
+          // Funciones
+          if (exp.functions) {
              const funcArray = Array.isArray(exp.functions) ? exp.functions : [exp.functions];
              const cleanFunctions = funcArray.filter(f => f && f.trim() !== '');
              
@@ -252,13 +255,13 @@ export const generateStaffPDF = async (profile) => {
   }
 
   // ==========================================
-  // 6. DATOS BANCARIOS (SOLO BANCO)
+  // 6. DATOS BANCARIOS
   // ==========================================
   if (currentY > 240) { doc.addPage(); currentY = 20; }
 
   autoTable(doc, {
     startY: currentY,
-    head: [['DATOS BANCARIOS']], // Título actualizado
+    head: [['DATOS BANCARIOS']],
     theme: 'grid',
     headStyles: { fillColor: PRIMARY, fontSize: 10, fontStyle: 'bold', halign: 'center' },
     margin: { left: 14, right: 14 }
@@ -269,8 +272,8 @@ export const generateStaffPDF = async (profile) => {
     theme: 'plain',
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     body: [
-      ['Banco:', ob.bank_name || '---', 'N° Cuenta:', ob.bbva_account || '---'],
-      ['CCI:', ob.interbank_account || '---', 'Observaciones:', ob.bank_observations || '---']
+      ['Banco:', checkVal(ob.bank_name), 'N° Cuenta:', checkVal(ob.bbva_account)],
+      ['CCI:', checkVal(ob.interbank_account), 'Obs:', checkVal(ob.bank_observations)]
     ],
     columnStyles: { 0: { fontStyle: 'bold', width: 25, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     margin: { left: 14, right: 14 }
@@ -279,7 +282,7 @@ export const generateStaffPDF = async (profile) => {
   currentY = doc.lastAutoTable.finalY + 10;
 
   // ==========================================
-  // CLÁUSULAS Y LEGAL
+  // CLÁUSULAS Y LEGAL (RESTAURADO)
   // ==========================================
   
   if (currentY > 200) {
@@ -294,13 +297,12 @@ export const generateStaffPDF = async (profile) => {
   const legalText = `Declaro bajo juramento que la información proporcionada en la presente ficha es veraz, conforme a lo establecido en el artículo IV inciso 1.7 del Título Preliminar, el artículo 47 inciso 47.1.3 y el artículo 44 del TUO de la Ley Nº 27444, aprobado por D.S. Nº 006-2017-JUS. Autorizo su verificación, y acepto que, de encontrarse información falsa o adulterada acepto expresamente que la entidad proceda a mi retiro automático, sea del proceso de selección o de la entidad si se produjo vinculación, sin prejuicio de aplicarse las sanciones legales que correspondan.`;
 
   const clausesText = [
-      "CLAUSULAS INTERNAS:",
-      "• Me comprometo a cumplir con mis funciones, las políticas, reglamentos internos y disposiciones de la empresa.",
-      "• Declaro haber recibido la inducción en Seguridad y Salud en el Trabajo y me comprometo al uso adecuado de los equipos de protección personal (EPP) entregados.",
-      "• Me obligo a mantener la confidencialidad de toda información a la que tenga acceso en el ejercicio de mis funciones.",
-      "• Reconozco que debo comunicar de inmediato cualquier ausencia, accidente o novedad relacionada con mi trabajo.",
-      "• En caso de recibir bienes, equipos o materiales de la empresa (incluidos EPP), me comprometo a su correcta utilización y devolución, autorizando expresamente el descuento de su valor en mis beneficios sociales en caso de pérdida o no devolución.",
-      "• Autorizo el tratamiento de mis datos personales para fines administrativos y de control, conforme a la Ley Nº 29733.",
+      "CLÁUSULAS Y COMPROMISOS:",
+      "• Me comprometo a cumplir fielmente con mis funciones, las políticas de la empresa, y el Reglamento Interno de Trabajo.",
+      "• Declaro conocer que la empresa cuenta con normas de Seguridad y Salud en el Trabajo, las cuales me comprometo a respetar para salvaguardar mi integridad y la de mis compañeros.",
+      "• Me obligo a mantener la más estricta confidencialidad sobre la información técnica, comercial o administrativa de la empresa a la que tenga acceso.",
+      "• En caso de que se me asignen equipos (laptop, celular, EPP, herramientas), me hago responsable de su custodia y buen uso, autorizando el descuento en caso de pérdida o daño por negligencia comprobada.",
+      "• Autorizo el tratamiento de mis datos personales para fines de gestión de recursos humanos, planilla y bienestar social, conforme a la Ley Nº 29733.",
       "",
       "“Con mi firma acepto las cláusulas contractuales y declaro bajo juramento que los datos antes mencionados son verdaderos”."
   ];
@@ -310,7 +312,7 @@ export const generateStaffPDF = async (profile) => {
   doc.text(splitLegal, 14, currentY);
   currentY += (splitLegal.length * 3) + 5;
 
-  // Imprimir Cláusulas Internas
+  // Imprimir Cláusulas
   doc.setFont("helvetica", "bold");
   doc.text(clausesText[0], 14, currentY); 
   currentY += 4;
@@ -334,7 +336,7 @@ export const generateStaffPDF = async (profile) => {
   // ==========================================
   currentY += 25;
 
-  if (currentY + 40 > 290) {
+  if (currentY + 40 > 280) {
       doc.addPage();
       currentY = 40;
   }
@@ -361,7 +363,7 @@ export const generateStaffPDF = async (profile) => {
   const pageHeight = doc.internal.pageSize.height;
   doc.setFontSize(7);
   doc.setTextColor(150);
-  doc.text(`Fecha de impresión: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, pageHeight - 10);
+  doc.text(`Generado el: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, pageHeight - 10);
 
-  doc.save(`Ficha_Personal_${profile.document_number || 'Staff'}.pdf`);
+  doc.save(`Ficha_Staff_${profile.document_number || 'Colaborador'}.pdf`);
 };

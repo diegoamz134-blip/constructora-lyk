@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Clock, ChevronRight, MessageSquare, 
-  MapPin, Loader2, HardHat, User
+  MapPin, Loader2, HardHat
 } from 'lucide-react';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import logoFull from '../../assets/images/logo-lk-full.png';
@@ -41,7 +41,8 @@ const WorkerDashboard = () => {
   const canAccessLog = ['Capataz', 'Operario'].includes(worker.category);
 
   const formatCurrency = (amount) => {
-    if (!amount || amount === 0) return 'Según Tabla';
+    // CAMBIO AQUÍ: Texto actualizado
+    if (!amount || amount === 0) return 'Según el Sistema';
     return `S/. ${Number(amount).toFixed(2)}`;
   };
 
@@ -53,7 +54,6 @@ const WorkerDashboard = () => {
     if (name && lastName) {
         return `${name[0]}${lastName[0]}`.toUpperCase();
     }
-    // Fallback si solo hay un nombre completo string
     return (name.split(' ').map(n => n[0]).slice(0, 2).join('') || 'WK').toUpperCase();
   };
 
@@ -70,7 +70,7 @@ const WorkerDashboard = () => {
         {/* Logo de la empresa */}
         <img src={logoFull} alt="L&K" className="h-10 w-auto object-contain opacity-90" />
         
-        {/* BOTÓN DE PERFIL (IMPLEMENTACIÓN MANUAL ROBUSTA) */}
+        {/* BOTÓN DE PERFIL */}
         <motion.button 
           whileTap={{ scale: 0.9 }}
           onClick={() => goTo('/worker/profile')} 
@@ -79,25 +79,20 @@ const WorkerDashboard = () => {
           <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-100 shadow-md bg-[#003366] flex items-center justify-center text-white font-bold text-sm relative z-10">
              {worker.avatar_url ? (
                 <>
-                  {/* Imagen de fondo (fallback de iniciales por si la imagen tarda) */}
                   <span className="absolute inset-0 flex items-center justify-center bg-[#003366] z-0">
                     {getInitials()}
                   </span>
-                  {/* Imagen real */}
                   <img 
                     src={worker.avatar_url} 
                     alt="Perfil" 
                     className="w-full h-full object-cover relative z-10"
-                    onError={(e) => { e.target.style.display = 'none'; }} // Si falla, se ve el span de abajo
+                    onError={(e) => { e.target.style.display = 'none'; }} 
                   />
                 </>
              ) : (
-                // Si no hay URL, mostramos iniciales directamente
                 <span>{getInitials()}</span>
              )}
           </div>
-          
-          {/* Indicador de estado (opcional, adorno visual) */}
           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full z-20"></div>
         </motion.button>
       </motion.div>
@@ -118,7 +113,6 @@ const WorkerDashboard = () => {
         whileHover={{ scale: 1.02 }}
         className="bg-white rounded-[2rem] p-6 shadow-xl shadow-slate-200/50 border border-slate-100 relative overflow-hidden group"
       >
-        {/* Decoración de fondo animada */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 group-hover:bg-blue-100 transition-colors duration-500"></div>
         
         <div className="relative z-10">
@@ -149,13 +143,12 @@ const WorkerDashboard = () => {
         </div>
       </motion.div>
 
-      {/* 4. ACCESOS RÁPIDOS (GRID LIMPIO) */}
+      {/* 4. ACCESOS RÁPIDOS */}
       <motion.div variants={itemVariants}>
         <h3 className="text-sm font-bold text-slate-400 uppercase mb-4 px-1 tracking-wider">Menú Principal</h3>
 
         <div className="grid grid-cols-2 gap-4">
           
-          {/* BOTÓN ASISTENCIA (PRINCIPAL) */}
           <motion.div 
             variants={itemVariants}
             whileHover={{ scale: 1.02 }}
@@ -177,7 +170,6 @@ const WorkerDashboard = () => {
             </div>
           </motion.div>
 
-          {/* BOTÓN BITÁCORA (CONDICIONAL) */}
           {canAccessLog && (
             <motion.div 
               variants={itemVariants}
@@ -194,7 +186,6 @@ const WorkerDashboard = () => {
             </motion.div>
           )}
 
-          {/* BOTÓN PROYECTO */}
           <motion.div 
             variants={itemVariants}
             whileHover={{ y: -5 }}

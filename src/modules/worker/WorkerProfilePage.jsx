@@ -64,9 +64,9 @@ const WorkerProfilePage = () => {
     first_name: '', paternal_surname: '', maternal_surname: '', document_number: '',
     birth_date: '', age: '', nationality: 'Peruana', sex: '',
     
-    // Laborales Internos (Agregados)
-    category: 'Obrero', // Cargo
-    entry_date: '', // Fecha Ingreso
+    // Laborales Internos
+    category: 'Obrero', 
+    start_date: '', // CORREGIDO: Usamos start_date en lugar de entry_date
 
     // Ubicación
     address: '', district: '', province: '', department: 'Lima',
@@ -81,6 +81,7 @@ const WorkerProfilePage = () => {
 
     // Académico
     education_level: '', education_status: '', education_institution: '',
+    grad_date: '',
 
     // Bancario / Tallas / Pension
     pension_system: 'ONP', 
@@ -126,7 +127,6 @@ const WorkerProfilePage = () => {
   }, [worker]);
 
   useEffect(() => {
-      // Recalcular edad si cambia la fecha de nacimiento
       if (formData.birth_date) {
           setFormData(prev => ({ ...prev, age: calculateAge(prev.birth_date) }));
       }
@@ -141,7 +141,10 @@ const WorkerProfilePage = () => {
             ...prev, 
             ...data, 
             category: data.category || 'Peón',
-            entry_date: data.entry_date || '', // Asegurar que se cargue
+            start_date: data.start_date || '', // CORREGIDO: Mapeamos start_date correctamente
+            
+            // Datos dentro del JSONB details
+            grad_date: data.details?.grad_date || '',
             emergency_contacts: data.details?.emergency_contacts || [],
             dependents: data.details?.dependents || [],
             relatives_in_company: data.details?.relatives_in_company || [],
@@ -242,7 +245,8 @@ const WorkerProfilePage = () => {
           birth_date: formData.birth_date || null,
           nationality: formData.nationality,
           sex: formData.sex,
-          entry_date: formData.entry_date || null, // Guardar fecha ingreso
+          
+          start_date: formData.start_date || null, // CORREGIDO: Guardar start_date
           
           marital_status: formData.marital_status,
           spouse_name: ['Casado', 'Conviviente'].includes(formData.marital_status) ? formData.spouse_name : null,
@@ -255,9 +259,9 @@ const WorkerProfilePage = () => {
           department: formData.department,
           phone: formData.phone,
           secondary_phone: formData.secondary_phone,
-          secondary_email: formData.secondary_email,
+          email: formData.email, // GUARDAR EMAIL
+          secondary_email: formData.secondary_email, // GUARDAR EMAIL SECUNDARIO
           
-          // Pension y Tallas movidas a Updates generales
           pension_system: formData.pension_system,
           shirt_size: formData.shirt_size,
           pants_size: formData.pants_size,
@@ -275,6 +279,7 @@ const WorkerProfilePage = () => {
           
           details: {
               ...worker.details,
+              grad_date: formData.grad_date,
               emergency_contacts: formData.emergency_contacts,
               dependents: formData.dependents,
               has_relatives_in_company: formData.has_relatives_in_company,
@@ -319,14 +324,14 @@ const WorkerProfilePage = () => {
                  <InputField label="Nacionalidad" name="nationality" value={formData.nationality} onChange={handleInputChange} isEditing={isEditing} />
                  <SelectField label="Sexo" name="sex" value={formData.sex} onChange={handleInputChange} isEditing={isEditing} options={['Masculino', 'Femenino']} />
                  
-                 {/* DATOS LABORALES BÁSICOS AGREGADOS AQUÍ */}
+                 {/* DATOS LABORALES BÁSICOS CORREGIDOS */}
                  <InputField label="Cargo (Categoría)" name="category" value={formData.category} disabled={true} isEditing={false} />
-                 <InputField label="Fecha Ingreso" name="entry_date" type="date" value={formData.entry_date} onChange={handleInputChange} isEditing={isEditing} icon={Calendar} />
-                 <SelectField label="Sistema Pensión" name="pension_system" value={formData.pension_system} onChange={handleInputChange} isEditing={false} disabled={true} options={['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat']} />
+                 <InputField label="Fecha Ingreso" name="start_date" type="date" value={formData.start_date} onChange={handleInputChange} isEditing={isEditing} icon={Calendar} />
+                 <SelectField label="Sistema Pensión" name="pension_system" value={formData.pension_system} onChange={handleInputChange} isEditing={isEditing} options={['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen']} />
              </div>
           </div>
 
-          {/* SECCIÓN DE TALLAS MOVIDA AQUÍ */}
+          {/* SECCIÓN DE TALLAS */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4 border-b pb-2"><Briefcase size={20} className="text-indigo-600"/> Tallas de Dotación</h3>
              <div className="grid grid-cols-3 gap-6">
@@ -390,7 +395,7 @@ const WorkerProfilePage = () => {
               
               <InputField label="Celular Principal" name="phone" value={formData.phone} onChange={handleInputChange} isEditing={isEditing} icon={Phone} />
               <InputField label="Celular Emergencia / Casa" name="secondary_phone" value={formData.secondary_phone} onChange={handleInputChange} isEditing={isEditing} icon={Phone} />
-              <InputField label="Email Personal" name="email" value={formData.email} onChange={handleInputChange} isEditing={isEditing} disabled={true} icon={Mail} />
+              <InputField label="Email Personal" name="email" value={formData.email} onChange={handleInputChange} isEditing={isEditing} icon={Mail} />
               <InputField label="Email Adicional" name="secondary_email" value={formData.secondary_email} onChange={handleInputChange} isEditing={isEditing} icon={Mail} />
           </div>
 
@@ -420,15 +425,24 @@ const WorkerProfilePage = () => {
       </div>
   );
 
-  const renderEducation = () => (
+  const renderEducation = () => {
+      const advancedLevels = ['Técnico', 'Universitario', 'Bachiller', 'Titulado', 'Egresado', 'Colegiado'];
+      const showDetails = advancedLevels.includes(formData.education_level);
+
+      return (
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm animate-in fade-in">
           <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4 border-b pb-2"><GraduationCap size={20} className="text-purple-600"/> Antecedentes Académicos</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <SelectField label="Nivel Educativo" name="education_level" value={formData.education_level} onChange={handleInputChange} isEditing={isEditing} options={['Secundaria', 'Técnico', 'Universitario', 'Bachiller', 'Titulado']} />
+              <SelectField label="Nivel Educativo" name="education_level" value={formData.education_level} onChange={handleInputChange} isEditing={isEditing} options={['Secundaria', 'Técnico', 'Universitario', 'Bachiller', 'Titulado', 'Egresado', 'Colegiado']} />
               <SelectField label="Estado" name="education_status" value={formData.education_status} onChange={handleInputChange} isEditing={isEditing} options={['Completo', 'Incompleto', 'En Curso']} />
-              <div className="md:col-span-2">
+              
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <InputField label="Institución Educativa" name="education_institution" value={formData.education_institution} onChange={handleInputChange} isEditing={isEditing} placeholder="Nombre del Colegio / Universidad" />
+                  
+                  {showDetails && (
+                      <InputField label="Fecha de Egreso / Grado" name="grad_date" type="date" value={formData.grad_date} onChange={handleInputChange} isEditing={isEditing} icon={Calendar} />
+                  )}
               </div>
           </div>
 
@@ -436,7 +450,7 @@ const WorkerProfilePage = () => {
           {isEditing && (
               <div className="flex gap-2 mb-3 bg-purple-50 p-2 rounded-lg">
                   <input placeholder="Nombre del Curso" value={tempCourse.name} onChange={e => setTempCourse({...tempCourse, name: e.target.value})} className="p-1 border rounded text-xs flex-[2]" />
-                  <input type="month" value={tempCourse.date} onChange={e => setTempCourse({...tempCourse, date: e.target.value})} className="p-1 border rounded text-xs flex-1" />
+                  <input type="date" value={tempCourse.date} onChange={e => setTempCourse({...tempCourse, date: e.target.value})} className="p-1 border rounded text-xs flex-1" />
                   <button onClick={() => addToList('additional_courses', tempCourse, setTempCourse, {name:'', date:''})} className="bg-purple-600 text-white p-1 rounded"><Plus size={16}/></button>
               </div>
           )}
@@ -450,11 +464,12 @@ const WorkerProfilePage = () => {
               {formData.additional_courses.length === 0 && <p className="text-sm text-slate-400 italic">No hay cursos registrados.</p>}
           </ul>
       </div>
-  );
+      );
+  };
 
   const renderWork = () => (
       <div className="space-y-6 animate-in fade-in">
-          {/* Datos Financieros (Ahora solo bancarios) */}
+          {/* Datos Financieros */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4 border-b pb-2"><Shield size={20} className="text-orange-600"/> Datos Bancarios</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -464,13 +479,12 @@ const WorkerProfilePage = () => {
               </div>
           </div>
 
-          {/* Experiencia Laboral (Edición Completa) */}
+          {/* Experiencia Laboral */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                <div className="flex justify-between items-center mb-4 border-b pb-2">
                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Briefcase size={20} className="text-slate-600"/> Experiencia Laboral Externa</h3>
                </div>
                
-               {/* FORMULARIO DE AGREGAR TRABAJO */}
                {isEditing && (
                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4 animate-in fade-in">
                         <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Agregar Nuevo Trabajo</h4>
@@ -488,7 +502,6 @@ const WorkerProfilePage = () => {
                              <input placeholder="Teléfono Jefe" name="boss_phone" value={newJob.boss_phone} onChange={handleJobChange} className="p-2 border rounded text-sm"/>
                         </div>
                         
-                        {/* Agregar Funciones */}
                         <div className="bg-white p-2 border rounded mb-2">
                             <div className="flex gap-1 mb-1">
                                 <input placeholder="Agregar función..." value={tempFunction} onChange={e => setTempFunction(e.target.value)} onKeyDown={e => e.key === 'Enter' && addFunctionToJob()} className="p-1 border rounded text-xs flex-1"/>
@@ -558,7 +571,6 @@ const WorkerProfilePage = () => {
         </div>
         
         <div className="flex gap-2 w-full md:w-auto">
-            {/* BOTÓN DESCARGAR PDF */}
             <button 
                 onClick={handleDownloadPDF} 
                 className="group flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm bg-white border border-slate-200 text-slate-600 shadow-sm transition-all duration-300 hover:border-red-200 hover:bg-red-50 hover:text-red-600 hover:shadow-md hover:-translate-y-0.5"

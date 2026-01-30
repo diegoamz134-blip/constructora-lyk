@@ -5,7 +5,7 @@ import {
   Edit2, Save, Camera, Lock, Loader2, 
   Briefcase, User, Shield, 
   Eye, EyeOff, MapPin, Heart, GraduationCap, 
-  CreditCard, FileText, Building2, FileDown
+  CreditCard, FileText, Building2, FileDown, Calendar
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../context/AuthContext';
@@ -15,9 +15,13 @@ import { generateStaffPDF } from '../../utils/staffPdfGenerator';
 import StatusModal from '../../components/common/StatusModal';
 import ImageCropperModal from '../../components/common/ImageCropperModal';
 
+const PENSION_SYSTEMS = [
+  'ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen'
+];
+
 const UserProfilePage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -66,9 +70,14 @@ const UserProfilePage = () => {
         .from('employees')
         .select('*')
         .eq('id', currentUser.id)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+
+      if (!data) {
+        logout(); 
+        return;
+      }
 
       if (data) {
         const safeOnboardingData = (data.onboarding_data && typeof data.onboarding_data === 'object') 
@@ -100,29 +109,39 @@ const UserProfilePage = () => {
     const { name, value } = e.target;
     const safeValue = value === null || value === undefined ? '' : value;
 
-    if (!section && !subfield) {
-        setProfile(prev => ({ ...prev, [name]: safeValue }));
-        return;
-    }
+    // Lógica para actualizar estado
+    setProfile(prev => {
+        let newProfile = { ...prev };
 
-    if (section === 'onboarding_data' && index === undefined) {
-        setProfile(prev => ({
-            ...prev,
-            onboarding_data: { ...prev.onboarding_data, [name]: safeValue }
-        }));
-        return;
-    }
+        if (!section && !subfield) {
+            newProfile[name] = safeValue;
+        } else if (section === 'onboarding_data' && index === undefined) {
+            newProfile.onboarding_data = { ...prev.onboarding_data, [name]: safeValue };
+        } else if (section && index !== undefined && subfield) {
+            const list = [...(prev.onboarding_data[section] || [])];
+            if(!list[index]) list[index] = {}; 
+            list[index][subfield] = safeValue;
+            newProfile.onboarding_data = { ...prev.onboarding_data, [section]: list };
+        }
 
-    if (section && index !== undefined && subfield) {
-        const list = [...(profile.onboarding_data[section] || [])];
-        if(!list[index]) list[index] = {}; 
-        list[index][subfield] = safeValue;
+        // LÓGICA DE CALCULO DE EDAD AUTOMÁTICO
+        if (name === 'birth_date') {
+            const birth = new Date(safeValue);
+            const now = new Date();
+            let age = now.getFullYear() - birth.getFullYear();
+            const m = now.getMonth() - birth.getMonth();
+            if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
+                age--;
+            }
+            // Actualizamos la edad dentro de onboarding_data
+            newProfile.onboarding_data = { 
+                ...newProfile.onboarding_data, 
+                age: age.toString() 
+            };
+        }
 
-        setProfile(prev => ({
-            ...prev,
-            onboarding_data: { ...prev.onboarding_data, [section]: list }
-        }));
-    }
+        return newProfile;
+    });
   };
 
   const handleArrayChange = (value, section, index, subIndex) => {
@@ -329,10 +348,26 @@ const UserProfilePage = () => {
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
                     <Field label="Edad" name="age" value={ob.age} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="number" />
                     
-                    {/* SEXO Y SISTEMA DE PENSIÓN (AUTOMÁTICO) */}
+                    {/* SEXO Y SISTEMA DE PENSIÓN */}
                     <Field label="Sexo" name="gender" value={ob.gender} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
-                    {/* Se establece isEditing={false} para que Sistema Pensión sea de solo lectura */}
-                    <Field label="Sistema Pensión" name="afp_status" value={ob.afp_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={false} />
+                    
+                    {/* PENSION SYSTEM - SELECTOR */}
+                    {isEditing ? (
+                        <div className="flex flex-col gap-1.5 w-full">
+                            <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Sistema Pensión</label>
+                            <select 
+                                name="afp_status" 
+                                value={ob.afp_status || ''} 
+                                onChange={e => handleChange(e, 'onboarding_data')} 
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 font-medium focus:bg-white focus:border-[#0F172A] outline-none transition-all"
+                            >
+                                <option value="">-- Seleccione --</option>
+                                {PENSION_SYSTEMS.map(sys => <option key={sys} value={sys}>{sys}</option>)}
+                            </select>
+                        </div>
+                    ) : (
+                        <Field label="Sistema Pensión" name="afp_status" value={ob.afp_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={false} />
+                    )}
 
                     {/* CARGO Y FECHA DE INGRESO */}
                     <Field label="Cargo" name="role" value={profile.role} onChange={handleChange} isEditing={false} />
@@ -467,7 +502,6 @@ const UserProfilePage = () => {
                                     <Field label="Inicio" name="start" value={exp.start} onChange={e => handleChange(e, 'work_experience', idx, 'start')} isEditing={isEditing} type="date" />
                                     <Field label="Fin" name="end" value={exp.end} onChange={e => handleChange(e, 'work_experience', idx, 'end')} isEditing={isEditing} type="date" />
                                     
-                                    {/* VISUALIZAR FUNCIONES */}
                                     <div className="md:col-span-2 mt-2">
                                         <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Funciones</label>
                                         {Array.isArray(exp.functions) ? (

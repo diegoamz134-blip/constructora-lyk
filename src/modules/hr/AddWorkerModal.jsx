@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Save, User, Briefcase, Loader2, 
-  BookOpen, ChevronDown, Check,
+  ChevronDown, Check,
   Calendar, Trash2, PieChart, Hash,
   Lock, Eye, EyeOff, Phone,
   FileText, UploadCloud, CheckCircle2
@@ -117,10 +117,25 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
     setFormData({ ...formData, [e.target.name]: value });
   };
 
+  // --- NUEVAS FUNCIONES DE VALIDACIÓN ---
+
+  // Validador de Teléfono: Solo números y máx 9 dígitos
+  const handlePhoneChange = (e) => {
+    const value = e.target.value.replace(/\D/g, ''); 
+    if (value.length <= 9) {
+      setFormData(prev => ({ ...prev, phone: value }));
+    }
+  };
+
+  // Validador de Documento: DNI=8, CE/Otros=9
   const handleDocumentChange = (e) => {
     const value = e.target.value.replace(/\D/g, ''); 
-    const maxLength = formData.document_type === 'DNI' ? 8 : 12;
-    if (value.length <= maxLength) setFormData({ ...formData, document_number: value });
+    // Si es DNI -> 8 dígitos, si es CE -> 9 dígitos
+    const maxLength = formData.document_type === 'DNI' ? 8 : 9;
+    
+    if (value.length <= maxLength) {
+        setFormData({ ...formData, document_number: value });
+    }
   };
 
   const handleDeleteClick = async () => {
@@ -173,13 +188,26 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
     await Promise.all(uploadPromises);
   };
 
-  // --- SUBMIT ---
+  // --- SUBMIT CON VALIDACIÓN ESTRICTA ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
+    // 1. Validar DNI (8 dígitos)
     if (formData.document_type === 'DNI' && formData.document_number.length !== 8) {
-        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El DNI debe tener 8 dígitos.' });
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El DNI debe tener 8 dígitos exactos.' });
+        setLoading(false); return;
+    }
+
+    // 2. Validar CE (9 dígitos)
+    if (formData.document_type !== 'DNI' && formData.document_number.length !== 9) {
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El Carnet de Extranjería debe tener 9 dígitos.' });
+        setLoading(false); return;
+    }
+
+    // 3. Validar Celular (9 dígitos) si se ingresó alguno
+    if (formData.phone && formData.phone.length !== 9) {
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El celular debe tener 9 dígitos.' });
         setLoading(false); return;
     }
 
@@ -295,6 +323,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
+                            {/* INPUT DOCUMENTO CON LA NUEVA FUNCIÓN */}
                             <input name="document_number" required value={formData.document_number} onChange={handleDocumentChange} className="w-full h-full pl-3 bg-transparent outline-none text-sm font-mono" placeholder="Número"/>
                         </div>
                     </div>
@@ -302,7 +331,16 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                         <label className="text-xs font-bold text-slate-500 uppercase">Celular</label>
                         <div className="relative h-[48px]">
                             <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="999..."/>
+                            {/* INPUT CELULAR CON LA NUEVA FUNCIÓN */}
+                            <input 
+                              type="tel" 
+                              name="phone" 
+                              value={formData.phone} 
+                              onChange={handlePhoneChange} 
+                              inputMode="numeric"
+                              className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" 
+                              placeholder="999888777"
+                            />
                         </div>
                     </div>
                   </div>
@@ -350,7 +388,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                     </div>
                   </div>
 
-                  {/* RÉGIMEN PENSIONARIO (MODIFICADO: Sin Oficina, ocupando ancho completo) */}
+                  {/* RÉGIMEN PENSIONARIO */}
                   <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-1 relative" ref={afpRef}>
                           <label className="text-xs font-bold text-slate-500 uppercase">Régimen Pensionario</label>
@@ -420,7 +458,7 @@ const AddWorkerModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) =>
                      </div>
                   </div>
 
-                  {/* SECCIÓN DE ARCHIVOS (NUEVA) */}
+                  {/* SECCIÓN DE ARCHIVOS */}
                   <div className="border-t pt-4">
                     <h4 className="text-sm font-bold text-[#003366] mb-3 flex items-center gap-2">
                         <FileText size={16}/> Documentos del Obrero

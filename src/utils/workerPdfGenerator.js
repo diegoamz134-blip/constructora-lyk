@@ -7,6 +7,8 @@ const formatDate = (dateString) => {
   if (!dateString) return '---';
   try {
     const [year, month, day] = dateString.split('-');
+    // Validar que sean números
+    if(!year || !month || !day) return dateString;
     return `${day}/${month}/${year}`;
   } catch (e) {
     return dateString;
@@ -72,8 +74,8 @@ export const generateWorkerPDF = async (worker) => {
     ['Edad:', worker.age ? `${worker.age} años` : '---', 'Sexo:', checkVal(worker.sex)],
     // Fila 4
     ['Nacionalidad:', checkVal(worker.nationality), 'Estado Civil:', checkVal(worker.marital_status)],
-    // Fila 5: Laboral Básico
-    ['Cargo:', checkVal(worker.category).toUpperCase(), 'F. Ingreso:', formatDate(worker.entry_date)],
+    // Fila 5: Laboral Básico (CORREGIDO: start_date)
+    ['Cargo:', checkVal(worker.category).toUpperCase(), 'F. Ingreso:', formatDate(worker.start_date || worker.entry_date)],
     // Fila 6: Pensión
     ['Sistema Pensión:', checkVal(worker.pension_system), 'Cónyuge:', checkVal(worker.spouse_name)],
     
@@ -127,8 +129,9 @@ export const generateWorkerPDF = async (worker) => {
   // 3. FAMILIA Y EMERGENCIA
   // ==========================================
   
-  // Dependientes
-  const dependentRows = (worker.details?.dependents || []).map(d => [d.name, `${d.age} años`, '-']);
+  // Dependientes (Prioriza la lista directa del formulario, luego details)
+  const dependentsList = worker.dependents || worker.details?.dependents || [];
+  const dependentRows = dependentsList.map(d => [d.name, `${d.age} años`, '-']);
   
   if (dependentRows.length > 0) {
       doc.setFontSize(9);
@@ -151,7 +154,8 @@ export const generateWorkerPDF = async (worker) => {
   }
 
   // Emergencias
-  const emergencyRows = (worker.details?.emergency_contacts || []).map(c => [c.name, c.relation, c.phone]);
+  const emergencyList = worker.emergency_contacts || worker.details?.emergency_contacts || [];
+  const emergencyRows = emergencyList.map(c => [c.name, c.relation, c.phone]);
 
   if (emergencyRows.length > 0) {
       doc.setFontSize(9);
@@ -216,15 +220,42 @@ export const generateWorkerPDF = async (worker) => {
     columnStyles: { 0: { fontStyle: 'bold', width: 30, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     body: [
       ['Nivel Educ.:', checkVal(worker.education_level), 'Estado:', checkVal(worker.education_status)],
-      ['Institución:', checkVal(worker.education_institution), '', '']
+      // AÑADIDO: Fecha de Egreso
+      ['Institución:', checkVal(worker.education_institution), 'F. Egreso:', formatDate(worker.grad_date)] 
     ],
     margin: { left: 14, right: 14 }
   });
 
-  currentY = doc.lastAutoTable.finalY;
+  currentY = doc.lastAutoTable.finalY + 5;
+
+  // 5.1 CURSOS ADICIONALES (SECCIÓN NUEVA)
+  const coursesList = worker.additional_courses || worker.details?.additional_courses || [];
+  const courseRows = coursesList.map(c => [c.name, formatDate(c.date)]);
+
+  if (courseRows.length > 0) {
+      doc.setFontSize(9);
+      doc.setTextColor(...PRIMARY);
+      doc.setFont("helvetica", "bold");
+      doc.text("CURSOS Y CAPACITACIONES", 14, currentY + 4);
+
+      autoTable(doc, {
+        startY: currentY + 6,
+        head: [['Nombre del Curso/Certificación', 'Fecha']],
+        theme: 'grid',
+        headStyles: { fillColor: SECONDARY, textColor: TEXT_DARK, fontSize: 8, fontStyle: 'bold' },
+        styles: { fontSize: 8, lineColor: 230 },
+        columnStyles: { 1: { width: 30, halign: 'center' } },
+        body: courseRows,
+        margin: { left: 14, right: 14 }
+      });
+      currentY = doc.lastAutoTable.finalY + 8;
+  } else {
+      currentY += 5;
+  }
 
   // Experiencia Laboral
-  const jobRows = (worker.details?.work_experience || []).map(job => [
+  const jobsList = worker.work_experience || worker.details?.work_experience || [];
+  const jobRows = jobsList.map(job => [
     job.company, job.role, `${job.period_start || ''} - ${job.period_end || ''}`, job.boss_name || '-'
   ]);
 
@@ -234,10 +265,10 @@ export const generateWorkerPDF = async (worker) => {
       doc.setFontSize(9);
       doc.setTextColor(...PRIMARY);
       doc.setFont("helvetica", "bold");
-      doc.text("EXPERIENCIA LABORAL PREVIA", 14, currentY + 5);
+      doc.text("EXPERIENCIA LABORAL PREVIA", 14, currentY + 4);
 
       autoTable(doc, {
-        startY: currentY + 7,
+        startY: currentY + 6,
         head: [['Empresa', 'Cargo', 'Periodo', 'Referencia']],
         theme: 'grid',
         headStyles: { fillColor: SECONDARY, textColor: TEXT_DARK, fontSize: 8, fontStyle: 'bold' },

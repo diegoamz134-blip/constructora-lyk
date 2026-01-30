@@ -168,9 +168,29 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     setShowPassword(false);
   }, [userToEdit, isOpen]);
 
+  // --- HANDLERS SEGUROS PARA EVITAR RE-RENDERS ---
+
   const handleChange = (e) => {
-    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-    setFormData({ ...formData, [e.target.name]: value });
+    const { name, value, type, checked } = e.target;
+    const newValue = type === 'checkbox' ? checked : value;
+    
+    // Preparamos el nuevo estado
+    let updatedData = { ...formData, [name]: newValue };
+
+    // LÓGICA SEGURA: Si cambia la fecha de ingreso y supera a la de fin, limpiamos la de fin
+    if (name === 'start_date' && formData.contract_end_date && newValue > formData.contract_end_date) {
+        updatedData.contract_end_date = '';
+    }
+
+    setFormData(updatedData);
+  };
+
+  // Validación de teléfono: Solo números y máx 9 dígitos
+  const handlePhoneChange = (e) => {
+    const value = e.target.value.replace(/\D/g, ''); 
+    if (value.length <= 9) {
+      setFormData(prev => ({ ...prev, phone: value }));
+    }
   };
 
   const handleDocumentChange = (e) => {
@@ -222,8 +242,21 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
     e.preventDefault();
     setLoading(true);
 
+    // Validación DNI
     if (formData.document_type === 'DNI' && formData.document_number.length !== 8) {
         setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El DNI debe tener 8 dígitos.' });
+        setLoading(false); return;
+    }
+
+    // Validación Teléfono (Nuevo)
+    if (formData.phone.length > 0 && formData.phone.length !== 9) {
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'El celular debe tener 9 dígitos.' });
+        setLoading(false); return;
+    }
+
+    // Validación Fecha Fin vs Inicio (Nuevo)
+    if (formData.contract_end_date && formData.contract_end_date < formData.start_date) {
+        setNotification({ isOpen: true, type: 'error', title: 'Error en fechas', message: 'El fin de contrato no puede ser anterior al ingreso.' });
         setLoading(false); return;
     }
 
@@ -320,7 +353,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
               <div className="overflow-y-auto p-6 scrollbar-thin">
                 <form onSubmit={handleSubmit} className="space-y-5">
                   
-                  {/* DATOS PERSONALES (Omitido por brevedad, es igual al anterior) */}
+                  {/* DATOS PERSONALES */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Nombres</label><input name="first_name" required value={formData.first_name} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Ap. Paterno</label><input name="paternal_surname" required value={formData.paternal_surname} onChange={handleChange} className="w-full px-3 py-3 bg-slate-50 rounded-xl text-sm border border-slate-200 outline-none focus:border-[#003366]"/></div>
@@ -340,14 +373,32 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess, userToEdit, onDelete }) 
                         <label className="text-xs font-bold text-slate-500 uppercase">Celular</label>
                         <div className="relative h-[48px]">
                             <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" placeholder="999..."/>
+                            <input 
+                              type="tel" 
+                              name="phone" 
+                              value={formData.phone} 
+                              onChange={handlePhoneChange} 
+                              inputMode="numeric"
+                              className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]" 
+                              placeholder="999888777"
+                            />
                         </div>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">F. Ingreso</label><input type="date" name="start_date" required value={formData.start_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
-                    <div className="space-y-1"><label className="text-xs font-bold text-slate-500 uppercase">Fin Contrato</label><input type="date" name="contract_end_date" value={formData.contract_end_date} onChange={handleChange} className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/></div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Fin Contrato</label>
+                      <input 
+                        type="date" 
+                        name="contract_end_date" 
+                        value={formData.contract_end_date} 
+                        onChange={handleChange}
+                        min={formData.start_date}
+                        className="w-full h-[48px] px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"
+                      />
+                    </div>
                   </div>
 
                   {/* CARGO Y SEDE */}
