@@ -92,7 +92,7 @@ const navItems = [
       'jefe_rrhh', 
       'asistente_rrhh',
       'gerente_proyectos', 'coordinador_proyectos',
-      'residente_obra', 'encargado_obra'
+      'encargado_obra'
     ],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
