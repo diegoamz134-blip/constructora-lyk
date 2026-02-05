@@ -51,7 +51,8 @@ const StatusModal = ({ isOpen, onClose, type = 'success', title, message }) => {
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        // CAMBIO IMPORTANTE: z-[9999] para superar al mapa (Leaflet usa z-400 a z-1000)
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           
           {/* Fondo borroso */}
           <motion.div 

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, MapPin, Building2, DollarSign, Activity, AlertCircle } from 'lucide-react';
+import { X, Save, MapPin, Building2, DollarSign, Activity, AlertCircle, Search, Loader2 } from 'lucide-react';
 import { supabase } from '../../../services/supabase';
 
 // --- IMPORTACIONES DE MAPA (Leaflet) ---
 import { MapContainer, TileLayer, Marker, useMapEvents, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+
+// IMPORTAMOS EL MODAL BONITO
+import StatusModal from '../../../components/common/StatusModal';
 
 // Arreglo para el icono por defecto de Leaflet en React
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -28,10 +31,10 @@ const LocationPicker = ({ position, onLocationSelect }) => {
     },
   });
 
-  // Si cambiamos de proyecto y la posición cambia, centramos el mapa ahí
+  // Si cambiamos de proyecto o BUSCAMOS UNA DIRECCIÓN, el mapa vuela ahí
   useEffect(() => {
     if (position) {
-      map.flyTo(position, map.getZoom());
+      map.flyTo(position, 16); // Zoom más cercano al encontrar dirección
     }
   }, [position, map]);
 
@@ -44,8 +47,17 @@ const LocationPicker = ({ position, onLocationSelect }) => {
 
 const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }) => {
   const [loading, setLoading] = useState(false);
+  const [searchingMap, setSearchingMap] = useState(false); 
   const [errorMsg, setErrorMsg] = useState('');
   
+  // Estado para el Modal de Alertas (Feedback bonito)
+  const [statusModal, setStatusModal] = useState({ 
+    isOpen: false, 
+    type: 'success', 
+    title: '', 
+    message: ''
+  });
+
   // Coordenadas por defecto (Lima, Perú)
   const defaultCenter = [-12.046374, -77.042793]; 
 
@@ -67,7 +79,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
       setErrorMsg('');
       
       if (projectToEdit) {
-        // MODO EDICIÓN: Cargar datos del proyecto existente
         setFormData({
           name: projectToEdit.name || '',
           project_code: projectToEdit.project_code || '',
@@ -80,7 +91,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
           status: projectToEdit.status || 'En Ejecución'
         });
       } else {
-        // MODO CREACIÓN: Limpiar formulario
         setFormData({
           name: '', project_code: '', location: '',
           latitude: '', longitude: '',
@@ -103,27 +113,83 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     }));
   };
 
+  const handleCloseStatusModal = () => {
+    setStatusModal({ ...statusModal, isOpen: false });
+  };
+
+  // --- FUNCIÓN MEJORADA: BUSCAR DIRECCIÓN ---
+  const handleAddressSearch = async () => {
+    // 1. Validación inicial con Modal bonito
+    if (!formData.location || formData.location.length < 5) {
+        setStatusModal({
+            isOpen: true,
+            type: 'warning', // Icono amarillo de advertencia
+            title: 'Dirección muy corta',
+            message: 'Por favor ingresa una dirección más específica para poder buscarla en el mapa.'
+        });
+        return;
+    }
+
+    setSearchingMap(true);
+    try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.location + ', Peru')}`);
+        const data = await response.json();
+
+        if (data && data.length > 0) {
+            const result = data[0];
+            const lat = parseFloat(result.lat);
+            const lon = parseFloat(result.lon);
+
+            // Actualizamos coordenadas
+            setFormData(prev => ({
+                ...prev,
+                latitude: lat,
+                longitude: lon
+            }));
+        } else {
+            // 2. Alerta de "No encontrado" bonita
+            setStatusModal({
+                isOpen: true,
+                type: 'warning',
+                title: 'No encontrado',
+                message: 'No pudimos encontrar esa dirección exacta. Intenta añadir el distrito o ser más específico (Ej: Av. Arequipa 123, Lima).'
+            });
+        }
+    } catch (error) {
+        console.error("Error buscando dirección:", error);
+        // 3. Alerta de Error bonita
+        setStatusModal({
+            isOpen: true,
+            type: 'error',
+            title: 'Error de Conexión',
+            message: 'Ocurrió un problema al intentar conectar con el servicio de mapas. Revisa tu internet.'
+        });
+    } finally {
+        setSearchingMap(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
 
     try {
-      // Validaciones básicas
       if (!formData.name || !formData.project_code || !formData.start_date) {
         throw new Error('Por favor completa los campos obligatorios (*)');
       }
 
-      // Validación de Coordenadas
+      // Validación de GPS
       if (!formData.latitude || !formData.longitude) {
-        const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas continuar?");
+        // Mantenemos el confirm nativo aquí porque interrumpe el flujo, 
+        // pero ya tenemos la búsqueda cubierta con modales bonitos.
+        const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas continuar de todas formas?");
         if (!confirmNoGps) {
           setLoading(false);
           return;
         }
       }
 
-      // Preparar objeto de datos
       const projectData = {
         name: formData.name,
         project_code: formData.project_code,
@@ -137,24 +203,19 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
       };
 
       if (projectToEdit) {
-        // --- ACTUALIZAR PROYECTO EXISTENTE ---
         const { error } = await supabase
           .from('projects')
           .update(projectData)
           .eq('id', projectToEdit.id);
-
         if (error) throw error;
-
       } else {
-        // --- CREAR NUEVO PROYECTO ---
         const { error } = await supabase
           .from('projects')
           .insert([projectData]);
-
         if (error) throw error;
       }
 
-      onProjectCreated(); // Recargar lista en el padre
+      onProjectCreated();
       onClose();
     } catch (error) {
       console.error(error);
@@ -243,21 +304,42 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                 </div>
               </div>
 
+              {/* --- CAMPO DE DIRECCIÓN MEJORADO CON BUSCADOR --- */}
               <div className="space-y-1">
-                 <label className="text-xs font-bold text-slate-600">Dirección Referencial</label>
-                 <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                    <input type="text" name="location" value={formData.location} onChange={handleChange} className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none" placeholder="Av. Principal 123..." />
+                 <label className="text-xs font-bold text-slate-600">Dirección y Ubicación GPS</label>
+                 <div className="flex gap-2">
+                    <div className="relative flex-1">
+                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                        <input 
+                            type="text" 
+                            name="location" 
+                            value={formData.location} 
+                            onChange={handleChange} 
+                            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none" 
+                            placeholder="Escribe dirección y busca..." 
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddressSearch(); } }}
+                        />
+                    </div>
+                    <button 
+                        type="button" 
+                        onClick={handleAddressSearch}
+                        disabled={searchingMap}
+                        className="px-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition flex items-center gap-2"
+                        title="Buscar en el mapa"
+                    >
+                        {searchingMap ? <Loader2 className="animate-spin" size={20}/> : <Search size={20}/>}
+                    </button>
                  </div>
+                 <p className="text-[10px] text-slate-400 pl-1">Presiona Enter o el botón para ubicar en el mapa.</p>
               </div>
             </div>
 
             {/* COLUMNA DERECHA: MAPA */}
             <div className="space-y-4 flex flex-col h-full">
                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between items-center">
-                  Ubicación GPS (Para App Obreros)
-                  <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100 normal-case font-bold">
-                    {formData.latitude ? 'Ubicación Seleccionada' : 'Haz clic en el mapa'}
+                  Ubicación GPS Confirmada
+                  <span className={`text-[10px] px-2 py-0.5 rounded border normal-case font-bold ${formData.latitude ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                    {formData.latitude ? '✓ Coordenadas Listas' : 'Sin ubicación GPS'}
                   </span>
                </h3>
 
@@ -301,6 +383,16 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
             </button>
           </div>
         </form>
+
+        {/* --- AQUÍ ESTÁ NUESTRO MODAL BONITO --- */}
+        <StatusModal 
+            isOpen={statusModal.isOpen}
+            onClose={handleCloseStatusModal}
+            type={statusModal.type}
+            title={statusModal.title}
+            message={statusModal.message}
+        />
+
       </div>
     </div>
   );
