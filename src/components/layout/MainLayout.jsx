@@ -129,7 +129,8 @@ const navItems = [
     ],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
-      { path: '/campo/tareo', label: 'Residente de Campo', icon: ClipboardCheck },
+      // AQUÍ SE REALIZÓ EL CAMBIO DE NOMBRE:
+      { path: '/campo/tareo', label: 'Revisión de Asistencia', icon: ClipboardCheck },
       { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
     ]
   },
@@ -301,10 +302,9 @@ const MainLayout = () => {
         })}
       </nav>
 
-      {/* --- FOOTER DEL SIDEBAR MEJORADO --- */}
+      {/* --- FOOTER DEL SIDEBAR --- */}
       <div className="border-t border-white/5 bg-[#050912] p-4">
          
-         {/* TARJETA DE USUARIO */}
          <div className="flex items-center gap-3 mb-4 px-2">
             <div className="shrink-0">
                {displayPhoto ? (
@@ -326,7 +326,6 @@ const MainLayout = () => {
             </div>
          </div>
 
-         {/* BOTONES DE ACCIÓN */}
          <div className="space-y-1">
             {isSuperUser && (
                 <NavLink to="/configuracion" className="flex items-center gap-3 px-4 py-2.5 text-slate-400 hover:text-white transition-colors rounded-xl hover:bg-white/5 w-full">

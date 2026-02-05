@@ -4,14 +4,14 @@ import {
   Calendar, Save, MapPin, CheckCircle, XCircle, 
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
   Building2, ArrowLeft, Image as ImageIcon,
-  ExternalLink, Eye, X, ChevronDown, Coffee, Send 
+  ExternalLink, Eye, X, ChevronDown, Coffee, Send, Clock 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // IMPORTAMOS EL MODAL PERSONALIZADO
 import StatusModal from '../../components/common/StatusModal';
 
-// --- NUEVAS IMPORTACIONES PARA FILTRAR PROYECTOS ---
+// --- IMPORTACIONES PARA FILTRAR PROYECTOS ---
 import { getProjectsForUser } from '../../services/projectsService'; 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
@@ -31,11 +31,11 @@ const FieldAttendancePage = () => {
   // Estado para el Modal de Fotos
   const [photoModal, setPhotoModal] = useState({ isOpen: false, worker: null });
   
-  // Estado para Modal de Confirmación (Pregunta antes de guardar)
+  // Estado para Modal de Confirmación
   const [confirmActionType, setConfirmActionType] = useState(null); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
-  // Estado para el StatusModal (Feedback de Éxito/Error)
+  // Estado para el StatusModal
   const [statusModal, setStatusModal] = useState({ 
     isOpen: false, 
     type: 'success', 
@@ -44,25 +44,21 @@ const FieldAttendancePage = () => {
     onCloseAction: null 
   });
 
-  // 1. Cargar Proyectos Activos (FILTRADO POR USUARIO)
+  // 1. Cargar Proyectos Activos
   useEffect(() => {
     const loadProjects = async () => {
-      if (!currentUser) return; // Esperamos a que cargue el usuario
+      if (!currentUser) return;
 
       try {
-        // Usamos el servicio que filtra: Admin ve todo, Residente ve solo lo asignado
         const data = await getProjectsForUser(currentUser);
-        
-        // Mantenemos el filtro de estado "En Ejecución" que tenías originalmente
         const activeProjects = data.filter(p => p.status === 'En Ejecución');
-        
         setProjects(activeProjects || []);
       } catch (err) {
         console.error("Error cargando proyectos:", err);
       }
     };
     loadProjects();
-  }, [currentUser]); // Se ejecuta cuando detectamos al usuario
+  }, [currentUser]);
 
   // 2. Cargar Cuadrilla y Cruzar con Asistencia
   useEffect(() => {
@@ -74,7 +70,7 @@ const FieldAttendancePage = () => {
     const loadTeamAndAttendance = async () => {
       setLoading(true);
       try {
-        // A. Traer trabajadores asignados
+        // A. Traer trabajadores
         const { data: workersData, error: workersError } = await supabase
           .from('workers')
           .select('*')
@@ -125,7 +121,7 @@ const FieldAttendancePage = () => {
             isOpen: true,
             type: 'error',
             title: 'Error de Carga',
-            message: 'No se pudo cargar la lista de trabajadores. Revisa tu conexión.'
+            message: 'No se pudo cargar la lista de trabajadores.'
         });
       } finally {
         setLoading(false);
@@ -143,7 +139,34 @@ const FieldAttendancePage = () => {
     if (newStatus === 'Presente' && !newWorkers[index].saved) {
         newWorkers[index].observation = ''; 
     }
+
+    // Sin auto-relleno, solo limpieza si no es presente
+    if (newStatus !== 'Presente') {
+        newWorkers[index].checkInTime = null;
+        newWorkers[index].checkOutTime = null;
+    }
     
+    setWorkers(newWorkers);
+  };
+
+  const handleTimeChange = (index, field, timeValue) => {
+    const newWorkers = [...workers];
+    
+    if (timeValue) {
+        // --- CORRECCIÓN HORA PERUANA AL GUARDAR ---
+        // Construimos la fecha ISO explícitamente con el offset de Perú (-05:00)
+        // Esto asegura que "08:00" signifique "08:00 en Perú" y no UTC.
+        const fullDateTime = `${date}T${timeValue}:00-05:00`;
+        newWorkers[index][field] = fullDateTime;
+    } else {
+        newWorkers[index][field] = null;
+    }
+
+    // Si editamos hora, asumimos que está "Presente"
+    if (newWorkers[index].attendanceStatus !== 'Presente') {
+        newWorkers[index].attendanceStatus = 'Presente';
+    }
+
     setWorkers(newWorkers);
   };
 
@@ -157,7 +180,7 @@ const FieldAttendancePage = () => {
   
   const handleSaveClick = (type) => {
     if (!selectedProject || workers.length === 0) return;
-    setConfirmActionType(type); // 'BORRADOR' o 'VALIDADO'
+    setConfirmActionType(type);
     setShowConfirmModal(true);
   };
 
@@ -172,19 +195,13 @@ const FieldAttendancePage = () => {
         let finalCheckIn = w.checkInTime;
         let finalCheckOut = w.checkOutTime;
 
-        // Si es manual y está presente, asignar horas por defecto
-        if (w.origin === 'MANUAL' && w.attendanceStatus === 'Presente') {
-            if (!finalCheckIn) finalCheckIn = `${date} 07:00:00`;
-            if (!finalCheckOut) finalCheckOut = `${date} 17:00:00`;
-        }
-        // Si no está presente, limpiar horas
+        // Limpieza de seguridad
         if (w.attendanceStatus !== 'Presente') {
             finalCheckIn = null;
             finalCheckOut = null;
         }
 
-        return {
-          id: w.attendanceId, 
+        const record = {
           worker_id: w.id,
           project_name: selectedProject.name,
           date: date,
@@ -195,24 +212,42 @@ const FieldAttendancePage = () => {
           observation: w.observation || '',
           validation_status: statusToSave 
         };
+
+        if (w.attendanceId) {
+            record.id = w.attendanceId;
+        }
+
+        return record;
       });
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('attendance')
-        .upsert(recordsToUpsert, { onConflict: 'id' }); 
+        .upsert(recordsToUpsert, { onConflict: 'id' })
+        .select(); 
       
       if (error) throw error;
+
+      if (data) {
+          const updatedWorkers = [...workers];
+          data.forEach(updatedRecord => {
+              const index = updatedWorkers.findIndex(w => w.id === updatedRecord.worker_id);
+              if (index !== -1) {
+                  updatedWorkers[index].attendanceId = updatedRecord.id;
+                  updatedWorkers[index].saved = true;
+              }
+          });
+          setWorkers(updatedWorkers);
+      }
 
       const isValidation = statusToSave === 'VALIDADO';
       
       setStatusModal({
         isOpen: true,
         type: 'success',
-        title: isValidation ? '¡Enviado a RRHH!' : 'Borrador Guardado',
+        title: isValidation ? '¡Enviado a RRHH!' : 'Guardado',
         message: isValidation 
-          ? `Se ha enviado la asistencia de ${workers.length} trabajadores a Recursos Humanos correctamente.`
-          : 'El avance se ha guardado localmente. Recuerda enviar la validación final al terminar el día.',
-        onCloseAction: () => window.location.reload() 
+          ? `Se ha enviado la asistencia de ${workers.length} trabajadores.`
+          : 'Cambios guardados localmente.',
       });
 
     } catch (e) {
@@ -220,8 +255,8 @@ const FieldAttendancePage = () => {
       setStatusModal({
         isOpen: true,
         type: 'error',
-        title: 'Error al Guardar',
-        message: e.message || 'No se pudo guardar la asistencia. Inténtalo de nuevo.'
+        title: 'Error',
+        message: e.message || 'No se pudo guardar.'
       });
     } finally {
       setSaving(false);
@@ -234,10 +269,33 @@ const FieldAttendancePage = () => {
       if (action) action();
   };
 
-  // --- HELPERS ---
-  const formatTime = (isoString) => {
-    if (!isoString) return '--:--';
-    return new Date(isoString).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  // --- HELPERS (HORA PERUANA) ---
+  const getTimeInputValue = (isoString) => {
+    if (!isoString) return '';
+    try {
+        // Creamos la fecha a partir del string
+        const d = new Date(isoString);
+        
+        // --- CORRECCIÓN HORA PERUANA VISUALIZACIÓN ---
+        // Usamos Intl.DateTimeFormat para forzar la zona horaria de Lima
+        // independientemente de la configuración de la PC del usuario.
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/Lima',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false // Formato 24h para el input type="time"
+        });
+        
+        // Extraemos las partes formateadas
+        const parts = formatter.formatToParts(d);
+        const hour = parts.find(p => p.type === 'hour').value;
+        const minute = parts.find(p => p.type === 'minute').value;
+        
+        return `${hour}:${minute}`;
+    } catch (e) {
+        console.error("Error parsing date:", e);
+        return '';
+    }
   };
 
   const openMap = (coords) => {
@@ -275,8 +333,9 @@ const FieldAttendancePage = () => {
       <div className="p-6 max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
+            {/* TÍTULO CAMBIADO A "REVISIÓN DE ASISTENCIA" */}
             <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
-              <ClipboardCheck className="text-[#f0c419]" size={32} /> Supervisión de Campo
+              <ClipboardCheck className="text-[#f0c419]" size={32} /> Revisión de Asistencia
             </h1>
             <p className="text-slate-500 mt-2">Valida la asistencia, ubicación y fotos del personal en obra.</p>
           </div>
@@ -414,34 +473,48 @@ const FieldAttendancePage = () => {
 
                   {/* 2. ENTRADA */}
                   <td className="px-6 py-4 text-center">
-                    {worker.checkInTime ? (
-                      <div className="flex flex-col items-center">
-                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded mb-1">
-                          {formatTime(worker.checkInTime)}
-                        </span>
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="relative group">
+                            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#003366] transition-colors">
+                                <Clock size={14} className="group-hover:rotate-12 transition-transform duration-300"/>
+                            </div>
+                            <input 
+                                type="time"
+                                value={getTimeInputValue(worker.checkInTime)}
+                                onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkInTime', e.target.value)}
+                                className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center shadow-sm group-hover:bg-white"
+                            />
+                        </div>
+
                         {worker.checkInLocation && worker.checkInLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkInLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
                               <MapPin size={10}/> Ver Mapa
                            </button>
                         )}
-                      </div>
-                    ) : <span className="text-slate-300">-</span>}
+                    </div>
                   </td>
 
                   {/* 3. SALIDA */}
                   <td className="px-6 py-4 text-center">
-                    {worker.checkOutTime ? (
-                      <div className="flex flex-col items-center">
-                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded mb-1">
-                          {formatTime(worker.checkOutTime)}
-                        </span>
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="relative group">
+                            <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#003366] transition-colors">
+                                <Clock size={14} className="group-hover:rotate-12 transition-transform duration-300"/>
+                            </div>
+                            <input 
+                                type="time"
+                                value={getTimeInputValue(worker.checkOutTime)}
+                                onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkOutTime', e.target.value)}
+                                className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center shadow-sm group-hover:bg-white"
+                            />
+                        </div>
+
                         {worker.checkOutLocation && worker.checkOutLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkOutLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
                               <MapPin size={10}/> Ver Mapa
                            </button>
                         )}
                       </div>
-                    ) : <span className="text-slate-300">-</span>}
                   </td>
 
                   {/* 4. EVIDENCIA (FOTOS) */}
@@ -458,13 +531,13 @@ const FieldAttendancePage = () => {
                     )}
                   </td>
 
-                  {/* 5. ESTADO (SELECTOR) */}
+                  {/* 5. ESTADO */}
                   <td className="px-6 py-4 text-center">
                     <div className="relative inline-block w-32">
                         <select
                             value={worker.attendanceStatus}
                             onChange={(e) => handleStatusChange(workers.indexOf(worker), e.target.value)}
-                            className={`w-full appearance-none py-1.5 pl-3 pr-8 rounded-lg font-bold text-xs border cursor-pointer outline-none transition-all text-center
+                            className={`w-full appearance-none py-1.5 pl-3 pr-8 rounded-lg font-bold text-xs border cursor-pointer outline-none transition-all text-center shadow-sm
                                 ${getStatusStyles(worker.attendanceStatus)}`}
                         >
                             <option value="Presente">Presente</option>
@@ -497,9 +570,8 @@ const FieldAttendancePage = () => {
           </table>
         </div>
 
-        {/* FOOTER - ACCIONES DE GUARDADO */}
+        {/* FOOTER */}
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-4">
-            {/* BOTÓN 1: GUARDAR BORRADOR */}
             <button 
               onClick={() => handleSaveClick('BORRADOR')}
               disabled={saving || filteredWorkers.length === 0}
@@ -509,7 +581,6 @@ const FieldAttendancePage = () => {
               <span>Guardar Borrador</span>
             </button>
 
-            {/* BOTÓN 2: ENVIAR A RRHH */}
             <button 
               onClick={() => handleSaveClick('VALIDADO')}
               disabled={saving || filteredWorkers.length === 0}
@@ -521,127 +592,60 @@ const FieldAttendancePage = () => {
         </div>
       </div>
 
-      {/* --- MODAL DE FOTOS --- */}
+      {/* MODAL DE FOTOS */}
       <AnimatePresence>
         {photoModal.isOpen && photoModal.worker && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setPhotoModal({ isOpen: false, worker: null })}>
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="p-4 border-b flex justify-between items-center bg-slate-50">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <ImageIcon size={20} className="text-[#003366]"/> 
-                  Evidencia: {photoModal.worker.full_name}
-                </h3>
-                <button onClick={() => setPhotoModal({ isOpen: false, worker: null })} className="p-1 hover:bg-slate-200 rounded-full"><X size={20}/></button>
-              </div>
-              
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-100">
-                {/* FOTO ENTRADA */}
-                <div className="bg-white p-3 rounded-xl shadow-sm">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-bold text-green-700 bg-green-50 px-2 py-1 rounded border border-green-100">ENTRADA</span>
-                    <span className="text-xs text-slate-400 font-mono">{formatTime(photoModal.worker.checkInTime)}</span>
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+               <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+                 <h3 className="font-bold text-slate-800 flex items-center gap-2"><ImageIcon size={20} className="text-[#003366]"/> Evidencia: {photoModal.worker.full_name}</h3>
+                 <button onClick={() => setPhotoModal({isOpen:false, worker:null})} className="p-1 hover:bg-slate-100 rounded-full"><X size={20}/></button>
+               </div>
+               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-100">
+                  <div className="bg-white p-3 rounded-xl shadow-sm">
+                      <p className="font-bold text-xs mb-2 text-green-700 bg-green-50 inline-block px-2 py-1 rounded">ENTRADA</p>
+                      {photoModal.worker.checkInPhoto ? (
+                        <div className="aspect-[3/4] bg-slate-200 rounded-lg overflow-hidden relative group">
+                            <img src={photoModal.worker.checkInPhoto} className="w-full h-full object-cover"/>
+                            <a href={photoModal.worker.checkInPhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2"><ExternalLink size={20}/> Abrir</a>
+                        </div>
+                      ) : <div className="h-64 bg-slate-50 flex items-center justify-center text-xs text-slate-400 border-2 border-dashed rounded-lg">Sin foto</div>}
                   </div>
-                  {photoModal.worker.checkInPhoto ? (
-                    <div className="aspect-[3/4] bg-slate-200 rounded-lg overflow-hidden relative group">
-                      <img src={photoModal.worker.checkInPhoto} alt="Entrada" className="w-full h-full object-cover"/>
-                      <a href={photoModal.worker.checkInPhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2">
-                        <ExternalLink size={20}/> Abrir Original
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="aspect-[3/4] bg-slate-50 rounded-lg flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-200">
-                      <ImageIcon size={40}/>
-                      <span className="text-xs mt-2">Sin foto registrada</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* FOTO SALIDA */}
-                <div className="bg-white p-3 rounded-xl shadow-sm">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100">SALIDA</span>
-                    <span className="text-xs text-slate-400 font-mono">{formatTime(photoModal.worker.checkOutTime)}</span>
+                  <div className="bg-white p-3 rounded-xl shadow-sm">
+                      <p className="font-bold text-xs mb-2 text-red-700 bg-red-50 inline-block px-2 py-1 rounded">SALIDA</p>
+                      {photoModal.worker.checkOutPhoto ? (
+                        <div className="aspect-[3/4] bg-slate-200 rounded-lg overflow-hidden relative group">
+                            <img src={photoModal.worker.checkOutPhoto} className="w-full h-full object-cover"/>
+                            <a href={photoModal.worker.checkOutPhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2"><ExternalLink size={20}/> Abrir</a>
+                        </div>
+                      ) : <div className="h-64 bg-slate-50 flex items-center justify-center text-xs text-slate-400 border-2 border-dashed rounded-lg">Sin foto</div>}
                   </div>
-                  {photoModal.worker.checkOutPhoto ? (
-                    <div className="aspect-[3/4] bg-slate-200 rounded-lg overflow-hidden relative group">
-                      <img src={photoModal.worker.checkOutPhoto} alt="Salida" className="w-full h-full object-cover"/>
-                      <a href={photoModal.worker.checkOutPhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2">
-                        <ExternalLink size={20}/> Abrir Original
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="aspect-[3/4] bg-slate-50 rounded-lg flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-200">
-                      <ImageIcon size={40}/>
-                      <span className="text-xs mt-2">Sin foto registrada</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* --- MODAL DE CONFIRMACIÓN (PREGUNTA) --- */}
+      {/* MODAL CONFIRMACIÓN */}
       <AnimatePresence>
         {showConfirmModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm"
-              onClick={() => setShowConfirmModal(false)}
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm relative z-10 overflow-hidden text-center p-8"
-            >
-              <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 
-                ${confirmActionType === 'VALIDADO' ? 'bg-blue-50 text-[#003366]' : 'bg-slate-100 text-slate-500'}`}>
-                {confirmActionType === 'VALIDADO' ? <ClipboardCheck size={40} strokeWidth={1.5} /> : <Save size={40} strokeWidth={1.5} />}
-              </div>
-              
-              <h3 className="text-2xl font-bold text-slate-800 mb-2">
-                {confirmActionType === 'VALIDADO' ? '¿Enviar a Recursos Humanos?' : '¿Guardar Borrador?'}
-              </h3>
-              
-              <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                {confirmActionType === 'VALIDADO' 
-                  ? <span>Estás a punto de <strong>VALIDAR Y ENVIAR</strong> el tareo del {date}. RRHH podrá ver estos datos inmediatamente para el cálculo de planilla.</span>
-                  : <span>Se guardará el avance actual de <strong>{workers.length} trabajadores</strong>. RRHH NO verá estos datos hasta que decidas enviarlos.</span>
-                }
-              </p>
-
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 py-3.5 text-slate-600 font-bold text-sm bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={executeSaveTareo}
-                  className={`flex-1 py-3.5 text-white font-bold text-sm rounded-xl shadow-lg transition-all active:scale-95
-                    ${confirmActionType === 'VALIDADO' 
-                      ? 'bg-[#003366] hover:bg-blue-900 shadow-blue-900/30' 
-                      : 'bg-slate-600 hover:bg-slate-700 shadow-slate-600/30'}`}
-                >
-                  {confirmActionType === 'VALIDADO' ? 'Confirmar Envío' : 'Guardar'}
-                </button>
-              </div>
-            </motion.div>
+             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowConfirmModal(false)}/>
+             <motion.div initial={{opacity:0, scale:0.9, y:20}} animate={{opacity:1, scale:1, y:0}} className="bg-white rounded-[2rem] p-8 relative z-10 max-w-sm w-full text-center shadow-2xl">
+                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 ${confirmActionType === 'VALIDADO' ? 'bg-blue-50 text-[#003366]' : 'bg-slate-100 text-slate-500'}`}>
+                    {confirmActionType === 'VALIDADO' ? <ClipboardCheck size={40}/> : <Save size={40}/>}
+                </div>
+                <h3 className="text-2xl font-bold text-slate-800 mb-2">{confirmActionType === 'VALIDADO' ? '¿Enviar a RRHH?' : '¿Guardar Borrador?'}</h3>
+                <p className="text-slate-500 text-sm mb-8">Se guardarán los cambios actuales de asistencia.</p>
+                <div className="flex gap-3">
+                    <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3 bg-slate-100 rounded-xl text-slate-600 font-bold hover:bg-slate-200 transition">Cancelar</button>
+                    <button onClick={executeSaveTareo} className={`flex-1 py-3 rounded-xl text-white font-bold shadow-lg transition ${confirmActionType === 'VALIDADO' ? 'bg-[#003366] hover:bg-blue-900' : 'bg-slate-600 hover:bg-slate-700'}`}>Confirmar</button>
+                </div>
+             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* --- NUEVO: STATUS MODAL (FEEDBACK) --- */}
       <StatusModal 
         isOpen={statusModal.isOpen}
         onClose={handleCloseStatusModal}
