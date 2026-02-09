@@ -23,7 +23,16 @@ export const AuthProvider = ({ children }) => {
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
           if (parsedSession.user && parsedSession.role) {
-            // CORRECCIÓN: Aseguramos que el usuario tenga el rol incrustado
+            
+            // --- NUEVA VALIDACIÓN AL RECARGAR PÁGINA ---
+            // Si el usuario guardado NO está activo, borramos la sesión
+            if (parsedSession.user.status && parsedSession.user.status !== 'Activo') {
+               console.warn("Sesión terminada: Usuario no activo.");
+               localStorage.removeItem('lyk_session');
+               setLoading(false);
+               return;
+            }
+
             const userWithRole = { ...parsedSession.user, role: parsedSession.role };
             setUser(userWithRole);
             setRole(parsedSession.role);
@@ -69,6 +78,13 @@ export const AuthProvider = ({ children }) => {
 
     if (!emp) throw new Error('Usuario no encontrado.');
 
+    // --- AQUÍ ESTÁ EL CAMBIO SOLICITADO (VALIDACIÓN DE ESTADO) ---
+    // Si el estado es diferente de 'Activo', bloqueamos el ingreso.
+    if (emp.status !== 'Activo') {
+        throw new Error(`ACCESO DENEGADO: Tu cuenta está en estado "${emp.status}".`);
+    }
+    // -------------------------------------------------------------
+
     // 3. Verificamos contraseña
     if (!emp.password) {
         // Backdoor temporal: DNI como contraseña si no tiene una establecida
@@ -76,6 +92,7 @@ export const AuthProvider = ({ children }) => {
            throw new Error('Contraseña no establecida. Intente con su DNI.');
         }
     } else {
+        // Usamos bcrypt para comparar
         const isValid = await bcrypt.compare(password, emp.password);
         if (!isValid) throw new Error('Contraseña incorrecta.');
     }
@@ -83,7 +100,7 @@ export const AuthProvider = ({ children }) => {
     // 4. DEFINIR ROL Y GUARDAR
     const userRole = isWorker ? 'worker' : (emp.role || 'staff');
     
-    // CORRECCIÓN CLAVE: Inyectamos el rol en el objeto usuario
+    // Inyectamos el rol en el objeto usuario
     const userWithRole = { ...emp, role: userRole };
     const sessionData = { user: userWithRole, role: userRole };
 

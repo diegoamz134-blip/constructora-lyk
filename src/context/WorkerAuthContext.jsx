@@ -12,7 +12,14 @@ export const WorkerAuthProvider = ({ children }) => {
     // 1. Cargar sesión al iniciar
     const storedSession = localStorage.getItem('lyk_worker_session');
     if (storedSession) {
-      setWorker(JSON.parse(storedSession));
+      const parsed = JSON.parse(storedSession);
+      
+      // --- NUEVA VALIDACIÓN AL RECARGAR ---
+      if (parsed.status && parsed.status !== 'Activo') {
+         localStorage.removeItem('lyk_worker_session');
+      } else {
+         setWorker(parsed);
+      }
     }
     setLoading(false);
   }, []);
@@ -30,6 +37,12 @@ export const WorkerAuthProvider = ({ children }) => {
       if (error || !workerData) {
         return { success: false, error: 'Obrero no encontrado o DNI incorrecto.' };
       }
+
+      // --- AQUÍ ESTÁ EL CAMBIO SOLICITADO (VALIDACIÓN DE ESTADO) ---
+      if (workerData.status !== 'Activo') {
+          return { success: false, error: `ACCESO BLOQUEADO: Tu estado es "${workerData.status}".` };
+      }
+      // -------------------------------------------------------------
 
       // 2. Verificar contraseña
       // Si la contraseña es el mismo DNI (primer ingreso o reseteo)
@@ -72,6 +85,12 @@ export const WorkerAuthProvider = ({ children }) => {
       if (error) throw error;
       
       if (data) {
+        // Validación extra por si le cambiaron el estado mientras estaba logueado
+        if (data.status !== 'Activo') {
+            logoutWorker();
+            return;
+        }
+
         const updatedSession = { ...data, role: 'worker' };
         setWorker(updatedSession);
         localStorage.setItem('lyk_worker_session', JSON.stringify(updatedSession));
@@ -93,7 +112,7 @@ export const WorkerAuthProvider = ({ children }) => {
         worker, 
         loginWorker, 
         logoutWorker, 
-        refreshWorker, // <--- AHORA SÍ ESTÁ EXPORTADA
+        refreshWorker, 
         loading 
     }}>
       {children}

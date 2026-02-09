@@ -3,7 +3,7 @@ import {
   Plus, Search, Filter, 
   Edit, Trash2, User, Building2, Phone, 
   MapPin, HardHat, 
-  Construction, X, Users, Hammer, AlertTriangle 
+  Construction, X, Users, Hammer, AlertTriangle, Activity 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AddEmployeeModal from './AddEmployeeModal';
 import AssignProjectsModal from './components/AssignProjectsModal'; 
 import EmployeeDocumentsModal from './components/EmployeeDocumentsModal'; 
+import ChangeStatusModal from './components/ChangeStatusModal'; // <--- NUEVO IMPORT
 
 // Modales Obreros
 import AddWorkerModal from './AddWorkerModal';
@@ -32,6 +33,7 @@ const HumanResourcesPage = () => {
   const [isAddWorkerModalOpen, setIsAddWorkerModalOpen] = useState(false); 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false); // <--- ESTADO NUEVO
   
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
@@ -118,6 +120,12 @@ const HumanResourcesPage = () => {
     if(e) { e.preventDefault(); e.stopPropagation(); }
     setSelectedPerson(person);
     setIsProjectModalOpen(true);
+  };
+
+  const handleChangeStatus = (e, person) => {
+    if(e) { e.preventDefault(); e.stopPropagation(); }
+    setSelectedPerson(person);
+    setIsStatusModalOpen(true);
   };
 
   // --- FILTROS ---
@@ -232,19 +240,23 @@ const HumanResourcesPage = () => {
                 </tr>
               ) : (
                 filteredList.map((item) => {
-                  // LÓGICA DE MAPPING DE DATOS SEGÚN TIPO
                   const isStaff = activeTab === 'staff';
                   
-                  // Campos dinámicos
                   const cargo = isStaff ? (item.position || 'Sin Cargo') : (item.category || 'Peón');
                   const oficina = isStaff ? (item.sedes?.name || <span className="text-slate-400 italic text-xs">Sin Sede</span>) : (item.project_assigned || <span className="text-slate-400 italic text-xs">Sin Asignar</span>);
                   const fechaIngreso = isStaff ? item.entry_date : item.start_date;
                   const fechaFormat = fechaIngreso ? new Date(fechaIngreso + 'T12:00:00').toLocaleDateString('es-PE') : '-';
                   
-                  // Estilos de Cargo
                   const cargoClass = isStaff 
                      ? "text-slate-700 bg-slate-100 border-slate-200"
                      : "text-orange-700 bg-orange-50 border-orange-200";
+
+                  // Colores de estado
+                  let statusColor = 'bg-slate-100 text-slate-500 border-slate-200';
+                  if (item.status === 'Activo') statusColor = 'bg-emerald-50 text-emerald-600 border-emerald-100';
+                  if (item.status === 'Vacaciones') statusColor = 'bg-blue-50 text-blue-600 border-blue-100';
+                  if (item.status === 'De Baja') statusColor = 'bg-red-50 text-red-600 border-red-100';
+                  if (item.status === 'Permiso') statusColor = 'bg-orange-50 text-orange-600 border-orange-100';
 
                   return (
                     <tr key={item.id} className="hover:bg-blue-50/30 transition-colors group">
@@ -266,53 +278,76 @@ const HumanResourcesPage = () => {
                         </div>
                       </td>
 
-                      {/* 2. Documento */}
                       <td className="px-4 py-4 text-sm font-mono text-slate-600">{item.document_number}</td>
 
-                      {/* 3. Cargo / Categoría */}
                       <td className="px-4 py-4">
                           <span className={`text-xs font-bold px-2 py-1 rounded-md border ${cargoClass}`}>
                              {cargo}
                           </span>
                       </td>
 
-                      {/* 4. Oficina / Proyecto */}
                       <td className="px-4 py-4 text-sm text-slate-600">
                           <div className="flex items-center gap-1.5">
                              <Building2 size={14} className="text-slate-400"/> {oficina}
                           </div>
                       </td>
 
-                      {/* 5. Fecha Ingreso */}
                       <td className="px-4 py-4 text-sm text-slate-600">{fechaFormat}</td>
 
-                      {/* 6. Estado */}
+                      {/* 6. Estado (Botón Clickeable para cambiar) */}
                       <td className="px-4 py-4 text-center">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${item.status === 'Activo' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                             {item.status}
-                          </span>
+                          <button 
+                             onClick={(e) => handleChangeStatus(e, item)}
+                             className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border hover:brightness-95 transition-all ${statusColor}`}
+                          >
+                             {item.status || 'Activo'}
+                          </button>
                       </td>
 
-                      {/* 7. Distrito */}
                       <td className="px-4 py-4 text-sm text-slate-600">{item.district || '-'}</td>
 
-                      {/* 8. Celular */}
                       <td className="px-4 py-4 text-sm text-slate-600">
                           {item.phone ? (
                              <div className="flex items-center gap-1"><Phone size={14} className="text-slate-400"/> {item.phone}</div>
                           ) : '-'}
                       </td>
 
-                      {/* 9. Obra Asignada (Gestionar) */}
                       <td className="px-4 py-4 text-center">
-                          <button type="button" onClick={(e) => handleAssignProject(e, item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 hover:scale-105 transition-all border border-blue-100 shadow-sm">
-                             <HardHat size={14} /> Gestionar
-                          </button>
+                          <div className="flex justify-center">
+                              <button 
+                                 type="button" 
+                                 onClick={(e) => handleAssignProject(e, item)} 
+                                 className={`
+                                    inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border
+                                    ${isStaff 
+                                       ? 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:scale-105 shadow-sm' 
+                                       : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50 hover:shadow-md'
+                                    }
+                                 `}
+                                 title="Clic para cambiar asignación"
+                              >
+                                 <HardHat size={14} className={!isStaff && item.project_assigned && item.project_assigned !== 'Sin asignar' ? "text-blue-500" : "text-slate-400"} /> 
+                                 <span className="truncate max-w-[180px]">
+                                    {isStaff 
+                                       ? 'Gestionar' 
+                                       : (item.project_assigned && item.project_assigned !== 'Sin asignar' ? item.project_assigned : 'Sin Asignar')
+                                    }
+                                 </span>
+                              </button>
+                          </div>
                       </td>
 
-                      {/* 10. Acciones */}
                       <td className="px-4 py-4 text-center">
                          <div className="flex items-center justify-center gap-2">
+                             {/* Nuevo botón de actividad para cambiar estado también aquí */}
+                            <button 
+                               type="button" 
+                               onClick={(e) => handleChangeStatus(e, item)} 
+                               className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" 
+                               title="Cambiar Estado"
+                            >
+                               <Activity size={18} />
+                            </button>
                             <button 
                                type="button" 
                                onClick={(e) => handleEdit(e, item)} 
@@ -343,7 +378,6 @@ const HumanResourcesPage = () => {
 
       {/* --- MODALES --- */}
       
-      {/* 1. Modal Staff */}
       <AddEmployeeModal 
         isOpen={isAddModalOpen} 
         onClose={() => setIsAddModalOpen(false)}
@@ -352,7 +386,6 @@ const HumanResourcesPage = () => {
         onDelete={(id) => { setIsAddModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }}
       />
 
-      {/* 2. Modal Obrero */}
       <AddWorkerModal
         isOpen={isAddWorkerModalOpen}
         onClose={() => setIsAddWorkerModalOpen(false)}
@@ -361,7 +394,15 @@ const HumanResourcesPage = () => {
         onDelete={(id) => { setIsAddWorkerModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }}
       />
 
-      {/* 3. Modal de Confirmación de Eliminación */}
+      {/* MODAL NUEVO DE ESTADO */}
+      <ChangeStatusModal
+        isOpen={isStatusModalOpen}
+        onClose={() => setIsStatusModalOpen(false)}
+        user={selectedPerson}
+        isWorker={activeTab === 'workers'}
+        onSuccess={fetchData}
+      />
+
       <AnimatePresence>
         {confirmDeleteModal.isOpen && (
            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={(e)=>e.stopPropagation()}>
@@ -406,7 +447,7 @@ const HumanResourcesPage = () => {
         isOpen={isProjectModalOpen}
         onClose={() => setIsProjectModalOpen(false)}
         user={selectedPerson}
-        isWorker={activeTab === 'workers'}  // <--- AQUÍ ESTÁ LA CORRECCIÓN
+        isWorker={activeTab === 'workers'}
         onSuccess={fetchData}
       />
 
