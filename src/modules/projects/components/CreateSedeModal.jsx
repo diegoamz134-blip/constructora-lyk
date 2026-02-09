@@ -81,12 +81,30 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleMapClick = (latlng) => {
+  // --- LÓGICA CORREGIDA: Reverse Geocoding ---
+  const handleMapClick = async (latlng) => {
+    // 1. Actualización visual inmediata
     setFormData(prev => ({
       ...prev,
       latitude: latlng.lat,
       longitude: latlng.lng
     }));
+
+    // 2. Buscar dirección
+    try {
+        // CORRECCIÓN: latlng.lng (Leaflet) -> lon (API)
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
+        const data = await response.json();
+
+        if (data && data.display_name) {
+             setFormData(prev => ({
+                ...prev,
+                location: data.display_name // Rellenamos el input
+            }));
+        }
+    } catch (error) {
+        console.error("Error al obtener dirección del mapa:", error);
+    }
   };
 
   const handleSubmit = async (e) => {

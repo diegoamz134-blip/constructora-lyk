@@ -105,25 +105,45 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleMapClick = (latlng) => {
+  // --- LÓGICA CORREGIDA: AL HACER CLIC EN EL MAPA ---
+  const handleMapClick = async (latlng) => {
+    // 1. Actualizamos coordenadas visualmente de inmediato
     setFormData(prev => ({
       ...prev,
       latitude: latlng.lat,
       longitude: latlng.lng
     }));
+
+    // 2. Intentamos obtener la dirección (Reverse Geocoding)
+    try {
+        setSearchingMap(true); // Icono de carga
+        // CORRECCIÓN AQUÍ: latlng.lng en lugar de latlng.lon
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
+        const data = await response.json();
+
+        if (data && data.display_name) {
+             setFormData(prev => ({
+                ...prev,
+                location: data.display_name // Rellenamos el campo de texto con la dirección encontrada
+            }));
+        }
+    } catch (error) {
+        console.error("Error obteniendo dirección desde el mapa:", error);
+    } finally {
+        setSearchingMap(false);
+    }
   };
 
   const handleCloseStatusModal = () => {
     setStatusModal({ ...statusModal, isOpen: false });
   };
 
-  // --- FUNCIÓN MEJORADA: BUSCAR DIRECCIÓN ---
+  // --- FUNCIÓN: BUSCAR DIRECCIÓN (TEXTO -> MAPA) ---
   const handleAddressSearch = async () => {
-    // 1. Validación inicial con Modal bonito
     if (!formData.location || formData.location.length < 5) {
         setStatusModal({
             isOpen: true,
-            type: 'warning', // Icono amarillo de advertencia
+            type: 'warning',
             title: 'Dirección muy corta',
             message: 'Por favor ingresa una dirección más específica para poder buscarla en el mapa.'
         });
@@ -147,22 +167,20 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                 longitude: lon
             }));
         } else {
-            // 2. Alerta de "No encontrado" bonita
             setStatusModal({
                 isOpen: true,
                 type: 'warning',
                 title: 'No encontrado',
-                message: 'No pudimos encontrar esa dirección exacta. Intenta añadir el distrito o ser más específico (Ej: Av. Arequipa 123, Lima).'
+                message: 'No pudimos encontrar esa dirección exacta. Intenta añadir el distrito o ser más específico.'
             });
         }
     } catch (error) {
         console.error("Error buscando dirección:", error);
-        // 3. Alerta de Error bonita
         setStatusModal({
             isOpen: true,
             type: 'error',
             title: 'Error de Conexión',
-            message: 'Ocurrió un problema al intentar conectar con el servicio de mapas. Revisa tu internet.'
+            message: 'Ocurrió un problema al intentar conectar con el servicio de mapas.'
         });
     } finally {
         setSearchingMap(false);
@@ -181,8 +199,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
 
       // Validación de GPS
       if (!formData.latitude || !formData.longitude) {
-        // Mantenemos el confirm nativo aquí porque interrumpe el flujo, 
-        // pero ya tenemos la búsqueda cubierta con modales bonitos.
         const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas continuar de todas formas?");
         if (!confirmNoGps) {
           setLoading(false);
@@ -384,7 +400,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
           </div>
         </form>
 
-        {/* --- AQUÍ ESTÁ NUESTRO MODAL BONITO --- */}
         <StatusModal 
             isOpen={statusModal.isOpen}
             onClose={handleCloseStatusModal}

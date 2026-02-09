@@ -406,6 +406,7 @@ const HumanResourcesPage = () => {
         isOpen={isProjectModalOpen}
         onClose={() => setIsProjectModalOpen(false)}
         user={selectedPerson}
+        isWorker={activeTab === 'workers'}  // <--- AQUÍ ESTÁ LA CORRECCIÓN
         onSuccess={fetchData}
       />
 

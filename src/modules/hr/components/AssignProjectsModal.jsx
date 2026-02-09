@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Save, Building2, MapPin, Search, 
-  CheckCircle2, Circle, CheckSquare, Square, 
-  Filter, Briefcase, Map // <--- Nuevos íconos
+  CheckCircle2, Circle, CheckSquare, 
+  Filter, Briefcase, Map, HardHat 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Servicios
 import { getProjects, getUserProjectIds, updateUserProjectAssignments } from '../../../services/projectsService';
-import { getSedes, assignStaffToSede } from '../../../services/sedesService'; // <--- Importamos servicio de Sedes
+import { getSedes, assignStaffToSede } from '../../../services/sedesService';
+import { supabase } from '../../../services/supabase'; // Cliente Supabase directo
 
-const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
+const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess, isWorker = false }) => {
   // Estados de Datos
   const [projects, setProjects] = useState([]);
   const [sedes, setSedes] = useState([]);
@@ -20,7 +21,7 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
   const [selectedSedeId, setSelectedSedeId] = useState(null);
 
   // Estados de UI
-  const [activeTab, setActiveTab] = useState('projects'); // 'projects' | 'sede'
+  const [activeTab, setActiveTab] = useState('projects'); 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,7 +31,7 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
     if (isOpen && user) {
       loadData();
       setSearchTerm('');
-      setActiveTab('projects'); // Resetear a la primera pestaña
+      setActiveTab('projects'); 
     }
   }, [isOpen, user]);
 
@@ -46,12 +47,32 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
       setProjects(allProjects || []);
       setSedes(allSedes || []);
 
-      // 2. Cargar asignaciones actuales de Proyectos
-      const assignedProjects = await getUserProjectIds(user.id);
-      setSelectedProjectIds(assignedProjects);
+      // 2. LOGICA DIFERENCIADA: OBRERO VS STAFF
+      if (isWorker) {
+        // --- LOGICA PARA OBREROS (Basada en tu columna 'project_assigned' tipo TEXT) ---
+        if (user.project_assigned) {
+            // Tu base de datos guarda texto, ej: "Residencial A, Residencial B"
+            // Intentamos hacer match con los nombres de proyectos existentes
+            const assignedNames = user.project_assigned.split(',').map(s => s.trim().toLowerCase());
+            
+            const matchingProjects = (allProjects || []).filter(p => 
+                assignedNames.includes(p.name.toLowerCase())
+            );
+            
+            setSelectedProjectIds(matchingProjects.map(p => p.id));
+        } else {
+            setSelectedProjectIds([]);
+        }
+        
+        // Los obreros no usan la columna sede_id vinculada a tabla sedes en tu schema actual de esta forma
+        setSelectedSedeId(null);
 
-      // 3. Cargar asignación actual de Sede (viene en el objeto user o es null)
-      setSelectedSedeId(user.sede_id || null);
+      } else {
+        // --- LOGICA PARA STAFF (Usa tabla 'project_assignments') ---
+        const assignedProjects = await getUserProjectIds(user.id);
+        setSelectedProjectIds(assignedProjects);
+        setSelectedSedeId(user.sede_id || null);
+      }
 
     } catch (error) {
       console.error("Error cargando asignaciones:", error);
@@ -79,18 +100,26 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
 
   // --- MANEJADORES DE SELECCIÓN ---
 
-  // Proyectos (Multiselección)
   const toggleProject = (projectId) => {
-    setSelectedProjectIds(prev => {
-      if (prev.includes(projectId)) {
-        return prev.filter(id => id !== projectId);
-      } else {
-        return [...prev, projectId];
-      }
-    });
+    if (isWorker) {
+        // Para obreros, comportamiento de Selección Única (Radio Button)
+        // Ya que el campo es texto simple, es mejor asignar una sola obra principal a la vez
+        // Si quieres múltiples, cambia esto a la lógica del 'else'
+        setSelectedProjectIds([projectId]); 
+    } else {
+        // Staff: Multiselección
+        setSelectedProjectIds(prev => {
+            if (prev.includes(projectId)) {
+                return prev.filter(id => id !== projectId);
+            } else {
+                return [...prev, projectId];
+            }
+        });
+    }
   };
 
   const handleSelectAllProjects = () => {
+    if (isWorker) return; // Deshabilitar select all para obreros
     const visibleIds = filteredList.map(p => p.id);
     const allSelected = visibleIds.every(id => selectedProjectIds.includes(id));
 
@@ -102,11 +131,9 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
     }
   };
 
-  // Sede (Selección Única)
   const toggleSede = (sedeId) => {
-    // Si toco la que ya está seleccionada, la desmarco (opcional), sino marco la nueva
     if (selectedSedeId === sedeId) {
-        setSelectedSedeId(null); // Desasignar sede
+        setSelectedSedeId(null); 
     } else {
         setSelectedSedeId(sedeId);
     }
@@ -116,26 +143,43 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // 1. Guardar Proyectos
-      const projectsPromise = updateUserProjectAssignments(user.id, selectedProjectIds);
       
-      // 2. Guardar Sede
-      // Nota: assignStaffToSede maneja internamente si se envía null para desasignar
-      const sedePromise = assignStaffToSede(user.id, selectedSedeId);
+      if (isWorker) {
+        // === GUARDADO PARA OBREROS (Actualizar columna TEXTO en tabla workers) ===
+        
+        // 1. Obtenemos los nombres de los proyectos seleccionados
+        const selectedProjectsData = projects.filter(p => selectedProjectIds.includes(p.id));
+        
+        // Creamos un string separado por comas: "Obra 1" o "Obra 1, Obra 2"
+        const projectNamesString = selectedProjectsData.map(p => p.name).join(', ');
 
-      await Promise.all([projectsPromise, sedePromise]);
+        // 2. Actualizamos directo la tabla workers usando el ID del obrero
+        const { error } = await supabase
+            .from('workers')
+            .update({ 
+                project_assigned: projectNamesString || 'Sin asignar' 
+            })
+            .eq('id', user.id);
+
+        if (error) throw error;
+        
+      } else {
+        // === GUARDADO PARA STAFF (Relacional - Tabla project_assignments) ===
+        const projectsPromise = updateUserProjectAssignments(user.id, selectedProjectIds);
+        const sedePromise = assignStaffToSede(user.id, selectedSedeId);
+        await Promise.all([projectsPromise, sedePromise]);
+      }
       
       if (onSuccess) onSuccess();
       onClose();
     } catch (error) {
-      console.error("Error:", error);
-      alert("Error al guardar cambios");
+      console.error("Error al guardar:", error);
+      alert("Error al guardar cambios: " + (error.message || "Error desconocido"));
     } finally {
       setSaving(false);
     }
   };
 
-  // Stats para el footer
   const selectedCount = activeTab === 'projects' ? selectedProjectIds.length : (selectedSedeId ? 1 : 0);
   const itemLabel = activeTab === 'projects' ? 'obras' : 'sede';
 
@@ -151,21 +195,21 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
         className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] border border-slate-200"
       >
         {/* === HEADER === */}
-        <div className="bg-gradient-to-r from-[#003366] to-[#0f4c8a] p-5 shrink-0 relative overflow-hidden">
+        <div className={`p-5 shrink-0 relative overflow-hidden bg-gradient-to-r ${isWorker ? 'from-orange-600 to-orange-800' : 'from-[#003366] to-[#0f4c8a]'}`}>
           <div className="absolute top-0 right-0 p-4 opacity-10 transform translate-x-2 -translate-y-2">
-            <Building2 size={100} className="text-white" />
+            {isWorker ? <HardHat size={100} className="text-white" /> : <Building2 size={100} className="text-white" />}
           </div>
           
           <div className="relative z-10 flex justify-between items-start">
             <div>
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Briefcase size={24} className="text-blue-200" /> 
-                Asignaciones Laborales
+                {isWorker ? <HardHat size={24} className="text-orange-200" /> : <Briefcase size={24} className="text-blue-200" />}
+                {isWorker ? 'Asignar Obra (Obrero)' : 'Asignaciones Laborales'}
               </h2>
-              <p className="text-blue-100 text-sm mt-1">Configurando para:</p>
+              <p className={isWorker ? "text-orange-100 text-sm mt-1" : "text-blue-100 text-sm mt-1"}>Configurando para:</p>
               <div className="mt-2 inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full border border-white/20 backdrop-blur-md">
                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
-                 <span className="font-bold text-white text-sm tracking-wide">{user?.full_name}</span>
+                 <span className="font-bold text-white text-sm tracking-wide">{user?.full_name || user?.name || 'Usuario'}</span>
               </div>
             </div>
             <button onClick={onClose} className="text-white/70 hover:text-white hover:bg-white/20 p-2 rounded-xl transition-all">
@@ -174,29 +218,31 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
           </div>
         </div>
 
-        {/* === TABS DE NAVEGACIÓN === */}
-        <div className="flex p-2 bg-slate-50 border-b border-slate-100 gap-2 shrink-0">
-            <button
-                onClick={() => { setActiveTab('projects'); setSearchTerm(''); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
-                    activeTab === 'projects' 
-                    ? 'bg-white text-[#003366] shadow-sm border border-slate-200' 
-                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
-                }`}
-            >
-                <Building2 size={16}/> Proyectos
-            </button>
-            <button
-                onClick={() => { setActiveTab('sede'); setSearchTerm(''); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
-                    activeTab === 'sede' 
-                    ? 'bg-white text-[#003366] shadow-sm border border-slate-200' 
-                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
-                }`}
-            >
-                <Map size={16}/> Sede Administrativa
-            </button>
-        </div>
+        {/* === TABS DE NAVEGACIÓN (Solo visible si NO es obrero) === */}
+        {!isWorker && (
+          <div className="flex p-2 bg-slate-50 border-b border-slate-100 gap-2 shrink-0">
+              <button
+                  onClick={() => { setActiveTab('projects'); setSearchTerm(''); }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      activeTab === 'projects' 
+                      ? 'bg-white text-[#003366] shadow-sm border border-slate-200' 
+                      : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                  }`}
+              >
+                  <Building2 size={16}/> Proyectos
+              </button>
+              <button
+                  onClick={() => { setActiveTab('sede'); setSearchTerm(''); }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      activeTab === 'sede' 
+                      ? 'bg-white text-[#003366] shadow-sm border border-slate-200' 
+                      : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                  }`}
+              >
+                  <Map size={16}/> Sede Administrativa
+              </button>
+          </div>
+        )}
 
         {/* === BUSCADOR Y ACCIONES === */}
         <div className="p-4 border-b border-slate-100 bg-white space-y-3 shrink-0">
@@ -216,8 +262,8 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
                {filteredList.length} {activeTab === 'projects' ? 'Proyectos' : 'Sedes'}
              </span>
              
-             {/* Botón "Seleccionar todo" solo visible en Proyectos */}
-             {activeTab === 'projects' && filteredList.length > 0 && (
+             {/* Botón "Seleccionar todo" solo visible en Staff */}
+             {activeTab === 'projects' && !isWorker && filteredList.length > 0 && (
                <button 
                  onClick={handleSelectAllProjects}
                  className="text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors bg-blue-50 text-blue-600 hover:bg-blue-100"
@@ -228,7 +274,7 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
           </div>
         </div>
 
-        {/* === LISTA DE ITEMS (Proyectos o Sedes) === */}
+        {/* === LISTA DE ITEMS === */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-slate-50/30">
           {loading ? (
              <div className="space-y-3">
@@ -244,7 +290,7 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
               <AnimatePresence mode='wait'>
                 {filteredList.map((item) => {
                   
-                  // Lógica de selección dinámica
+                  // Lógica de selección
                   const isSelected = activeTab === 'projects' 
                      ? selectedProjectIds.includes(item.id)
                      : selectedSedeId === item.id;
@@ -281,7 +327,6 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
                           <h4 className={`text-sm font-bold truncate ${isSelected ? 'text-blue-900' : 'text-slate-700'}`}>
                              {item.name}
                           </h4>
-                          {/* Badge opcional para Proyectos */}
                           {activeTab === 'projects' && (
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
                                 item.status === 'En Ejecución' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'
@@ -299,8 +344,8 @@ const AssignProjectsModal = ({ isOpen, onClose, user, onSuccess }) => {
                         </div>
                       </div>
 
-                      {/* Indicador Visual para Sedes (Radio Style) */}
-                      {activeTab === 'sede' && isSelected && (
+                      {/* Badge Visual para Sede o Selección Única Obrero */}
+                      {(activeTab === 'sede' || isWorker) && isSelected && (
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
                             ASIGNADA
                         </div>
