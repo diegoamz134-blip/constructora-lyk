@@ -10,6 +10,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import logoLyk from '../../assets/images/logo-lk-full.png'; 
 import bgImage from '../../assets/images/fondo-login.jpg';
 
+// IMPORTAR EL NUEVO MODAL
+import AccessDeniedModal from './components/AccessDeniedModal';
+
 const LoginPage = () => {
   const navigate = useNavigate();
   
@@ -26,19 +29,22 @@ const LoginPage = () => {
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
 
-  // --- REDIRECCIÓN AUTOMÁTICA MEJORADA ---
+  // ESTADO PARA EL MODAL DE ACCESO DENEGADO
+  const [deniedModal, setDeniedModal] = useState({
+    isOpen: false,
+    user: null,
+    status: '',
+    isWorker: false
+  });
+
   useEffect(() => {
     if (!loading && !loginSuccess && currentUser) {
        console.log("🚀 Usuario detectado:", currentUser);
-       
-       // CORRECCIÓN: Verificamos 'type' (del hook unificado) O 'role' (del contexto)
        const isWorker = 
           currentUser.type === 'worker' || 
           currentUser.role === 'worker' || 
           currentUser.role === 'obrero';
-
        const targetPath = isWorker ? '/worker/dashboard' : '/dashboard';
-       
        navigate(targetPath, { replace: true });
     }
   }, [currentUser, navigate, loading, loginSuccess]);
@@ -61,22 +67,49 @@ const LoginPage = () => {
       const password = formData.password;
 
       if (activeTab === 'staff') {
+         // LOGIN STAFF
          const response = await loginStaff(identifier, password);
          const nameToShow = response.user.full_name?.split(' ')[0] || response.user.first_name || 'Colaborador';
          triggerSuccess('/dashboard', nameToShow);
+
       } else {
+         // LOGIN OBRERO
          const response = await loginWorker(identifier, password);
          
          if (response.success) {
             const nameToShow = response.data.full_name?.split(' ')[0] || 'Compañero';
             triggerSuccess('/worker/dashboard', nameToShow);
          } else {
+            // DETECTAR BLOQUEO OBRERO
+            if (response.isStatusError) {
+                setDeniedModal({
+                    isOpen: true,
+                    user: response.user,
+                    status: response.status,
+                    isWorker: true
+                });
+                setLoading(false); // Detener carga pero no mostrar error rojo
+                return; 
+            }
             throw new Error(response.error || 'Error al iniciar sesión.');
          }
       }
 
     } catch (err) {
       console.error("Login Error:", err);
+      
+      // DETECTAR BLOQUEO STAFF (Viene en el 'throw' del AuthContext)
+      if (err.isStatusError) {
+          setDeniedModal({
+              isOpen: true,
+              user: err.user,
+              status: err.status,
+              isWorker: false
+          });
+          setLoading(false);
+          return;
+      }
+
       let msg = err.message || 'Error de conexión.';
       if (msg.includes('PGRST116')) msg = 'Error de datos duplicados.';
       setError(msg);
@@ -93,7 +126,18 @@ const LoginPage = () => {
   return (
     <div className={`min-h-screen flex flex-col lg:flex-row ${activeTab === 'obrero' ? 'lg:flex-row-reverse' : 'lg:flex-row'} bg-slate-50 overflow-hidden relative`}>
       
-      {/* === OVERLAY DE BIENVENIDA === */}
+      {/* === MODAL DE ACCESO DENEGADO === */}
+      <AccessDeniedModal 
+        isOpen={deniedModal.isOpen}
+        onClose={() => setDeniedModal({ ...deniedModal, isOpen: false })}
+        user={deniedModal.user}
+        status={deniedModal.status}
+        isWorker={deniedModal.isWorker}
+      />
+
+      {/* ... RESTO DEL COMPONENTE LOGIN (Overlay, Imagen, Formulario) IGUAL QUE ANTES ... */}
+      {/* (Mantén todo el código de UI que tenías abajo, es perfecto) */}
+      
       <AnimatePresence>
         {loginSuccess && (
           <motion.div 
@@ -115,7 +159,6 @@ const LoginPage = () => {
         )}
       </AnimatePresence>
 
-      {/* === IMAGEN LATERAL === */}
       <motion.div 
         layout 
         transition={{ type: "spring", stiffness: 60, damping: 20 }}
@@ -156,7 +199,6 @@ const LoginPage = () => {
         </div>
       </motion.div>
 
-      {/* === FORMULARIO === */}
       <motion.div 
         layout 
         transition={{ type: "spring", stiffness: 60, damping: 20 }}
@@ -178,7 +220,6 @@ const LoginPage = () => {
             <p className="text-slate-400 mt-2">Selecciona tu perfil para ingresar</p>
           </div>
 
-          {/* TABS */}
           <div className="bg-slate-100 p-1.5 rounded-2xl mb-8 relative flex">
             <motion.div 
               className="absolute top-1.5 bottom-1.5 rounded-xl bg-white shadow-sm"

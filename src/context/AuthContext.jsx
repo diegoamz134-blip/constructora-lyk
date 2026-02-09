@@ -24,8 +24,7 @@ export const AuthProvider = ({ children }) => {
           const parsedSession = JSON.parse(storedSession);
           if (parsedSession.user && parsedSession.role) {
             
-            // --- NUEVA VALIDACIÓN AL RECARGAR PÁGINA ---
-            // Si el usuario guardado NO está activo, borramos la sesión
+            // Si al recargar detectamos que ya no está activo, cerramos la sesión
             if (parsedSession.user.status && parsedSession.user.status !== 'Activo') {
                console.warn("Sesión terminada: Usuario no activo.");
                localStorage.removeItem('lyk_session');
@@ -52,7 +51,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (identifier, password) => {
     console.log("Intentando login (Staff/Admin) para:", identifier);
     
-    // 1. Buscamos en 'employees'
+    // 1. Buscamos en 'employees' por email o DNI
     let { data: emp, error } = await supabase
       .from('employees')
       .select('*')
@@ -61,7 +60,7 @@ export const AuthProvider = ({ children }) => {
 
     if (error) throw new Error('Error de conexión al buscar usuario.');
 
-    // 2. Si no es empleado, buscamos en 'workers' (Fallback)
+    // 2. Si no es empleado, buscamos en 'workers' (Fallback por si un obrero intenta entrar aquí)
     let isWorker = false;
     if (!emp) {
         const { data: wor } = await supabase
@@ -78,12 +77,16 @@ export const AuthProvider = ({ children }) => {
 
     if (!emp) throw new Error('Usuario no encontrado.');
 
-    // --- AQUÍ ESTÁ EL CAMBIO SOLICITADO (VALIDACIÓN DE ESTADO) ---
-    // Si el estado es diferente de 'Activo', bloqueamos el ingreso.
+    // --- NUEVA VALIDACIÓN DE ESTADO (Para Modal de Acceso Denegado) ---
+    // Si el estado NO es Activo, lanzamos un objeto especial en lugar de un error simple
     if (emp.status !== 'Activo') {
-        throw new Error(`ACCESO DENEGADO: Tu cuenta está en estado "${emp.status}".`);
+        throw { 
+            isStatusError: true, 
+            status: emp.status, 
+            user: emp 
+        };
     }
-    // -------------------------------------------------------------
+    // ------------------------------------------------------------------
 
     // 3. Verificamos contraseña
     if (!emp.password) {
@@ -92,7 +95,7 @@ export const AuthProvider = ({ children }) => {
            throw new Error('Contraseña no establecida. Intente con su DNI.');
         }
     } else {
-        // Usamos bcrypt para comparar
+        // Comparación segura con bcrypt
         const isValid = await bcrypt.compare(password, emp.password);
         if (!isValid) throw new Error('Contraseña incorrecta.');
     }
@@ -100,7 +103,6 @@ export const AuthProvider = ({ children }) => {
     // 4. DEFINIR ROL Y GUARDAR
     const userRole = isWorker ? 'worker' : (emp.role || 'staff');
     
-    // Inyectamos el rol en el objeto usuario
     const userWithRole = { ...emp, role: userRole };
     const sessionData = { user: userWithRole, role: userRole };
 

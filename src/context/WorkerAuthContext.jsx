@@ -14,7 +14,7 @@ export const WorkerAuthProvider = ({ children }) => {
     if (storedSession) {
       const parsed = JSON.parse(storedSession);
       
-      // --- NUEVA VALIDACIÓN AL RECARGAR ---
+      // Validación extra al recargar: si cambió a inactivo, lo sacamos
       if (parsed.status && parsed.status !== 'Activo') {
          localStorage.removeItem('lyk_worker_session');
       } else {
@@ -38,19 +38,23 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Obrero no encontrado o DNI incorrecto.' };
       }
 
-      // --- AQUÍ ESTÁ EL CAMBIO SOLICITADO (VALIDACIÓN DE ESTADO) ---
+      // --- NUEVA VALIDACIÓN DE ESTADO (Para Modal de Acceso Denegado) ---
       if (workerData.status !== 'Activo') {
-          return { success: false, error: `ACCESO BLOQUEADO: Tu estado es "${workerData.status}".` };
+          return { 
+              success: false, 
+              isStatusError: true, // Bandera para el Login Page
+              status: workerData.status,
+              user: workerData, // Datos para el modal
+              error: `Cuenta en estado: ${workerData.status}`
+          };
       }
-      // -------------------------------------------------------------
+      // ------------------------------------------------------------------
 
       // 2. Verificar contraseña
-      // Si la contraseña es el mismo DNI (primer ingreso o reseteo)
       let isValid = false;
       if (password === workerData.document_number) {
-          isValid = true;
+          isValid = true; // Primer ingreso (DNI = Password)
       } else if (workerData.password) {
-          // Si tiene hash, comparamos
           isValid = await bcrypt.compare(password, workerData.password);
       }
 
@@ -71,7 +75,7 @@ export const WorkerAuthProvider = ({ children }) => {
     }
   };
 
-  // --- FUNCIÓN PARA REFRESCAR DATOS (NUEVA) ---
+  // --- FUNCIÓN PARA REFRESCAR DATOS ---
   const refreshWorker = async () => {
     if (!worker?.id) return;
 
@@ -85,7 +89,7 @@ export const WorkerAuthProvider = ({ children }) => {
       if (error) throw error;
       
       if (data) {
-        // Validación extra por si le cambiaron el estado mientras estaba logueado
+        // Si le cambiaron el estado mientras estaba logueado, lo sacamos
         if (data.status !== 'Activo') {
             logoutWorker();
             return;
@@ -94,7 +98,6 @@ export const WorkerAuthProvider = ({ children }) => {
         const updatedSession = { ...data, role: 'worker' };
         setWorker(updatedSession);
         localStorage.setItem('lyk_worker_session', JSON.stringify(updatedSession));
-        console.log("Perfil actualizado en contexto");
       }
     } catch (error) {
       console.error("Error refrescando obrero:", error);

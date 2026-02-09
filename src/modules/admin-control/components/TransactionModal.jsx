@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, DollarSign, FileText, Calendar, Briefcase, Tag, Upload, Image as ImageIcon, Trash2, Loader2, AlertCircle, Edit } from 'lucide-react';
-import { createTransaction, updateTransaction, uploadFinanceFile } from '../../../services/accountingService'; // Importamos update
+import { createTransaction, updateTransaction, uploadFinanceFile } from '../../../services/accountingService';
 import { getProjects } from '../../../services/projectsService';
 
 const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => {
@@ -8,7 +8,6 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
   const [uploading, setUploading] = useState(false);
   const [projects, setProjects] = useState([]);
   
-  // Estado para el archivo
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   
@@ -25,26 +24,23 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
   useEffect(() => {
     if (isOpen) {
       loadProjects();
-      // Si hay transacción para editar, llenamos el formulario
       if (transactionToEdit) {
          setFormData({
             type: transactionToEdit.type,
             description: transactionToEdit.description,
-            amount: transactionToEdit.amount,
+            amount: transactionToEdit.amount.toString(), // Aseguramos que sea string para el formateo
             category: transactionToEdit.category,
             date: transactionToEdit.date,
             project_id: transactionToEdit.project_id || '',
             reference_document: transactionToEdit.reference_document || ''
          });
-         // Si ya tiene archivo, mostramos el link existente (aunque no lo descargamos al input file)
          if (transactionToEdit.file_url) {
             setPreviewUrl(transactionToEdit.file_url); 
          } else {
             setPreviewUrl(null);
          }
-         setSelectedFile(null); // Reseteamos archivo nuevo
+         setSelectedFile(null);
       } else {
-         // Modo Crear: Limpiar
          setFormData({
             type: 'Gasto', description: '', amount: '', category: 'Materiales',
             date: new Date().toISOString().split('T')[0], project_id: '', reference_document: ''
@@ -60,7 +56,42 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
     setProjects(data || []);
   };
 
-  // --- LÓGICA DE COMPRESIÓN DE IMÁGENES ---
+  // --- LÓGICA DE MONTO (NUEVA) ---
+
+  // 1. Formateador Visual (Agrega comas): 1234.5 -> 1,234.5
+  const formatDisplayValue = (value) => {
+    if (!value) return '';
+    // Separamos enteros y decimales
+    const parts = value.split('.');
+    // Agregamos comas solo a la parte entera
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    // Unimos de nuevo
+    return parts.join('.');
+  };
+
+  // 2. Manejador de Cambio (Limpia el input):
+  const handleAmountChange = (e) => {
+    // Obtenemos el valor crudo y quitamos todo lo que NO sea número o punto
+    let val = e.target.value.replace(/[^0-9.]/g, '');
+
+    // Evitar múltiples puntos decimales
+    if ((val.match(/\./g) || []).length > 1) {
+        return; 
+    }
+
+    // Limitar a 2 decimales
+    if (val.includes('.')) {
+        const parts = val.split('.');
+        if (parts[1].length > 2) {
+            val = parts[0] + '.' + parts[1].slice(0, 2);
+        }
+    }
+
+    setFormData({ ...formData, amount: val });
+  };
+
+  // --- FIN LÓGICA DE MONTO ---
+
   const compressImage = async (file) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -134,22 +165,24 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
     e.preventDefault();
     setLoading(true);
     try {
-      let fileUrl = transactionToEdit?.file_url || null; // Mantener URL anterior si existe
+      let fileUrl = transactionToEdit?.file_url || null;
 
-      // 1. Si hay archivo NUEVO, lo subimos y reemplazamos la URL
       if (selectedFile) {
         setUploading(true);
         fileUrl = await uploadFinanceFile(selectedFile);
         setUploading(false);
       }
 
+      // Aseguramos que el monto se guarde como número limpio
+      const cleanAmount = parseFloat(formData.amount); 
+
       const payload = {
         ...formData,
+        amount: cleanAmount, // Enviamos número
         project_id: formData.project_id || null,
         file_url: fileUrl
       };
 
-      // 2. Guardar o Actualizar
       if (transactionToEdit) {
         await updateTransaction(transactionToEdit.id, payload);
       } else {
@@ -184,7 +217,6 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           
-          {/* TABS TIPO */}
           <div className="flex bg-slate-100 p-1 rounded-xl">
             {['Gasto', 'Ingreso'].map(type => (
               <button
@@ -212,13 +244,25 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
                     <label className="text-xs font-bold text-slate-500 uppercase">Monto (S/.)</label>
                     <div className="relative">
                       <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                      
+                      {/* --- INPUT DE MONTO ACTUALIZADO --- */}
                       <input 
-                        type="number" step="0.01" required
+                        type="text" // Cambiado de 'number' a 'text' para permitir comas
+                        inputMode="decimal" // Teclado numérico en móviles
+                        required
                         className="w-full pl-9 pr-3 py-2.5 border-2 border-slate-100 rounded-xl focus:border-blue-500 outline-none font-mono font-bold text-lg text-slate-700 bg-slate-50"
-                        value={formData.amount}
-                        onChange={e => setFormData({...formData, amount: e.target.value})}
+                        
+                        // Valor visible: Usamos la función formatDisplayValue
+                        value={formatDisplayValue(formData.amount)}
+                        
+                        // Al cambiar: Usamos handleAmountChange
+                        onChange={handleAmountChange}
+                        
                         placeholder="0.00"
+                        autoComplete="off"
                       />
+                      {/* ---------------------------------- */}
+                      
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -325,7 +369,6 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
                     </>
                   ) : (
                     <div className="w-full h-full p-4 flex flex-col items-center justify-center relative">
-                        {/* Botón borrar archivo seleccionado */}
                         {selectedFile && (
                           <button 
                             onClick={removeFile}
@@ -338,7 +381,6 @@ const TransactionModal = ({ isOpen, onClose, onSuccess, transactionToEdit }) => 
 
                         {previewUrl ? (
                           <div className="w-full h-full flex items-center justify-center overflow-hidden rounded-lg bg-white border border-slate-200">
-                             {/* Si es PDF o imagen */}
                              {previewUrl.includes('.pdf') ? (
                                 <div className="text-center">
                                     <FileText size={40} className="text-red-500 mb-2 mx-auto"/>

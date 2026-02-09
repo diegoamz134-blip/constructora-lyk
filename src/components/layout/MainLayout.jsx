@@ -13,87 +13,38 @@ import logoFull from '../../assets/images/logo-lk-full.png';
 
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
+import NotificationsMenu from '../common/NotificationsMenu';
 
-// --- CONFIGURACIÓN DE MENÚ ---
+// CONFIGURACIÓN DE MENÚ (Se mantiene igual)
 const navItems = [
-  // 1. DASHBOARD
   { 
     path: '/dashboard', 
     icon: LayoutDashboard, 
     label: 'Dashboard',
-    allowed: [
-      'gerente_admin_finanzas',
-      'contador', 'analista_contable', 'asistente_contabilidad',
-      'administrador', 'asistente_administrativo',
-      'servicios_generales', 'transportista', 'personal_limpieza',
-      'jefe_rrhh', 'tesorera',
-      'gerente_proyectos', 'coordinador_proyectos',
-      'residente_obra', 'encargado_obra',
-      'asistente_residente', 'ingeniero_campo', 'arquitecto_campo', 'ingeniero_instalaciones',
-      'jefe_licitaciones', 'asistente_costos',
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos',
-      'jefe_calidad'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 'asistente_administrativo', 'servicios_generales', 'transportista', 'personal_limpieza', 'jefe_rrhh', 'tesorera', 'gerente_proyectos', 'coordinador_proyectos', 'residente_obra', 'encargado_obra', 'asistente_residente', 'ingeniero_campo', 'arquitecto_campo', 'ingeniero_instalaciones', 'jefe_licitaciones', 'asistente_costos', 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos', 'jefe_calidad']
   },
-
-  // 2. CONTABILIDAD
   { 
     path: '/finanzas', 
     icon: Landmark, 
     label: 'Contabilidad',
-    allowed: [
-      'gerente_admin_finanzas',
-      'contador', 'analista_contable',
-      'asistente_contabilidad',
-      'administrador',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos']
   },
-
-  // 3. ADMINISTRACIÓN
   {
     path: '/administracion',
     icon: Briefcase,
     label: 'Administración',
-    allowed: [
-      'gerente_admin_finanzas',
-      'contador', 'analista_contable',
-      'administrador',
-      'asistente_administrativo',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'contador', 'analista_contable', 'administrador', 'asistente_administrativo', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos']
   },
-
-  // 4. LOGÍSTICA
   {
     path: '/logistica',
     icon: Truck,
     label: 'Logística',
-    allowed: [
-      'gerente_admin_finanzas',
-      'contador', 'analista_contable',
-      'administrador',
-      'asistente_logistica', 'encargado_almacen',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos']
   },
-
-  // 5. RECURSOS HUMANOS
   { 
     label: 'Recursos Humanos', 
     icon: Users,
-    allowed: [
-      'gerente_admin_finanzas',
-      'contador', 'analista_contable',
-      'administrador',
-      'jefe_rrhh', 
-      'asistente_rrhh',
-      'gerente_proyectos', 'coordinador_proyectos',
-      'encargado_obra'
-    ],
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'contador', 'analista_contable', 'administrador', 'jefe_rrhh', 'asistente_rrhh', 'gerente_proyectos', 'coordinador_proyectos', 'encargado_obra'],
     children: [
       { path: '/users', label: 'Personal y Contratos' },
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
@@ -101,64 +52,33 @@ const navItems = [
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
     ]
   },
-
-  // 6. TESORERÍA
   {
     path: '/tesoreria',
     icon: Wallet,
     label: 'Tesorería',
-    allowed: [
-      'gerente_admin_finanzas',
-      'administrador',
-      'jefe_rrhh', 
-      'tesorera',
-      'gerente_proyectos', 'coordinador_proyectos'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'administrador', 'jefe_rrhh', 'tesorera', 'gerente_proyectos', 'coordinador_proyectos']
   },
-
-  // 7. EJECUCIÓN DE OBRAS
   { 
     label: 'Ejecución de Obras', 
     icon: Building2, 
-    allowed: [
-      'gerente_admin_finanzas',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos',
-      'residente_obra', 'encargado_obra',
-      'jefe_calidad'
-    ],
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos', 'residente_obra', 'encargado_obra', 'jefe_calidad'],
     children: [
       { path: '/proyectos', label: 'Panel de Obras' },
-      // AQUÍ SE REALIZÓ EL CAMBIO DE NOMBRE:
       { path: '/campo/tareo', label: 'Revisión de Asistencia', icon: ClipboardCheck },
       { path: '/proyectos/sedes', label: 'Sedes Corporativas' } 
     ]
   },
-
-  // 8. LICITACIONES
   { 
     path: '/licitaciones', 
     icon: FileSpreadsheet, 
     label: 'Licitaciones',
-    allowed: [
-      'gerente_admin_finanzas',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos',
-      'jefe_licitaciones'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos', 'jefe_licitaciones']
   },
-
-  // 9. SSOMA
   {
     path: '/ssoma',
     icon: ShieldCheck,
     label: 'SSOMA',
-    allowed: [
-      'gerente_admin_finanzas',
-      'jefe_rrhh', 
-      'gerente_proyectos', 'coordinador_proyectos',
-      'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos'
-    ]
+    allowed: ['admin', 'gerencia_general', 'gerencia_admin_finanzas', 'jefe_rrhh', 'gerente_proyectos', 'coordinador_proyectos', 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista_riesgos']
   },
 ];
 
@@ -168,11 +88,8 @@ const MainLayout = () => {
   
   const { currentUser, logout, isLoading } = useUnifiedAuth();
   
-  // --- LÓGICA ROBUSTA DE ROL ---
   const rawRole = currentUser?.role || currentUser?.position || 'staff';
   const currentRole = rawRole.toLowerCase().replace(/ /g, '_');
-
-  // Super usuarios ven todo
   const isSuperUser = ['admin', 'gerencia_general'].includes(currentRole);
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -180,8 +97,6 @@ const MainLayout = () => {
   
   const displayName = currentUser?.full_name || currentUser?.email?.split('@')[0] || 'Usuario';
   const displayPhoto = currentUser?.avatar_url || null;
-  
-  // Iniciales para el avatar si no hay foto
   const initials = displayName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
   const [openMenus, setOpenMenus] = useState({
@@ -205,7 +120,6 @@ const MainLayout = () => {
     }, 1000);
   };
 
-  // --- FUNCIÓN PARA MOSTRAR EL ROL BONITO ---
   const formatRoleName = (roleKey) => {
     const roles = {
         'admin': 'Administrador del Sistema',
@@ -302,9 +216,7 @@ const MainLayout = () => {
         })}
       </nav>
 
-      {/* --- FOOTER DEL SIDEBAR --- */}
       <div className="border-t border-white/5 bg-[#050912] p-4">
-         
          <div className="flex items-center gap-3 mb-4 px-2">
             <div className="shrink-0">
                {displayPhoto ? (
@@ -343,7 +255,8 @@ const MainLayout = () => {
 
   const getPageTitle = () => {
     if (location.pathname.includes('/dashboard')) return 'Dashboard General';
-    // ... resto
+    if (location.pathname.includes('/users')) return 'Gestión de RR.HH.';
+    if (location.pathname.includes('/finanzas')) return 'Contabilidad';
     return 'Constructora L&K';
   };
 
@@ -390,7 +303,8 @@ const MainLayout = () => {
       </AnimatePresence>
 
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
-        <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-10">
+        {/* --- CAMBIO AQUÍ: z-40 en el Header para que la campana flote sobre todo --- */}
+        <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-40 relative">
            <div className="flex items-center gap-3">
              <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden">
                <Menu size={24} />
@@ -401,11 +315,10 @@ const MainLayout = () => {
            </div>
            
            <div className="flex items-center gap-2 md:gap-4">
-              <button className="relative p-2 bg-slate-50 md:bg-white rounded-xl text-slate-500 hover:text-[#0F172A] shadow-sm transition-all">
-                <Bell size={20} />
-              </button>
+              
+              <NotificationsMenu />
+
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
-                
                 <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
                   {displayPhoto ? (
                     <img src={displayPhoto} alt="Perfil" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
@@ -413,7 +326,6 @@ const MainLayout = () => {
                     <span className="text-xs font-bold text-slate-500">{initials}</span>
                   )}
                 </div>
-
                 <div className="hidden md:block text-right">
                   <p className="text-sm font-bold text-slate-800 leading-none group-hover:text-[#0F172A]">{displayName}</p>
                   <p className="text-[11px] text-slate-400 font-medium capitalize truncate max-w-[120px]">
@@ -425,7 +337,7 @@ const MainLayout = () => {
            </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide">
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide z-0">
            <Outlet />
         </div>
         

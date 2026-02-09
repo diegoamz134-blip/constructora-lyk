@@ -10,7 +10,6 @@ import L from 'leaflet';
 // IMPORTAMOS EL MODAL BONITO
 import StatusModal from '../../../components/common/StatusModal';
 
-// Arreglo para el icono por defecto de Leaflet en React
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
@@ -31,10 +30,9 @@ const LocationPicker = ({ position, onLocationSelect }) => {
     },
   });
 
-  // Si cambiamos de proyecto o BUSCAMOS UNA DIRECCIÓN, el mapa vuela ahí
   useEffect(() => {
     if (position) {
-      map.flyTo(position, 16); // Zoom más cercano al encontrar dirección
+      map.flyTo(position, 16);
     }
   }, [position, map]);
 
@@ -50,7 +48,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
   const [searchingMap, setSearchingMap] = useState(false); 
   const [errorMsg, setErrorMsg] = useState('');
   
-  // Estado para el Modal de Alertas (Feedback bonito)
   const [statusModal, setStatusModal] = useState({ 
     isOpen: false, 
     type: 'success', 
@@ -58,7 +55,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     message: ''
   });
 
-  // Coordenadas por defecto (Lima, Perú)
   const defaultCenter = [-12.046374, -77.042793]; 
 
   const [formData, setFormData] = useState({
@@ -73,7 +69,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     status: 'En Ejecución'
   });
 
-  // EFECTO: Cargar datos al abrir el modal
   useEffect(() => {
     if (isOpen) {
       setErrorMsg('');
@@ -87,7 +82,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
           longitude: projectToEdit.longitude || '',
           start_date: projectToEdit.start_date || '',
           end_date: projectToEdit.end_date || '',
-          budget: projectToEdit.budget || '',
+          budget: projectToEdit.budget ? projectToEdit.budget.toString() : '',
           status: projectToEdit.status || 'En Ejecución'
         });
       } else {
@@ -105,26 +100,44 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // --- LÓGICA CORREGIDA: AL HACER CLIC EN EL MAPA ---
+  // --- LÓGICA DE PRESUPUESTO (FORMATO BANCARIO) ---
+  const formatDisplayValue = (value) => {
+    if (!value) return '';
+    const strValue = value.toString();
+    const parts = strValue.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return parts.join('.');
+  };
+
+  const handleBudgetChange = (e) => {
+    let val = e.target.value.replace(/[^0-9.]/g, '');
+    if ((val.match(/\./g) || []).length > 1) return; 
+    if (val.includes('.')) {
+        const parts = val.split('.');
+        if (parts[1].length > 2) {
+            val = parts[0] + '.' + parts[1].slice(0, 2);
+        }
+    }
+    setFormData({ ...formData, budget: val });
+  };
+
+  // --- MAPA ---
   const handleMapClick = async (latlng) => {
-    // 1. Actualizamos coordenadas visualmente de inmediato
     setFormData(prev => ({
       ...prev,
       latitude: latlng.lat,
       longitude: latlng.lng
     }));
 
-    // 2. Intentamos obtener la dirección (Reverse Geocoding)
     try {
-        setSearchingMap(true); // Icono de carga
-        // CORRECCIÓN AQUÍ: latlng.lng en lugar de latlng.lon
+        setSearchingMap(true); 
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
         const data = await response.json();
 
         if (data && data.display_name) {
              setFormData(prev => ({
                 ...prev,
-                location: data.display_name // Rellenamos el campo de texto con la dirección encontrada
+                location: data.display_name 
             }));
         }
     } catch (error) {
@@ -134,18 +147,38 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
     }
   };
 
+  // --- MANEJO DE CIERRE DE ALERTAS ---
   const handleCloseStatusModal = () => {
+    // Cerramos el modal de estado
     setStatusModal({ ...statusModal, isOpen: false });
+    
+    // IMPORTANTE: Si era un mensaje de éxito, cerramos también el formulario principal
+    if (statusModal.type === 'success') {
+        onClose();
+    }
   };
 
-  // --- FUNCIÓN: BUSCAR DIRECCIÓN (TEXTO -> MAPA) ---
+  // --- NUEVO: EFECTO DE CIERRE AUTOMÁTICO (2 SEGUNDOS) ---
+  useEffect(() => {
+    let timer;
+    // Si el modal está abierto Y es de tipo éxito
+    if (statusModal.isOpen && statusModal.type === 'success') {
+      timer = setTimeout(() => {
+        handleCloseStatusModal();
+      }, 2000); // 2000 ms = 2 segundos
+    }
+    // Limpieza del timer si el componente se desmonta antes
+    return () => clearTimeout(timer);
+  }, [statusModal]);
+  // ---------------------------------------------------------
+
   const handleAddressSearch = async () => {
     if (!formData.location || formData.location.length < 5) {
         setStatusModal({
             isOpen: true,
             type: 'warning',
             title: 'Dirección muy corta',
-            message: 'Por favor ingresa una dirección más específica para poder buscarla en el mapa.'
+            message: 'Por favor ingresa una dirección más específica.'
         });
         return;
     }
@@ -160,7 +193,6 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
             const lat = parseFloat(result.lat);
             const lon = parseFloat(result.lon);
 
-            // Actualizamos coordenadas
             setFormData(prev => ({
                 ...prev,
                 latitude: lat,
@@ -171,7 +203,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                 isOpen: true,
                 type: 'warning',
                 title: 'No encontrado',
-                message: 'No pudimos encontrar esa dirección exacta. Intenta añadir el distrito o ser más específico.'
+                message: 'No pudimos encontrar esa dirección exacta.'
             });
         }
     } catch (error) {
@@ -180,7 +212,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
             isOpen: true,
             type: 'error',
             title: 'Error de Conexión',
-            message: 'Ocurrió un problema al intentar conectar con el servicio de mapas.'
+            message: 'Ocurrió un problema al conectar con el mapa.'
         });
     } finally {
         setSearchingMap(false);
@@ -197,7 +229,13 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
         throw new Error('Por favor completa los campos obligatorios (*)');
       }
 
-      // Validación de GPS
+      // Validación de Fechas
+      if (formData.end_date && formData.start_date) {
+         if (new Date(formData.end_date) < new Date(formData.start_date)) {
+            throw new Error('La fecha de fin no puede ser anterior a la fecha de inicio.');
+         }
+      }
+
       if (!formData.latitude || !formData.longitude) {
         const confirmNoGps = window.confirm("⚠️ No has seleccionado una ubicación en el mapa.\n\nSin coordenadas, la validación GPS para los obreros NO funcionará.\n¿Deseas continuar de todas formas?");
         if (!confirmNoGps) {
@@ -205,6 +243,8 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
           return;
         }
       }
+
+      const cleanBudget = formData.budget ? parseFloat(formData.budget) : 0;
 
       const projectData = {
         name: formData.name,
@@ -214,7 +254,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
         longitude: formData.longitude || null,
         start_date: formData.start_date,
         end_date: formData.end_date || null,
-        budget: formData.budget || 0,
+        budget: cleanBudget,
         status: formData.status
       };
 
@@ -231,8 +271,19 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
         if (error) throw error;
       }
 
+      // Actualizamos la lista en la página principal
       onProjectCreated();
-      onClose();
+      
+      // Mostrar Alerta de Éxito (se cerrará sola en 2s)
+      setStatusModal({
+        isOpen: true,
+        type: 'success',
+        title: projectToEdit ? 'Proyecto Actualizado' : 'Proyecto Creado',
+        message: projectToEdit 
+            ? 'Los cambios se han guardado correctamente.' 
+            : 'El nuevo proyecto ha sido registrado.'
+      });
+
     } catch (error) {
       console.error(error);
       setErrorMsg(error.message);
@@ -255,7 +306,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
               {projectToEdit ? 'Editar Proyecto' : 'Crear Nuevo Proyecto'}
             </h2>
             <p className="text-slate-500 text-sm">
-              {projectToEdit ? 'Modifica los detalles del proyecto seleccionado.' : 'Ingresa los detalles y la ubicación de la obra.'}
+              {projectToEdit ? 'Modifica los detalles del proyecto.' : 'Ingresa los detalles y la ubicación de la obra.'}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition">
@@ -273,7 +324,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
-            {/* COLUMNA IZQUIERDA: DATOS GENERALES */}
+            {/* COLUMNA IZQUIERDA */}
             <div className="space-y-4">
               <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Información General</h3>
               
@@ -286,7 +337,19 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                   <label className="text-xs font-bold text-slate-600">Presupuesto (S/.)</label>
                   <div className="relative">
                     <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" size={14}/>
-                    <input type="number" name="budget" value={formData.budget} onChange={handleChange} className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none" placeholder="0.00" />
+                    
+                    {/* INPUT PRESUPUESTO */}
+                    <input 
+                      type="text" 
+                      inputMode="decimal"
+                      name="budget"
+                      value={formatDisplayValue(formData.budget)} 
+                      onChange={handleBudgetChange} 
+                      className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none font-bold text-slate-700" 
+                      placeholder="0.00" 
+                      autoComplete="off"
+                    />
+
                   </div>
                 </div>
               </div>
@@ -303,7 +366,14 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-600">Fecha Fin (Aprox)</label>
-                  <input type="date" name="end_date" value={formData.end_date} onChange={handleChange} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none" />
+                  <input 
+                    type="date" 
+                    name="end_date" 
+                    value={formData.end_date} 
+                    onChange={handleChange} 
+                    min={formData.start_date}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:border-[#003366] outline-none" 
+                  />
                 </div>
               </div>
 
@@ -320,7 +390,7 @@ const CreateProjectModal = ({ isOpen, onClose, onProjectCreated, projectToEdit }
                 </div>
               </div>
 
-              {/* --- CAMPO DE DIRECCIÓN MEJORADO CON BUSCADOR --- */}
+              {/* --- CAMPO DE DIRECCIÓN --- */}
               <div className="space-y-1">
                  <label className="text-xs font-bold text-slate-600">Dirección y Ubicación GPS</label>
                  <div className="flex gap-2">
