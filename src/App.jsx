@@ -7,7 +7,7 @@ import MainLayout from './components/layout/MainLayout';
 import WorkerLayout from './components/layout/WorkerLayout';
 import RoleProtectedRoute from './components/layout/RoleProtectedRoute';
 import OnboardingGuard from './components/layout/OnboardingGuard';
-import WorkerOnboardingGuard from './components/layout/WorkerOnboardingGuard'; // <--- IMPORTANTE
+import WorkerOnboardingGuard from './components/layout/WorkerOnboardingGuard'; 
 
 // Páginas Públicas
 const ClientLandingPage = React.lazy(() => import('./modules/landing/ClientLandingPage'));
@@ -29,9 +29,13 @@ const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetai
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
 
+// --- AQUÍ ESTÁ EL IMPORT AGREGADO ---
+const SsomaPage = React.lazy(() => import('./modules/ssoma/SsomaPage'));
+// ------------------------------------
+
 // PÁGINAS DE ONBOARDING
 const StaffOnboardingPage = React.lazy(() => import('./modules/onboarding/StaffOnboardingPage'));
-const WorkerOnboardingPage = React.lazy(() => import('./modules/onboarding/WorkerOnboardingPage')); // <--- NUEVA PÁGINA
+const WorkerOnboardingPage = React.lazy(() => import('./modules/onboarding/WorkerOnboardingPage')); 
 
 // PÁGINA DE MANTENIMIENTO
 const MaintenancePage = React.lazy(() => import('./components/common/MaintenancePage'));
@@ -63,7 +67,7 @@ function App() {
         {/* --- ONBOARDING STAFF --- */}
         <Route path="/onboarding" element={<StaffOnboardingPage />} />
 
-        {/* --- ONBOARDING OBREROS (IMPORTANTE: Definida explícitamente) --- */}
+        {/* --- ONBOARDING OBREROS --- */}
         <Route path="/worker/onboarding" element={<WorkerOnboardingPage />} />
 
         {/* --- RUTAS PROTEGIDAS STAFF --- */}
@@ -120,12 +124,14 @@ function App() {
              </Route>
           </Route>
 
-          {/* SSOMA */}
+          {/* --- AQUÍ ESTÁ EL CAMBIO EN LA RUTA DE SSOMA --- */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista']} />}>
              <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-                <Route path="/ssoma" element={<MaintenancePage title="Gestión SSOMA" />} />
+                {/* Cambiamos MaintenancePage por SsomaPage */}
+                <Route path="/ssoma" element={<SsomaPage />} />
              </Route>
           </Route>
+          {/* ----------------------------------------------- */}
 
           {/* RRHH */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_rrhh']} />}>
@@ -148,7 +154,6 @@ function App() {
         </Route> {/* FIN DEL ONBOARDING GUARD STAFF */}
 
         {/* --- RUTAS DE OBREROS (WORKERS) --- */}
-        {/* Envolvemos con WorkerOnboardingGuard */}
         <Route element={<WorkerOnboardingGuard />}>
           <Route path="/worker" element={<WorkerLayout />}>
             <Route path="dashboard" element={<WorkerDashboard />} />
