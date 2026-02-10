@@ -29,9 +29,11 @@ const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetai
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
 
-// --- AQUÍ ESTÁ EL IMPORT AGREGADO ---
+// --- NUEVO IMPORT PARA LOGÍSTICA ---
+const LogisticsPage = React.lazy(() => import('./modules/logistics/LogisticsPage'));
+// -----------------------------------
+
 const SsomaPage = React.lazy(() => import('./modules/ssoma/SsomaPage'));
-// ------------------------------------
 
 // PÁGINAS DE ONBOARDING
 const StaffOnboardingPage = React.lazy(() => import('./modules/onboarding/StaffOnboardingPage'));
@@ -110,10 +112,11 @@ function App() {
              </Route>
           </Route>
 
-          {/* LOGÍSTICA */}
+          {/* LOGÍSTICA - ACTUALIZADO */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen']} />}>
              <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-                <Route path="/logistica" element={<MaintenancePage title="Logística y Almacén" />} />
+                {/* Aquí conectamos tu nueva página */}
+                <Route path="/logistica" element={<LogisticsPage />} />
              </Route>
           </Route>
 
@@ -124,14 +127,12 @@ function App() {
              </Route>
           </Route>
 
-          {/* --- AQUÍ ESTÁ EL CAMBIO EN LA RUTA DE SSOMA --- */}
+          {/* SSOMA */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'jefe_ssoma', 'coordinador_ssoma', 'prevencionista']} />}>
              <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-                {/* Cambiamos MaintenancePage por SsomaPage */}
                 <Route path="/ssoma" element={<SsomaPage />} />
              </Route>
           </Route>
-          {/* ----------------------------------------------- */}
 
           {/* RRHH */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_rrhh']} />}>
