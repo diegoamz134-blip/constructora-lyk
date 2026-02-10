@@ -33,6 +33,15 @@ export const logisticsService = {
     return data[0];
   },
 
+  deleteProduct: async (id) => {
+    const { error } = await supabase
+      .from('logistics_products')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+    return true;
+  },
+
   // --- CATEGORÍAS ---
   getCategories: async () => {
     const { data, error } = await supabase
@@ -43,7 +52,7 @@ export const logisticsService = {
     return data;
   },
 
-  // --- KARDEX (MOVIMIENTOS) ---
+  // --- KARDEX ---
   getKardex: async (productId) => {
     const { data, error } = await supabase
       .from('logistics_movements')
@@ -53,13 +62,11 @@ export const logisticsService = {
       `)
       .eq('product_id', productId)
       .order('created_at', { ascending: false });
-    
     if (error) throw error;
     return data;
   },
 
   registerMovement: async (movementData) => {
-    // 1. Registrar movimiento
     const { data: movement, error: moveError } = await supabase
       .from('logistics_movements')
       .insert([movementData])
@@ -67,7 +74,6 @@ export const logisticsService = {
       .single();
     if (moveError) throw moveError;
 
-    // 2. Actualizar stock (simple)
     const { data: product } = await supabase
       .from('logistics_products')
       .select('stock_current')
@@ -105,7 +111,6 @@ export const logisticsService = {
     return data[0];
   },
 
-  // [NUEVO] Actualizar proveedor
   updateProvider: async (id, updates) => {
     const { data, error } = await supabase
       .from('logistics_providers')
@@ -119,6 +124,124 @@ export const logisticsService = {
   deleteProvider: async (id) => {
     const { error } = await supabase
       .from('logistics_providers')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+    return true;
+  },
+
+  // --- ÓRDENES DE COMPRA ---
+  getOrders: async () => {
+    const { data, error } = await supabase
+      .from('logistics_orders')
+      .select(`
+        *,
+        provider:logistics_providers(name, ruc),
+        items:logistics_order_items(*)
+      `)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  createOrder: async (orderData, items) => {
+    // 1. Crear cabecera
+    const { data: order, error: orderError } = await supabase
+      .from('logistics_orders')
+      .insert([orderData])
+      .select()
+      .single();
+    
+    if (orderError) throw orderError;
+
+    // 2. Preparar ítems
+    const itemsWithOrderId = items.map(item => ({
+      order_id: order.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      total_price: item.total_price
+    }));
+
+    // 3. Insertar ítems
+    const { error: itemsError } = await supabase
+      .from('logistics_order_items')
+      .insert(itemsWithOrderId);
+
+    if (itemsError) throw itemsError;
+
+    return order;
+  },
+
+  // --- AQUÍ ESTÁ LA MAGIA ---
+  updateOrderStatus: async (id, status) => {
+    // 1. Si el estado es "Recibido", actualizamos el inventario
+    if (status === 'Recibido') {
+        // A. Verificar que no haya sido recibido antes para no duplicar
+        const { data: currentOrder } = await supabase
+            .from('logistics_orders')
+            .select('status')
+            .eq('id', id)
+            .single();
+
+        if (currentOrder.status === 'Recibido') {
+             throw new Error('Esta orden ya fue recibida anteriormente.');
+        }
+
+        // B. Traer los productos de la orden
+        const { data: items, error: itemsError } = await supabase
+            .from('logistics_order_items')
+            .select('*')
+            .eq('order_id', id);
+
+        if (itemsError) throw itemsError;
+
+        // C. Bucle: Actualizar cada producto
+        for (const item of items) {
+            // Traer stock actual
+            const { data: product } = await supabase
+                .from('logistics_products')
+                .select('stock_current')
+                .eq('id', item.product_id)
+                .single();
+
+            if (product) {
+                const newStock = Number(product.stock_current) + Number(item.quantity);
+
+                // Actualizar Producto
+                await supabase
+                    .from('logistics_products')
+                    .update({ stock_current: newStock })
+                    .eq('id', item.product_id);
+
+                // Crear movimiento en Kardex
+                await supabase
+                    .from('logistics_movements')
+                    .insert([{
+                        product_id: item.product_id,
+                        type: 'ENTRADA',
+                        quantity: item.quantity,
+                        reason: `Recepción Orden Compra #${id}`,
+                        created_at: new Date()
+                    }]);
+            }
+        }
+    }
+
+    // 2. Finalmente cambiar el estado de la orden
+    const { data, error } = await supabase
+      .from('logistics_orders')
+      .update({ status })
+      .eq('id', id)
+      .select();
+    
+    if (error) throw error;
+    return data[0];
+  },
+  
+  deleteOrder: async (id) => {
+    const { error } = await supabase
+      .from('logistics_orders')
       .delete()
       .eq('id', id);
     if (error) throw error;
