@@ -109,7 +109,6 @@ const UserProfilePage = () => {
     const { name, value } = e.target;
     const safeValue = value === null || value === undefined ? '' : value;
 
-    // Lógica para actualizar estado
     setProfile(prev => {
         let newProfile = { ...prev };
 
@@ -124,7 +123,6 @@ const UserProfilePage = () => {
             newProfile.onboarding_data = { ...prev.onboarding_data, [section]: list };
         }
 
-        // LÓGICA DE CALCULO DE EDAD AUTOMÁTICO
         if (name === 'birth_date') {
             const birth = new Date(safeValue);
             const now = new Date();
@@ -133,7 +131,6 @@ const UserProfilePage = () => {
             if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
                 age--;
             }
-            // Actualizamos la edad dentro de onboarding_data
             newProfile.onboarding_data = { 
                 ...newProfile.onboarding_data, 
                 age: age.toString() 
@@ -256,7 +253,6 @@ const UserProfilePage = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto space-y-6 pb-20 p-4 md:p-6">
       
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between">
          <div>
             <h1 className="text-2xl font-bold text-slate-800">Mi Perfil</h1>
@@ -298,7 +294,8 @@ const UserProfilePage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* COLUMNA IZQUIERDA: RESUMEN */}
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center h-fit sticky top-6">
+        {/* CORRECCIÓN: 'relative' para móvil, 'sticky' solo para desktop (lg) */}
+        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center h-fit relative lg:sticky lg:top-6">
           <div className="relative mb-4 group cursor-pointer" onClick={() => fileInputRef.current.click()}>
             <div className={`w-32 h-32 rounded-full border-4 border-slate-50 relative overflow-hidden bg-slate-100 ${uploading ? 'opacity-50' : ''}`}>
                {!imageError && avatarSrc ? (
@@ -331,10 +328,8 @@ const UserProfilePage = () => {
           </div>
         </div>
 
-        {/* COLUMNA DERECHA: CONTENIDO */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* TAB 1: GENERAL */}
           {activeTab === 'general' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
@@ -344,14 +339,11 @@ const UserProfilePage = () => {
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8">
                     <Field label="Nombres Completos" name="full_name" value={profile.full_name} onChange={handleChange} isEditing={isEditing} />
                     
-                    {/* FECHA DE NACIMIENTO Y EDAD */}
                     <Field label="F. Nacimiento" name="birth_date" value={profile.birth_date} onChange={handleChange} isEditing={isEditing} type="date" />
                     <Field label="Edad" name="age" value={ob.age} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="number" />
                     
-                    {/* SEXO Y SISTEMA DE PENSIÓN */}
                     <Field label="Sexo" name="gender" value={ob.gender} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     
-                    {/* PENSION SYSTEM - SELECTOR */}
                     {isEditing ? (
                         <div className="flex flex-col gap-1.5 w-full">
                             <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Sistema Pensión</label>
@@ -369,7 +361,6 @@ const UserProfilePage = () => {
                         <Field label="Sistema Pensión" name="afp_status" value={ob.afp_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={false} />
                     )}
 
-                    {/* CARGO Y FECHA DE INGRESO */}
                     <Field label="Cargo" name="role" value={profile.role} onChange={handleChange} isEditing={false} />
                     <Field label="Fecha Ingreso" name="entry_date" value={profile.entry_date} onChange={handleChange} isEditing={isEditing} type="date" />
 
@@ -381,7 +372,6 @@ const UserProfilePage = () => {
                  </div>
                </div>
 
-               {/* Seguridad */}
                <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
                  <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Shield size={18}/> Seguridad</h3>
                  <form onSubmit={handlePasswordUpdate} className="flex flex-col md:flex-row gap-4 items-end">
@@ -401,7 +391,6 @@ const UserProfilePage = () => {
             </motion.div>
           )}
 
-          {/* TAB 2: DETALLES */}
           {activeTab === 'details' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
@@ -423,7 +412,6 @@ const UserProfilePage = () => {
                         <Field label="Nombre Madre" name="mother_name" value={ob.mother_name} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                     </div>
 
-                    {/* LISTA DE HIJOS */}
                     {ob.children && ob.children.length > 0 && (
                         <div className="mb-6 bg-slate-50 p-4 rounded-xl">
                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Detalle Hijos</h4>
@@ -436,7 +424,6 @@ const UserProfilePage = () => {
                         </div>
                     )}
 
-                    {/* LISTA DE EMERGENCIAS */}
                     <div className="bg-red-50 p-4 rounded-xl border border-red-100">
                         <h4 className="text-xs font-bold text-red-800 uppercase mb-3">Contactos de Emergencia</h4>
                         {ob.emergency_contacts && ob.emergency_contacts.length > 0 ? (
@@ -463,7 +450,6 @@ const UserProfilePage = () => {
             </motion.div>
           )}
 
-          {/* TAB 3: PROFESIONAL */}
           {activeTab === 'professional' && (
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
@@ -472,10 +458,11 @@ const UserProfilePage = () => {
                         <Field label="Nivel" name="education_level" value={ob.education_level} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Estado" name="education_status" value={ob.education_status} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
                         <Field label="Institución" name="institution" value={ob.institution} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
-                        <Field label="Año Egreso" name="grad_year" value={ob.grad_year} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} />
+                        
+                        {/* CORRECCIÓN PREVIA MANTENIDA: grad_date */}
+                        <Field label="F. Egreso / Grado" name="grad_date" value={ob.grad_date} onChange={e => handleChange(e, 'onboarding_data')} isEditing={isEditing} type="date" />
                     </div>
                     
-                    {/* VISUALIZAR CURSOS */}
                     {ob.additional_courses && ob.additional_courses.length > 0 && (
                         <div className="mt-4 pt-4 border-t border-slate-100">
                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Cursos Adicionales</h4>
@@ -536,7 +523,6 @@ const UserProfilePage = () => {
              </motion.div>
           )}
 
-          {/* TAB 4: BANCARIO */}
           {activeTab === 'bank' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
                  <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><Building2 size={20} className="text-indigo-600"/> Información Bancaria</h3>
