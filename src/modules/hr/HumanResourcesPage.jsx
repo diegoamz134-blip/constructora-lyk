@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AddEmployeeModal from './AddEmployeeModal';
 import AssignProjectsModal from './components/AssignProjectsModal'; 
 import EmployeeDocumentsModal from './components/EmployeeDocumentsModal'; 
-import ChangeStatusModal from './components/ChangeStatusModal'; // <--- NUEVO IMPORT
+import ChangeStatusModal from './components/ChangeStatusModal'; 
 
 // Modales Obreros
 import AddWorkerModal from './AddWorkerModal';
@@ -33,7 +33,7 @@ const HumanResourcesPage = () => {
   const [isAddWorkerModalOpen, setIsAddWorkerModalOpen] = useState(false); 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false); // <--- ESTADO NUEVO
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false); 
   
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
@@ -95,7 +95,7 @@ const HumanResourcesPage = () => {
     setConfirmDeleteModal({ isOpen: true, id, name });
   };
 
-  // EJECUTAR ELIMINACIÓN
+  // EJECUTAR ELIMINACIÓN (CORREGIDO)
   const executeDelete = async () => {
     const idToDelete = confirmDeleteModal.id;
     if (!idToDelete) return;
@@ -105,14 +105,56 @@ const HumanResourcesPage = () => {
 
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
+      
+      // --- SOLUCIÓN ERROR FK (Foreign Key) ---
+      // Antes de borrar al usuario, borramos sus dependencias para evitar el error 409/23503.
+      
+      if (activeTab === 'staff') {
+        // 1. Borrar Asistencias del Staff
+        // El error menciona 'attendance_employee_id_fkey', por lo tanto la columna es 'employee_id'
+        const { error: attendanceError } = await supabase
+          .from('attendance')
+          .delete()
+          .eq('employee_id', idToDelete);
+
+        if (attendanceError) {
+           console.error("Error limpiando asistencia:", attendanceError);
+           // Si falla esto, lanzamos error para no intentar borrar al usuario a medias
+           throw new Error("No se pudieron eliminar las asistencias vinculadas.");
+        }
+        
+        // NOTA: Si en el futuro tienes otras tablas (ej: 'payroll', 'documents'), agrégalas aquí.
+        
+      } else {
+        // Lógica preventiva para Obreros (Workers)
+        // Intentamos borrar asistencias si existen bajo 'worker_id'
+        await supabase
+           .from('attendance')
+           .delete()
+           .eq('worker_id', idToDelete)
+           .catch(() => {}); // Ignoramos error si la columna no existe o no aplica
+      }
+
+      // --- AHORA SÍ BORRAMOS AL USUARIO ---
       const { error } = await supabase.from(table).delete().eq('id', idToDelete);
+      
       if (error) throw error;
       
-      setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro eliminado correctamente.' });
+      setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro y sus datos asociados eliminados correctamente.' });
       fetchData(); 
     } catch (error) {
-      console.error(error);
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo eliminar.' });
+      console.error('Error executing delete:', error);
+      
+      let errorMsg = 'No se pudo eliminar.';
+      
+      // Si sigue saliendo error de llave foránea (quizás otra tabla que no vimos)
+      if (error.code === '23503') {
+         errorMsg = 'No se puede eliminar: El usuario tiene registros vinculados (Planillas, Contratos, etc.) activos.';
+      } else if (error.message) {
+         errorMsg = error.message;
+      }
+
+      setNotification({ isOpen: true, type: 'error', title: 'Error', message: errorMsg });
     }
   };
 
