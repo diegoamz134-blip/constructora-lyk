@@ -4,16 +4,20 @@ import {
   Building2, Activity, Clock, 
   MapPin, LogIn, LogOut, CheckCircle2, Loader2,
   AlertTriangle, ChevronLeft, ChevronRight, CheckCircle,
-  Briefcase, RefreshCw, Save, X, Cloud, Sun, CloudRain, Wind, CloudLightning
+  Briefcase, RefreshCw, Save, X, Cloud, Sun, CloudRain, Wind, CloudLightning,
+  Camera 
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, LineChart, Line
 } from 'recharts';
+import { toast } from 'sonner';
+
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../context/AuthContext';
 import StatusModal from '../../components/common/StatusModal';
 import EmployeeDocumentsModal from '../hr/components/EmployeeDocumentsModal';
+import CameraModal from '../../components/common/CameraModal'; 
 
 // COLORES PARA GRÁFICOS
 const COLORS = ['#003366', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
@@ -54,6 +58,10 @@ const DashboardPage = () => {
   // FILTRO RESIDENTE
   const [residentProjectName, setResidentProjectName] = useState(null);
   const [residentProjectId, setResidentProjectId] = useState(null);
+
+  // --- NUEVOS ESTADOS PARA CÁMARA ---
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [attendanceType, setAttendanceType] = useState(null); // 'Ingreso' | 'Salida'
 
   // 1. Reloj
   useEffect(() => {
@@ -155,15 +163,12 @@ const DashboardPage = () => {
       let staffCount = 0;
 
       if (role === 'residente_obra') {
-          // Obras asignadas (generalmente 1)
           projectsCount = projectId ? 1 : 0;
-          // Personal en esa obra
           if (projectName) {
               const { count } = await supabase.from('workers').select('*', { count: 'exact', head: true }).eq('status', 'Activo').eq('project_assigned', projectName);
               staffCount = count || 0;
           }
       } else {
-          // Admin ve todo
           const { count: pCount } = await supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'En Ejecución');
           const { count: sCount } = await supabase.from('employees').select('*', { count: 'exact', head: true }).eq('status', 'Activo');
           projectsCount = pCount || 0;
@@ -171,7 +176,7 @@ const DashboardPage = () => {
       }
       setKpiData({ activeProjects: projectsCount, activeStaff: staffCount });
 
-      // 2. DONUT: FUERZA LABORAL
+      // 2. DONUT
       let laborQuery = supabase.from('workers').select('category').eq('status', 'Activo');
       if (role === 'residente_obra' && projectName) {
           laborQuery = laborQuery.eq('project_assigned', projectName);
@@ -185,19 +190,16 @@ const DashboardPage = () => {
       }, {});
       setLaborData(Object.keys(laborDist).map(key => ({ name: key, value: laborDist[key] })));
 
-      // 3. CURVA S: AVANCE PROGRAMADO VS REAL
+      // 3. CURVA S
       if (projectId) {
-          // Obtener tareas del proyecto
           const { data: tasks } = await supabase.from('project_tasks').select('*').eq('project_id', projectId);
           
           if (tasks && tasks.length > 0) {
-              // Encontrar fechas de inicio y fin del proyecto
               const dates = tasks.flatMap(t => [new Date(t.start_date), new Date(t.end_date)]);
               const minDate = new Date(Math.min.apply(null, dates));
               const maxDate = new Date(Math.max.apply(null, dates));
               const today = new Date();
 
-              // Total de peso (duración total en días como proxy de peso)
               const totalDuration = tasks.reduce((acc, t) => {
                   const duration = (new Date(t.end_date) - new Date(t.start_date)) / (1000 * 60 * 60 * 24);
                   return acc + (duration > 0 ? duration : 1);
@@ -206,11 +208,9 @@ const DashboardPage = () => {
               const chartData = [];
               let currentDate = new Date(minDate);
               
-              // Generar puntos de la gráfica (cada 3 días para suavizar)
               while (currentDate <= maxDate) {
                   const dateStr = currentDate.toISOString().split('T')[0];
                   
-                  // A. PROGRAMADO: Suma de pesos de tareas que deberían estar listas
                   let plannedAccumulated = 0;
                   tasks.forEach(t => {
                       const tStart = new Date(t.start_date);
@@ -218,33 +218,24 @@ const DashboardPage = () => {
                       const duration = (tEnd - tStart) / (1000 * 60 * 60 * 24) || 1;
                       
                       if (currentDate >= tEnd) {
-                          plannedAccumulated += duration; // Tarea debió terminar
+                          plannedAccumulated += duration;
                       } else if (currentDate >= tStart) {
                           const daysPassed = (currentDate - tStart) / (1000 * 60 * 60 * 24);
-                          plannedAccumulated += daysPassed; // Avance parcial lineal
+                          plannedAccumulated += daysPassed;
                       }
                   });
                   const plannedPct = Math.min(100, (plannedAccumulated / totalDuration) * 100);
 
-                  // B. REAL: Cálculo del avance real ponderado hasta la fecha
                   let actualAccumulated = 0;
                   if (currentDate <= today) {
                       tasks.forEach(t => {
                           const tStart = new Date(t.start_date);
                           const duration = (new Date(t.end_date) - tStart) / (1000 * 60 * 60 * 24) || 1;
-                          const taskProgress = t.progress || 0; // % reportado en BD
-
+                          const taskProgress = t.progress || 0; 
                           if (currentDate >= tStart) {
-                              // Asumimos que el progreso reportado se ganó linealmente hasta hoy
-                              // Si la tarea empezó, contribuye con su % real proporcional al tiempo pasado
-                              // Esta es una aproximación ya que no tenemos histórico diario
                               actualAccumulated += (duration * (taskProgress / 100)); 
                           }
                       });
-                      // Ajuste simple: Si estamos en el pasado, mostramos el acumulado.
-                      // Nota: Esta lógica asume que el 'progress' actual es el acumulado a hoy.
-                      // Para días pasados, sería ideal tener historial, aquí se proyecta el estado final hacia atrás (limitación sin tabla histórica)
-                      // PARA CORREGIR: Mostraremos la línea Real solo hasta HOY.
                   }
                   
                   const actualPct = currentDate <= today ? Math.min(100, (actualAccumulated / totalDuration) * 100) : null;
@@ -255,7 +246,7 @@ const DashboardPage = () => {
                       Real: actualPct !== null ? parseFloat(actualPct.toFixed(1)) : null
                   });
 
-                  currentDate.setDate(currentDate.getDate() + 5); // Salto de 5 días
+                  currentDate.setDate(currentDate.getDate() + 5);
               }
               setSCurveData(chartData);
           } else {
@@ -280,64 +271,125 @@ const DashboardPage = () => {
     });
   };
 
-  const handleCheckIn = async () => {
-    setBtnLoading(true);
-    if (!currentUser?.id) return;
-    
-    try {
-      const location = await getCurrentLocation();
-      const now = new Date();
-      
-      const payload = {
-        date: getLocalDateStr(),
-        check_in_time: now.toISOString(),
-        project_name: 'Oficina Central', 
-        check_in_location: location || 'Panel Web (Sin GPS)', 
-        status: 'Presente'
-      };
-
-      if (currentUser.role === 'worker') {
-          payload.worker_id = currentUser.id;
-      } else {
-          payload.employee_id = currentUser.id;
-      }
-
-      const { data, error } = await supabase.from('attendance').insert([payload]).select().single();
-      if (error) throw error;
-      
-      setTodayRecord(data);
-      setNotification({ isOpen: true, type: 'success', title: 'Entrada', message: `Registrada a las ${now.toLocaleTimeString()}` });
-    } catch (error) {
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message });
-    } finally {
-      setBtnLoading(false);
+  // --- FUNCIÓN AUXILIAR PARA CÁMARA ---
+  const dataURLtoBlob = (dataurl) => {
+    let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while(n--){
+        u8arr[n] = bstr.charCodeAt(n);
     }
+    return new Blob([u8arr], {type:mime});
   };
 
+  // 1. INICIAR CHECK-IN (Abre Cámara)
+  const handleCheckInClick = () => {
+    if (!currentUser?.id) return;
+    setAttendanceType('Ingreso');
+    setIsCameraOpen(true);
+  };
+
+  // 2. INICIAR CHECK-OUT (Abre Modal Confirmación, luego Cámara)
   const handleCheckOutClick = () => {
     if (todayRecord) setShowConfirmModal(true);
   };
 
-  const processCheckOut = async () => {
+  const confirmCheckOut = () => {
     setShowConfirmModal(false);
-    setBtnLoading(true);
-    try {
-      const location = await getCurrentLocation();
-      const now = new Date();
-      
-      const { data, error } = await supabase
-        .from('attendance')
-        .update({ check_out_time: now.toISOString(), check_out_location: location || 'Panel Web' })
-        .eq('id', todayRecord.id)
-        .select().single();
+    setAttendanceType('Salida');
+    setIsCameraOpen(true);
+  };
 
-      if (error) throw error;
-      setTodayRecord(data);
-      setNotification({ isOpen: true, type: 'success', title: 'Salida', message: 'Jornada finalizada.' });
+  // 3. PROCESAR FOTO Y GUARDAR EN BD
+  const handlePhotoCaptured = async (imgSrc) => {
+    setIsCameraOpen(false);
+    setBtnLoading(true);
+    const toastId = toast.loading("Procesando asistencia...");
+
+    try {
+        // A. Subir Foto (Si falla la subida, avisamos pero no rompemos todo si no es crítico)
+        const photoBlob = dataURLtoBlob(imgSrc);
+        // Sanear nombre de archivo para evitar errores 400 por caracteres raros
+        const safeDocNum = (currentUser.document_number || 'user').replace(/[^a-zA-Z0-9]/g, '');
+        const fileName = `attendance/${safeDocNum}_${Date.now()}_${attendanceType}.jpg`;
+        
+        let photoUrl = null;
+
+        const { error: uploadError } = await supabase.storage
+            .from('attendance_photos') 
+            .upload(fileName, photoBlob);
+            
+        if (uploadError) {
+             console.error("Error subiendo foto (Verifica que el Bucket 'attendance_photos' exista y sea Público):", uploadError);
+             toast.error("Error subiendo foto. Verifica el almacenamiento.", { id: toastId });
+             // Si quieres detener el proceso si la foto falla, descomenta la siguiente línea:
+             // throw new Error("Fallo al subir evidencia fotográfica.");
+        } else {
+             // Si subió bien, obtenemos la URL
+             const { data: publicUrlData } = supabase.storage
+                .from('attendance_photos')
+                .getPublicUrl(fileName);
+             photoUrl = publicUrlData.publicUrl;
+        }
+
+        // B. Obtener Ubicación
+        const location = await getCurrentLocation();
+        const now = new Date();
+
+        // C. Guardar en Base de Datos
+        if (attendanceType === 'Ingreso') {
+            const payload = {
+                date: getLocalDateStr(),
+                check_in_time: now.toISOString(),
+                project_name: residentProjectName || 'Oficina Central', 
+                check_in_location: location || 'Panel Web', 
+                status: 'Presente',
+                photo_url: photoUrl // Asegúrate de haber creado esta columna en Supabase (PASO 1)
+            };
+    
+            if (currentUser.role === 'worker') {
+                payload.worker_id = currentUser.id;
+            } else {
+                payload.employee_id = currentUser.id;
+            }
+    
+            const { data, error } = await supabase.from('attendance').insert([payload]).select().single();
+            if (error) {
+                // Manejo específico del error de columna faltante
+                if (error.code === 'PGRST204') {
+                    throw new Error("Falta la columna 'photo_url' en la base de datos.");
+                }
+                throw error;
+            }
+            
+            setTodayRecord(data);
+            setNotification({ isOpen: true, type: 'success', title: 'Entrada Registrada', message: `Foto capturada y asistencia marcada.` });
+            toast.success("Entrada registrada", { id: toastId });
+        
+        } else if (attendanceType === 'Salida') {
+            // Actualizar registro existente
+            const { data, error } = await supabase
+                .from('attendance')
+                .update({ 
+                    check_out_time: now.toISOString(), 
+                    check_out_location: location || 'Panel Web',
+                    // Si creaste la columna check_out_photo_url descomenta esto:
+                    // check_out_photo_url: photoUrl 
+                })
+                .eq('id', todayRecord.id)
+                .select().single();
+    
+            if (error) throw error;
+            setTodayRecord(data);
+            setNotification({ isOpen: true, type: 'success', title: 'Salida Registrada', message: 'Foto capturada. Jornada finalizada.' });
+            toast.success("Salida registrada", { id: toastId });
+        }
+
     } catch (error) {
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message });
+        console.error("Error asistencia:", error);
+        setNotification({ isOpen: true, type: 'error', title: 'Error', message: error.message || "No se pudo registrar." });
+        toast.error(error.message || "Error registrando asistencia", { id: toastId });
     } finally {
-      setBtnLoading(false);
+        setBtnLoading(false);
     }
   };
 
@@ -401,8 +453,8 @@ const DashboardPage = () => {
             </div>
             <div className="mt-4 flex flex-col gap-3 relative z-10">
                 {!todayRecord ? (
-                    <button onClick={handleCheckIn} disabled={btnLoading} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
-                        {btnLoading ? <Loader2 className="animate-spin" size={20}/> : <><LogIn size={20}/> Marcar Entrada</>}
+                    <button onClick={handleCheckInClick} disabled={btnLoading} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-transform active:scale-95">
+                        {btnLoading ? <Loader2 className="animate-spin" size={20}/> : <><Camera size={20}/> Marcar Entrada</>}
                     </button>
                 ) : !todayRecord.check_out_time ? (
                     <div className="space-y-3">
@@ -413,7 +465,7 @@ const DashboardPage = () => {
                                 <p className="text-sm font-bold text-slate-700">{new Date(todayRecord.check_in_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                             </div>
                         </div>
-                        <button onClick={handleCheckOutClick} disabled={btnLoading} className="w-full py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
+                        <button onClick={handleCheckOutClick} disabled={btnLoading} className="w-full py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-transform active:scale-95">
                             {btnLoading ? <Loader2 className="animate-spin" size={20}/> : <><LogOut size={20}/> Marcar Salida</>}
                         </button>
                     </div>
@@ -477,7 +529,7 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* 3. GRÁFICOS: DONUT Y CURVA S (NUEVA LÓGICA) */}
+      {/* 3. GRÁFICOS: DONUT Y CURVA S */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* DONUT */}
@@ -496,7 +548,7 @@ const DashboardPage = () => {
               </div>
           </div>
 
-          {/* CURVA S: PROGRAMADO VS REAL */}
+          {/* CURVA S */}
           <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col h-[350px]">
               <div className="flex justify-between items-center mb-6">
                   <div>
@@ -537,6 +589,7 @@ const DashboardPage = () => {
         <ValidWorkersTable refreshTrigger={refreshTrigger} onAssign={handleOpenAssignProject} projectFilter={residentProjectName} />
       </div>
 
+      {/* MODALES */}
       <EmployeeDocumentsModal isOpen={docModalOpen} onClose={() => { setDocModalOpen(false); handleSuccessAction(); }} person={selectedPersonForDocs} />
       <AssignProjectModal isOpen={projectModalOpen} onClose={() => setProjectModalOpen(false)} worker={selectedWorkerForProject} onSuccess={handleSuccessAction} />
       <StatusModal isOpen={notification.isOpen} onClose={() => setNotification({ ...notification, isOpen: false })} type={notification.type} title={notification.title} message={notification.message} />
@@ -552,12 +605,22 @@ const DashboardPage = () => {
               <p className="text-slate-500 text-sm mb-8">Estás a punto de registrar el fin de tu jornada.</p>
               <div className="flex gap-3">
                 <button onClick={() => setShowConfirmModal(false)} className="flex-1 py-3.5 text-slate-600 font-bold text-sm bg-slate-100 rounded-xl hover:bg-slate-200">Cancelar</button>
-                <button onClick={processCheckOut} className="flex-1 py-3.5 bg-orange-500 text-white font-bold text-sm rounded-xl hover:bg-orange-600 shadow-lg">Confirmar</button>
+                <button onClick={confirmCheckOut} className="flex-1 py-3.5 bg-orange-500 text-white font-bold text-sm rounded-xl hover:bg-orange-600 shadow-lg flex items-center justify-center gap-2">
+                     <Camera size={18}/> Confirmar
+                </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* MODAL CÁMARA */}
+      <CameraModal 
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onCapture={handlePhotoCaptured}
+      />
+
     </motion.div>
   );
 };
