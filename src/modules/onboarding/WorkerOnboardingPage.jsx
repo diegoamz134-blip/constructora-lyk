@@ -5,8 +5,8 @@ import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { supabase } from '../../services/supabase';
 import { 
   User, Users, GraduationCap, Briefcase, CreditCard, 
-  ChevronRight, ChevronLeft, Plus, Trash2, X, CheckCircle, 
-  AlertCircle, Building, SkipForward, Home, Phone, Mail, Calendar, ListPlus
+  ChevronRight, ChevronLeft, Plus, Trash2, X, CheckCircle, CheckCircle2,
+  AlertCircle, Building, SkipForward, Home, Phone, Mail, Calendar, LogOut
 } from 'lucide-react';
 
 // IMPORTACIÓN DEL LOGO
@@ -23,6 +23,9 @@ const SHIRT_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
 const PANT_SIZES = ['26', '28', '30', '32', '34', '36', '38'];
 const SHOE_SIZES = Array.from({length: 9}, (_, i) => (36 + i).toString());
 
+// OPCIONES DE CARGO PARA OBREROS
+const WORKER_ROLES = ['Ayudante', 'Oficial', 'Operario', 'Capataz'];
+
 const STEPS = [
   { id: 1, title: 'Datos Personales', subtitle: 'Información Básica', icon: User },
   { id: 2, title: 'Familia', subtitle: 'Hijos y Emergencias', icon: Users },
@@ -32,7 +35,7 @@ const STEPS = [
 ];
 
 const WorkerOnboardingPage = () => {
-  const { worker, refreshWorker } = useWorkerAuth();
+  const { worker, refreshWorker, logout } = useWorkerAuth(); // Asumiendo que existe logout en el contexto
   const navigate = useNavigate();
   
   const [currentStep, setCurrentStep] = useState(1);
@@ -50,7 +53,11 @@ const WorkerOnboardingPage = () => {
   }, []);
 
   const handleLogoutForce = async () => {
-    // Implementar si tienes función de logout en el contexto de worker, sino redirigir
+    try {
+        if (logout) await logout();
+    } catch (e) {
+        console.error("Error al salir", e);
+    }
     window.location.href = '/login';
   };
 
@@ -70,7 +77,10 @@ const WorkerOnboardingPage = () => {
     address: '', district: '', province: '', department: 'Lima',
     
     // Contacto
-    phone: '', secondary_phone: '', secondary_email: '',
+    phone: '', 
+    emergency_phone: '', 
+    personal_email: '',  
+    additional_email: '', 
     
     // Sistema Pensionario y Tallas
     pension_system: 'ONP', shirt_size: '', pants_size: '', shoe_size: '',
@@ -86,7 +96,7 @@ const WorkerOnboardingPage = () => {
     education_level: '',
     education_status: '',
     education_institution: '',
-    grad_date: '', // Nuevo campo para fecha exacta
+    grad_date: '', 
     additional_courses: [], 
 
     // 4. EXPERIENCIA
@@ -108,6 +118,33 @@ const WorkerOnboardingPage = () => {
   });
   const [tempFunction, setTempFunction] = useState('');
 
+  // FUNCIÓN PARA CALCULAR TIEMPO DE EXPERIENCIA
+  const calculateDuration = (start, end) => {
+    if (!start || !end) return '';
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    
+    if (endDate < startDate) return 'Fecha inválida';
+
+    // Cálculo aproximado en meses
+    let months = (endDate.getFullYear() - startDate.getFullYear()) * 12;
+    months -= startDate.getMonth();
+    months += endDate.getMonth();
+    
+    // Ajuste mínimo si es el mismo mes
+    if (months <= 0) months = 0; 
+    
+    const years = Math.floor(months / 12);
+    const remainingMonths = months % 12;
+
+    let parts = [];
+    if (years > 0) parts.push(`${years} año${years > 1 ? 's' : ''}`);
+    if (remainingMonths > 0) parts.push(`${remainingMonths} mes${remainingMonths !== 1 ? 'es' : ''}`);
+    
+    if (parts.length === 0) return 'Menos de un mes';
+    return parts.join(' y ');
+  };
+
   // CARGAR DATOS
   useEffect(() => {
     if (worker) {
@@ -124,9 +161,12 @@ const WorkerOnboardingPage = () => {
         district: worker.district || '',
         province: worker.province || '',
         department: worker.department || 'Lima',
+        
         phone: worker.phone || '',
-        secondary_phone: worker.secondary_phone || '',
-        secondary_email: worker.secondary_email || '',
+        emergency_phone: worker.secondary_phone || '',
+        personal_email: worker.secondary_email || '',
+        additional_email: worker.details?.additional_email || '',
+
         pension_system: worker.pension_system || 'ONP',
         shirt_size: worker.shirt_size || '',
         pants_size: worker.pants_size || '',
@@ -158,7 +198,6 @@ const WorkerOnboardingPage = () => {
     setFormData(prev => {
         let newState = { ...prev, [name]: type === 'checkbox' ? checked : value };
 
-        // CÁLCULO DE EDAD AUTOMÁTICO
         if (name === 'birth_date' && value) {
             const birth = new Date(value);
             const now = new Date();
@@ -175,7 +214,6 @@ const WorkerOnboardingPage = () => {
     });
   };
 
-  // Manejo de listas
   const addItem = (section, item, setItem, reset) => {
     if (Object.values(item).some(v => !v)) return; 
     setFormData(prev => ({ ...prev, [section]: [...prev[section], item] }));
@@ -185,17 +223,22 @@ const WorkerOnboardingPage = () => {
     setFormData(prev => ({ ...prev, [section]: prev[section].filter((_, i) => i !== index) }));
   };
 
-  // Manejo de trabajo
   const handleJobChange = (e) => setNewJob({ ...newJob, [e.target.name]: e.target.value });
+  
   const addFunction = () => {
     if (!tempFunction) return;
     setNewJob(prev => ({ ...prev, functions: [...prev.functions, tempFunction] }));
     setTempFunction('');
   };
   const removeFunction = (idx) => setNewJob(prev => ({ ...prev, functions: prev.functions.filter((_, i) => i !== idx) }));
+  
   const addJob = () => {
     if (!newJob.company || !newJob.role) return;
-    setFormData(prev => ({ ...prev, work_experience: [...prev.work_experience, newJob] }));
+    // Guardamos la duración calculada dentro del objeto del trabajo también si quieres mostrarla luego
+    const duration = calculateDuration(newJob.period_start, newJob.period_end);
+    const jobToAdd = { ...newJob, duration }; // Agregamos la duración calculada
+    
+    setFormData(prev => ({ ...prev, work_experience: [...prev.work_experience, jobToAdd] }));
     setNewJob({ company: '', role: '', field: '', period_start: '', period_end: '', boss_name: '', boss_phone: '', functions: [] });
   };
 
@@ -204,13 +247,12 @@ const WorkerOnboardingPage = () => {
     const errors = [];
     if (step === 1) {
         if (!formData.birth_date) errors.push("Fecha de Nacimiento");
-        if (!formData.age) errors.push("Edad (Automática)");
         if (!formData.nationality) errors.push("Nacionalidad");
         if (!formData.sex) errors.push("Sexo");
         if (!formData.marital_status) errors.push("Estado Civil");
         if (['Casado', 'Conviviente'].includes(formData.marital_status) && !formData.spouse_name) errors.push("Nombre del Cónyuge");
         if (!formData.address) errors.push("Dirección Actual");
-        if (!formData.phone) errors.push("Celular");
+        if (!formData.phone) errors.push("Celular Principal");
         if (!formData.pension_system) errors.push("Régimen Pensionario");
         if (!formData.shirt_size) errors.push("Talla de Polo");
         if (!formData.pants_size) errors.push("Talla de Pantalón");
@@ -218,15 +260,9 @@ const WorkerOnboardingPage = () => {
     }
     if (step === 2) {
         if (formData.emergency_contacts.length === 0) errors.push("Registre al menos un Contacto de Emergencia");
-        if (formData.has_children && formData.dependents.length === 0) errors.push("Registre a sus hijos en la lista");
     }
     if (step === 3) {
         if (!formData.education_level) errors.push("Nivel de Estudios");
-        const advancedLevels = ['Técnico', 'Universitario', 'Bachiller', 'Titulado', 'Egresado', 'Colegiado'];
-        if (advancedLevels.includes(formData.education_level)) {
-            if (!formData.education_institution) errors.push("Institución Educativa / Colegio");
-            if (!formData.grad_date) errors.push("Fecha de Egreso / Grado");
-        }
     }
     if (step === 5) {
         if (!formData.bank_name) errors.push("Banco");
@@ -244,15 +280,6 @@ const WorkerOnboardingPage = () => {
       if (currentStep < STEPS.length) setCurrentStep(s => s + 1);
   };
 
-  const handleFinalSubmit = () => {
-      const errors = validateStep(currentStep);
-      if (errors.length > 0) {
-          setNotification({ isOpen: true, type: 'error', title: 'Campos Faltantes', message: 'Por favor complete:\n\n' + errors.map(e => `• ${e}`).join('\n') });
-          return;
-      }
-      handleSubmit(false);
-  };
-
   const handleSubmit = async (skip = false) => {
     setLoading(true);
     try {
@@ -268,9 +295,11 @@ const WorkerOnboardingPage = () => {
         district: formData.district,
         province: formData.province,
         department: formData.department,
+        
         phone: formData.phone,
-        secondary_phone: formData.secondary_phone,
-        secondary_email: formData.secondary_email,
+        secondary_phone: formData.emergency_phone,
+        secondary_email: formData.personal_email,
+        
         pension_system: formData.pension_system,
         shirt_size: formData.shirt_size,
         pants_size: formData.pants_size,
@@ -286,8 +315,9 @@ const WorkerOnboardingPage = () => {
         details: {
           ...worker.details,
           skipped: skip,
-          age: formData.age, // GUARDA LA EDAD CALCULADA
+          age: formData.age, 
           grad_date: formData.grad_date, 
+          additional_email: formData.additional_email,
           emergency_contacts: formData.emergency_contacts,
           has_relatives_in_company: formData.has_relatives_in_company,
           relatives_in_company: formData.relatives_in_company,
@@ -313,15 +343,12 @@ const WorkerOnboardingPage = () => {
 
   const renderStep1 = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
-       {/* Bloque 1 */}
        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <div className="md:col-span-1"><FloatingInput label="F. Nacimiento" name="birth_date" type="date" val={formData.birth_date} onChange={handleChange} icon={Calendar} /></div>
-          {/* CAMPO EDAD BLOQUEADO (READONLY) */}
           <div className="md:col-span-1"><FloatingInput label="Edad" name="age" type="text" val={formData.age} readOnly={true} className="bg-slate-100 cursor-not-allowed" /></div>
           <div className="md:col-span-2"><FloatingInput label="Nacionalidad" name="nationality" val={formData.nationality} onChange={handleChange} /></div>
        </div>
 
-       {/* Bloque 2 */}
        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Select label="Sexo" name="sex" val={formData.sex} onChange={handleChange} options={['Masculino', 'Femenino']} />
           <Select label="Estado Civil" name="marital_status" val={formData.marital_status} onChange={handleChange} options={['Soltero', 'Casado', 'Conviviente', 'Viudo', 'Divorciado']} />
@@ -335,7 +362,6 @@ const WorkerOnboardingPage = () => {
           <FloatingInput label="Nombre de la Mamá" name="mothers_name" val={formData.mothers_name} onChange={handleChange} />
        </div>
 
-       {/* Ubicación */}
        <SectionBox title="Dirección Actual">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
              <div className="md:col-span-3"><FloatingInput label="Dirección / Calle / Mz." name="address" val={formData.address} onChange={handleChange} icon={Home} /></div>
@@ -345,10 +371,17 @@ const WorkerOnboardingPage = () => {
           </div>
        </SectionBox>
 
-       {/* Tallas y Régimen */}
-       <SectionBox title="Datos Laborales y Tallas">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+       <SectionBox title="Información de Contacto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <FloatingInput label="Celular Principal" name="phone" val={formData.phone} onChange={handleChange} icon={Phone} />
+             <FloatingInput label="Celular de Emergencia" name="emergency_phone" val={formData.emergency_phone} onChange={handleChange} icon={Phone} />
+             <FloatingInput label="Email Personal" name="personal_email" type="email" val={formData.personal_email} onChange={handleChange} icon={Mail} />
+             <FloatingInput label="Email Adicional" name="additional_email" type="email" val={formData.additional_email} onChange={handleChange} icon={Mail} />
+          </div>
+       </SectionBox>
+
+       <SectionBox title="Datos Laborales y Tallas">
+          <div className="mb-4">
              <Select label="Régimen Pensionario" name="pension_system" val={formData.pension_system} onChange={handleChange} options={['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen']} />
           </div>
           <div className="grid grid-cols-3 gap-6">
@@ -362,7 +395,7 @@ const WorkerOnboardingPage = () => {
 
   const renderStep2 = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
-       <SectionBox title="Contactos de Emergencia (Obligatorio)">
+       <SectionBox title="Contactos de Emergencia (Lista Detallada)">
           <div className="flex gap-2 mb-4 bg-red-50 p-3 rounded-xl border border-red-100">
              <input placeholder="Nombre" value={tempEmergency.name} onChange={e => setTempEmergency({...tempEmergency, name: e.target.value})} className="input-simple flex-[2]" />
              <input placeholder="Teléfono" value={tempEmergency.phone} onChange={e => setTempEmergency({...tempEmergency, phone: e.target.value})} className="input-simple flex-1" />
@@ -424,7 +457,6 @@ const WorkerOnboardingPage = () => {
   );
 
   const renderStep3 = () => {
-    // Niveles que requieren detalles adicionales
     const advancedLevels = ['Técnico', 'Universitario', 'Bachiller', 'Titulado', 'Egresado', 'Colegiado'];
     const showDetails = advancedLevels.includes(formData.education_level);
 
@@ -436,7 +468,6 @@ const WorkerOnboardingPage = () => {
                <Select label="Estado" name="education_status" val={formData.education_status} onChange={handleChange} options={['Completo', 'Incompleto', 'En Curso']} />
             </div>
             
-            {/* CAMPOS DINÁMICOS */}
             <AnimatePresence>
                 {showDetails && (
                     <motion.div initial={{opacity:0, height:0}} animate={{opacity:1, height:'auto'}} exit={{opacity:0, height:0}} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
@@ -472,13 +503,42 @@ const WorkerOnboardingPage = () => {
           <h4 className="text-sm font-bold text-[#003366] uppercase tracking-wider mb-4">Agregar Experiencia Laboral</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
              <input placeholder="Empresa" name="company" value={newJob.company} onChange={handleJobChange} className="input-simple bg-white" />
-             <input placeholder="Cargo" name="role" value={newJob.role} onChange={handleJobChange} className="input-simple bg-white" />
+             
+             {/* --- CAMBIO: SELECTOR DE CARGO --- */}
+             <Select 
+                label="Cargo" 
+                name="role" 
+                val={newJob.role} 
+                onChange={handleJobChange} 
+                options={WORKER_ROLES} 
+             />
+             {/* -------------------------------- */}
+             
              <div className="flex gap-2">
-                <input placeholder="Inicio" name="period_start" value={newJob.period_start} onChange={handleJobChange} className="input-simple bg-white flex-1" />
-                <input placeholder="Fin" name="period_end" value={newJob.period_end} onChange={handleJobChange} className="input-simple bg-white flex-1" />
+                <div className="flex-1">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase ml-1 mb-1 block">Inicio</label>
+                    <input type="date" name="period_start" value={newJob.period_start} onChange={handleJobChange} className="input-simple bg-white w-full" />
+                </div>
+                <div className="flex-1">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase ml-1 mb-1 block">Fin</label>
+                    <input type="date" name="period_end" value={newJob.period_end} onChange={handleJobChange} min={newJob.period_start} className="input-simple bg-white w-full" />
+                </div>
              </div>
+
              <input placeholder="Rubro" name="field" value={newJob.field} onChange={handleJobChange} className="input-simple bg-white" />
           </div>
+
+          {/* --- CAMBIO: CÁLCULO DE TIEMPO AUTOMÁTICO --- */}
+          {newJob.period_start && newJob.period_end && (
+             <div className="mb-4 px-2">
+                <span className="text-xs font-bold text-slate-500 uppercase">Tiempo calculado: </span>
+                <span className="text-sm font-bold text-blue-600">
+                    {calculateDuration(newJob.period_start, newJob.period_end)}
+                </span>
+             </div>
+          )}
+          {/* --------------------------------------------- */}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
              <input placeholder="Nombre Jefe" name="boss_name" value={newJob.boss_name} onChange={handleJobChange} className="input-simple bg-white" />
              <input placeholder="Teléfono Jefe" name="boss_phone" value={newJob.boss_phone} onChange={handleJobChange} className="input-simple bg-white" />
@@ -510,7 +570,10 @@ const WorkerOnboardingPage = () => {
                     <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold">{idx+1}</div>
                     <div>
                         <h4 className="font-bold text-slate-800">{job.company}</h4>
-                        <p className="text-xs text-slate-500 font-bold mb-1">{job.role} <span className="font-normal">({job.period_start} - {job.period_end})</span></p>
+                        <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 mb-1">
+                            <p className="text-xs text-slate-500 font-bold">{job.role} <span className="font-normal">({job.period_start} - {job.period_end})</span></p>
+                            {job.duration && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold border border-blue-100 w-fit">{job.duration}</span>}
+                        </div>
                         {job.boss_name && <p className="text-xs text-slate-500 mb-2">Jefe: {job.boss_name} ({job.boss_phone})</p>}
                         <ul className="list-disc ml-4 text-xs text-slate-600">
                             {job.functions.map((f, i) => <li key={i}>{f}</li>)}
@@ -548,12 +611,10 @@ const WorkerOnboardingPage = () => {
       
       <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="relative z-10 w-full max-w-6xl h-[90vh] md:h-[800px] bg-white/70 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl border border-white/50 flex flex-col md:flex-row overflow-hidden">
         
-        {/* BOTÓN OMITIR */}
         <button onClick={() => handleSubmit(true)} disabled={loading} className="absolute top-6 right-6 z-50 flex items-center gap-2 px-4 py-2 bg-white/80 border border-slate-200 rounded-full shadow-sm text-xs font-bold text-slate-500 hover:text-[#003366] hover:border-[#003366] transition-all">
             Omitir <SkipForward size={14} />
         </button>
 
-        {/* SIDEBAR */}
         <div className="w-full md:w-80 bg-white/60 border-r border-white/50 p-8 flex flex-col">
           <div className="mb-8">
              <div className="h-16 mb-6 flex items-center justify-center bg-white/50 px-4 py-2 rounded-xl border border-white shadow-sm overflow-hidden">
@@ -582,9 +643,16 @@ const WorkerOnboardingPage = () => {
                 )
              })}
           </div>
+
+          {/* --- CAMBIO: BOTÓN DE CERRAR SESIÓN --- */}
+          <div className="mt-auto pt-6 border-t border-white/20">
+             <button onClick={handleLogoutForce} className="w-full flex items-center justify-center gap-3 text-slate-500 hover:text-red-600 hover:bg-red-50 p-3 rounded-xl transition-all font-bold text-sm group">
+                 <LogOut size={18} className="group-hover:scale-110 transition-transform"/> Cerrar Sesión
+             </button>
+          </div>
+          {/* -------------------------------------- */}
         </div>
 
-        {/* CONTENIDO */}
         <div className="flex-1 flex flex-col relative bg-white/40">
            <div className="flex-1 overflow-y-auto p-6 md:p-12 relative scroll-smooth pt-16 md:pt-12">
               <AnimatePresence mode="wait">
@@ -615,7 +683,6 @@ const WorkerOnboardingPage = () => {
         </div>
       </motion.div>
 
-      {/* MODAL NOTIFICACIÓN */}
       <AnimatePresence>
          {notification.isOpen && (
              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
@@ -635,7 +702,6 @@ const WorkerOnboardingPage = () => {
          )}
       </AnimatePresence>
       
-      {/* ESTILOS INTERNOS */}
       <style>{`
         .input-simple { width: 100%; padding: 0.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0; font-size: 0.875rem; outline: none; transition: all; }
         .input-simple:focus { border-color: #93c5fd; box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.3); }
@@ -646,7 +712,6 @@ const WorkerOnboardingPage = () => {
   );
 };
 
-// Componentes Auxiliares para Diseño
 const SectionBox = ({ title, children }) => (<div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm"><h4 className="text-sm font-bold text-[#003366] uppercase tracking-wider mb-5 pb-2 border-b border-slate-50">{title}</h4>{children}</div>);
 const FloatingInput = ({ label, name, val, onChange, type="text", placeholder, icon: Icon, readOnly = false, className = '' }) => (
    <div className="relative group w-full">

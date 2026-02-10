@@ -2,16 +2,57 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 
-// Función auxiliar para fechas
+// --- FUNCIONES AUXILIARES ---
+
+// Formatear fechas (YYYY-MM-DD -> DD/MM/YYYY)
 const formatDate = (dateString) => {
   if (!dateString) return '---';
   try {
     const [year, month, day] = dateString.split('-');
-    // Validar que sean números
     if(!year || !month || !day) return dateString;
     return `${day}/${month}/${year}`;
   } catch (e) {
     return dateString;
+  }
+};
+
+// Formatear Texto (Primera Mayúscula, resto minúscula)
+const toTitleCase = (str) => {
+  if (!str) return '---';
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
+// Calcular Duración (Años y Meses)
+const calculateDuration = (start, end) => {
+  if (!start || !end) return '';
+  try {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
+      if (endDate < startDate) return '';
+
+      let months = (endDate.getFullYear() - startDate.getFullYear()) * 12;
+      months -= startDate.getMonth();
+      months += endDate.getMonth();
+      
+      if (months <= 0) months = 0; 
+      
+      const years = Math.floor(months / 12);
+      const remainingMonths = months % 12;
+
+      let parts = [];
+      if (years > 0) parts.push(`${years} año${years > 1 ? 's' : ''}`);
+      if (remainingMonths > 0) parts.push(`${remainingMonths} mes${remainingMonths !== 1 ? 'es' : ''}`);
+      
+      if (parts.length === 0) return 'Menos de un mes';
+      return parts.join(' y ');
+  } catch (e) {
+      return '';
   }
 };
 
@@ -66,18 +107,18 @@ export const generateWorkerPDF = async (worker) => {
   });
 
   const bodyPersonal = [
-    // Fila 1
-    ['Nombres:', checkVal(worker.first_name), 'Apellidos:', `${checkVal(worker.paternal_surname)} ${checkVal(worker.maternal_surname)}`],
+    // Fila 1: Nombres con formato Título
+    ['Nombres:', toTitleCase(worker.first_name), 'Apellidos:', `${toTitleCase(worker.paternal_surname)} ${toTitleCase(worker.maternal_surname)}`],
     // Fila 2
     ['DNI / CEX:', checkVal(worker.document_number), 'F. Nacimiento:', formatDate(worker.birth_date)],
     // Fila 3
-    ['Edad:', worker.age ? `${worker.age} años` : '---', 'Sexo:', checkVal(worker.sex)],
+    ['Edad:', worker.age ? `${worker.age} años` : '---', 'Sexo:', toTitleCase(worker.sex)],
     // Fila 4
-    ['Nacionalidad:', checkVal(worker.nationality), 'Estado Civil:', checkVal(worker.marital_status)],
-    // Fila 5: Laboral Básico (CORREGIDO: start_date)
-    ['Cargo:', checkVal(worker.category).toUpperCase(), 'F. Ingreso:', formatDate(worker.start_date || worker.entry_date)],
-    // Fila 6: Pensión
-    ['Sistema Pensión:', checkVal(worker.pension_system), 'Cónyuge:', checkVal(worker.spouse_name)],
+    ['Nacionalidad:', toTitleCase(worker.nationality), 'Estado Civil:', toTitleCase(worker.marital_status)],
+    // Fila 5: Cargo formateado
+    ['Cargo:', toTitleCase(worker.category), 'F. Ingreso:', formatDate(worker.start_date || worker.entry_date)],
+    // Fila 6
+    ['Sistema Pensión:', worker.pension_system, 'Cónyuge:', toTitleCase(worker.spouse_name)],
     
     // TALLAS
     ['Talla Camisa:', checkVal(worker.shirt_size), 'Talla Pantalón:', checkVal(worker.pants_size)],
@@ -115,10 +156,10 @@ export const generateWorkerPDF = async (worker) => {
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     columnStyles: { 0: { fontStyle: 'bold', width: 30, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     body: [
-      ['Dirección:', checkVal(worker.address), 'Distrito:', checkVal(worker.district)],
-      ['Provincia:', checkVal(worker.province), 'Departamento:', checkVal(worker.department)],
+      ['Dirección:', toTitleCase(worker.address), 'Distrito:', toTitleCase(worker.district)],
+      ['Provincia:', toTitleCase(worker.province), 'Departamento:', toTitleCase(worker.department)],
       ['Celular 1:', checkVal(worker.phone), 'Celular 2:', checkVal(worker.secondary_phone)],
-      ['Email:', checkVal(worker.email), 'Email Alt:', checkVal(worker.secondary_email)]
+      ['Email:', checkVal(worker.email).toLowerCase(), 'Email Alt:', checkVal(worker.secondary_email).toLowerCase()]
     ],
     margin: { left: 14, right: 14 }
   });
@@ -129,9 +170,8 @@ export const generateWorkerPDF = async (worker) => {
   // 3. FAMILIA Y EMERGENCIA
   // ==========================================
   
-  // Dependientes (Prioriza la lista directa del formulario, luego details)
   const dependentsList = worker.dependents || worker.details?.dependents || [];
-  const dependentRows = dependentsList.map(d => [d.name, `${d.age} años`, '-']);
+  const dependentRows = dependentsList.map(d => [toTitleCase(d.name), `${d.age} años`, '-']);
   
   if (dependentRows.length > 0) {
       doc.setFontSize(9);
@@ -155,7 +195,7 @@ export const generateWorkerPDF = async (worker) => {
 
   // Emergencias
   const emergencyList = worker.emergency_contacts || worker.details?.emergency_contacts || [];
-  const emergencyRows = emergencyList.map(c => [c.name, c.relation, c.phone]);
+  const emergencyRows = emergencyList.map(c => [toTitleCase(c.name), toTitleCase(c.relation), c.phone]);
 
   if (emergencyRows.length > 0) {
       doc.setFontSize(9);
@@ -194,7 +234,7 @@ export const generateWorkerPDF = async (worker) => {
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     columnStyles: { 0: { fontStyle: 'bold', width: 30, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     body: [
-      ['Banco:', checkVal(worker.bank_name), 'N° Cuenta:', checkVal(worker.bank_account)],
+      ['Banco:', toTitleCase(worker.bank_name), 'N° Cuenta:', checkVal(worker.bank_account)],
       ['CCI:', checkVal(worker.cci), '', '']
     ],
     margin: { left: 14, right: 14 }
@@ -219,18 +259,17 @@ export const generateWorkerPDF = async (worker) => {
     styles: { fontSize: 8, cellPadding: 1.5, textColor: TEXT_DARK },
     columnStyles: { 0: { fontStyle: 'bold', width: 30, textColor: PRIMARY }, 2: { fontStyle: 'bold', width: 25, textColor: PRIMARY } },
     body: [
-      ['Nivel Educ.:', checkVal(worker.education_level), 'Estado:', checkVal(worker.education_status)],
-      // AÑADIDO: Fecha de Egreso
-      ['Institución:', checkVal(worker.education_institution), 'F. Egreso:', formatDate(worker.grad_date)] 
+      ['Nivel Educ.:', toTitleCase(worker.education_level), 'Estado:', toTitleCase(worker.education_status)],
+      ['Institución:', toTitleCase(worker.education_institution), 'F. Egreso:', formatDate(worker.grad_date)] 
     ],
     margin: { left: 14, right: 14 }
   });
 
   currentY = doc.lastAutoTable.finalY + 5;
 
-  // 5.1 CURSOS ADICIONALES (SECCIÓN NUEVA)
+  // 5.1 CURSOS ADICIONALES
   const coursesList = worker.additional_courses || worker.details?.additional_courses || [];
-  const courseRows = coursesList.map(c => [c.name, formatDate(c.date)]);
+  const courseRows = coursesList.map(c => [toTitleCase(c.name), formatDate(c.date)]);
 
   if (courseRows.length > 0) {
       doc.setFontSize(9);
@@ -253,11 +292,20 @@ export const generateWorkerPDF = async (worker) => {
       currentY += 5;
   }
 
-  // Experiencia Laboral
+  // Experiencia Laboral con cálculo y formato
   const jobsList = worker.work_experience || worker.details?.work_experience || [];
-  const jobRows = jobsList.map(job => [
-    job.company, job.role, `${job.period_start || ''} - ${job.period_end || ''}`, job.boss_name || '-'
-  ]);
+  const jobRows = jobsList.map(job => {
+    const duration = calculateDuration(job.period_start, job.period_end);
+    const dateText = `${job.period_start || ''} - ${job.period_end || ''}`;
+    const fullDateText = duration ? `${dateText}\n(${duration})` : dateText;
+
+    return [
+      toTitleCase(job.company), 
+      toTitleCase(job.role), 
+      fullDateText, 
+      toTitleCase(job.boss_name) || '-'
+    ];
+  });
 
   if (jobRows.length > 0) {
       if (currentY > 250) { doc.addPage(); currentY = 20; }
@@ -269,7 +317,7 @@ export const generateWorkerPDF = async (worker) => {
 
       autoTable(doc, {
         startY: currentY + 6,
-        head: [['Empresa', 'Cargo', 'Periodo', 'Referencia']],
+        head: [['Empresa', 'Cargo', 'Periodo (Tiempo)', 'Referencia']],
         theme: 'grid',
         headStyles: { fillColor: SECONDARY, textColor: TEXT_DARK, fontSize: 8, fontStyle: 'bold' },
         styles: { fontSize: 8, lineColor: 230 },
@@ -346,7 +394,8 @@ export const generateWorkerPDF = async (worker) => {
   doc.text("Firma del Trabajador", 90, currentY + 5, { align: 'center' });
   
   doc.setFont("helvetica", "normal");
-  doc.text(`${(worker.first_name || '').toUpperCase()} ${(worker.paternal_surname || '').toUpperCase()}`, 90, currentY + 10, { align: 'center' });
+  // Firma también con formato título
+  doc.text(`${toTitleCase(worker.first_name || '')} ${toTitleCase(worker.paternal_surname || '')}`, 90, currentY + 10, { align: 'center' });
   doc.text(`DNI: ${worker.document_number || ''}`, 90, currentY + 14, { align: 'center' });
 
   doc.setDrawColor(200);

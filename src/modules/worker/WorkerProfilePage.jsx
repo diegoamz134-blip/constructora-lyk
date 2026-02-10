@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { supabase } from '../../services/supabase';
 import { generateWorkerPDF } from '../../utils/workerPdfGenerator';
+import { compressImage } from '../../utils/imageCompressor'; // <--- IMPORTACIÓN DE LA UTILIDAD
 import { 
   User, Phone, Mail, MapPin, Calendar, 
   Heart, Save, X, Edit3, Briefcase, 
@@ -66,7 +67,7 @@ const WorkerProfilePage = () => {
     
     // Laborales Internos
     category: 'Obrero', 
-    start_date: '', // CORREGIDO: Usamos start_date en lugar de entry_date
+    start_date: '', 
 
     // Ubicación
     address: '', district: '', province: '', department: 'Lima',
@@ -141,7 +142,7 @@ const WorkerProfilePage = () => {
             ...prev, 
             ...data, 
             category: data.category || 'Peón',
-            start_date: data.start_date || '', // CORREGIDO: Mapeamos start_date correctamente
+            start_date: data.start_date || '', 
             
             // Datos dentro del JSONB details
             grad_date: data.details?.grad_date || '',
@@ -198,21 +199,33 @@ const WorkerProfilePage = () => {
     setNewJob({ company: '', role: '', field: '', period_start: '', period_end: '', boss_name: '', boss_phone: '', functions: [] });
   };
 
-  // --- SUBIDA DE IMAGEN ---
+  // --- SUBIDA DE IMAGEN CON COMPRESIÓN ---
   const handleImageUpload = async (event) => {
     try {
         setUploadingImage(true);
         const file = event.target.files[0];
         if (!file) return;
         
-        const fileExt = file.name.split('.').pop();
+        // 1. COMPRIMIR LA IMAGEN ANTES DE SUBIR
+        const compressedFile = await compressImage(file);
+        
+        // Usamos siempre extensión .jpg porque el compresor devuelve JPEG
+        const fileExt = 'jpg'; 
         const fileName = `${worker.id}-${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file);
+        
+        // 2. SUBIR EL ARCHIVO COMPRIMIDO
+        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, compressedFile, {
+            contentType: 'image/jpeg',
+            upsert: true
+        });
+        
         if (uploadError) throw uploadError;
         
         const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
         setFormData(prev => ({ ...prev, avatar_url: publicUrl }));
+        
     } catch (error) {
+        console.error("Error al subir imagen:", error);
         Swal.fire('Error', 'No se pudo subir la imagen', 'error');
     } finally {
         setUploadingImage(false);
@@ -246,7 +259,7 @@ const WorkerProfilePage = () => {
           nationality: formData.nationality,
           sex: formData.sex,
           
-          start_date: formData.start_date || null, // CORREGIDO: Guardar start_date
+          start_date: formData.start_date || null, 
           
           marital_status: formData.marital_status,
           spouse_name: ['Casado', 'Conviviente'].includes(formData.marital_status) ? formData.spouse_name : null,
@@ -259,8 +272,8 @@ const WorkerProfilePage = () => {
           department: formData.department,
           phone: formData.phone,
           secondary_phone: formData.secondary_phone,
-          email: formData.email, // GUARDAR EMAIL
-          secondary_email: formData.secondary_email, // GUARDAR EMAIL SECUNDARIO
+          email: formData.email, 
+          secondary_email: formData.secondary_email, 
           
           pension_system: formData.pension_system,
           shirt_size: formData.shirt_size,
@@ -324,14 +337,12 @@ const WorkerProfilePage = () => {
                  <InputField label="Nacionalidad" name="nationality" value={formData.nationality} onChange={handleInputChange} isEditing={isEditing} />
                  <SelectField label="Sexo" name="sex" value={formData.sex} onChange={handleInputChange} isEditing={isEditing} options={['Masculino', 'Femenino']} />
                  
-                 {/* DATOS LABORALES BÁSICOS CORREGIDOS */}
                  <InputField label="Cargo (Categoría)" name="category" value={formData.category} disabled={true} isEditing={false} />
                  <InputField label="Fecha Ingreso" name="start_date" type="date" value={formData.start_date} onChange={handleInputChange} isEditing={isEditing} icon={Calendar} />
                  <SelectField label="Sistema Pensión" name="pension_system" value={formData.pension_system} onChange={handleInputChange} isEditing={isEditing} options={['ONP', 'AFP Integra', 'AFP Prima', 'AFP Profuturo', 'AFP Habitat', 'Sin Régimen']} />
              </div>
           </div>
 
-          {/* SECCIÓN DE TALLAS */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4 border-b pb-2"><Briefcase size={20} className="text-indigo-600"/> Tallas de Dotación</h3>
              <div className="grid grid-cols-3 gap-6">
