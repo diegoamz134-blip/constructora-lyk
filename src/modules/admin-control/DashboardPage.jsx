@@ -5,7 +5,7 @@ import {
   MapPin, LogIn, LogOut, CheckCircle2, Loader2,
   AlertTriangle, ChevronLeft, ChevronRight, CheckCircle,
   Briefcase, RefreshCw, Save, X, Cloud, Sun, CloudRain, Wind, CloudLightning,
-  Camera 
+  Camera, FileText 
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -626,14 +626,13 @@ const DashboardPage = () => {
   );
 };
 
-// --- TABLAS AUXILIARES COMPLETAS ---
-
+// --- COMPONENTE MEJORADO: TABLA DE DOCUMENTOS VENCIDOS AGRUPADOS ---
 const ExpiredDocumentsTable = ({ refreshTrigger, onUpdate, projectFilter }) => {
-  const [docs, setDocs] = useState([]);
+  const [peopleWithIssues, setPeopleWithIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
   const ITEMS_PER_PAGE = 5;
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => { fetchExpiredDocs(); }, [page, refreshTrigger, projectFilter]);
 
@@ -643,28 +642,38 @@ const ExpiredDocumentsTable = ({ refreshTrigger, onUpdate, projectFilter }) => {
       const nextMonth = new Date();
       nextMonth.setDate(nextMonth.getDate() + 30);
       const nextMonthStr = nextMonth.toISOString().split('T')[0];
-      const from = page * ITEMS_PER_PAGE;
-      const to = from + ITEMS_PER_PAGE - 1;
-
+      
+      // 1. Obtener TODOS los documentos que vencen pronto (sin límite estricto para poder agrupar bien)
       const { data: documents, error } = await supabase
         .from('hr_documents')
         .select('*')
         .lte('expiration_date', nextMonthStr)
         .order('expiration_date', { ascending: true })
-        .range(from, to);
+        .limit(100); // Límite de seguridad para no explotar
 
       if (error) throw error;
 
-      if (documents.length > 0) {
-        const workerDocs = documents.filter(d => d.person_type === 'worker');
-        const employeeDocs = documents.filter(d => d.person_type === 'employee');
+      if (documents && documents.length > 0) {
+        // 2. Agrupar por persona
+        const groupedMap = documents.reduce((acc, doc) => {
+            if (!acc[doc.person_id]) {
+                acc[doc.person_id] = {
+                    personId: doc.person_id,
+                    type: doc.person_type,
+                    docs: []
+                };
+            }
+            acc[doc.person_id].docs.push(doc);
+            return acc;
+        }, {});
 
-        const workerIds = [...new Set(workerDocs.map(d => d.person_id))];
-        const employeeIds = [...new Set(employeeDocs.map(d => d.person_id))];
+        const uniqueWorkerIds = Object.values(groupedMap).filter(g => g.type === 'worker').map(g => g.personId);
+        const uniqueEmployeeIds = Object.values(groupedMap).filter(g => g.type === 'employee').map(g => g.personId);
 
+        // 3. Traer detalles de las personas
         const [workersRes, employeesRes] = await Promise.all([
-            workerIds.length > 0 ? supabase.from('workers').select('id, full_name, category, project_assigned').in('id', workerIds) : { data: [] },
-            employeeIds.length > 0 ? supabase.from('employees').select('id, full_name, position').in('id', employeeIds) : { data: [] }
+            uniqueWorkerIds.length > 0 ? supabase.from('workers').select('id, full_name, category, project_assigned').in('id', uniqueWorkerIds) : { data: [] },
+            uniqueEmployeeIds.length > 0 ? supabase.from('employees').select('id, full_name, position').in('id', uniqueEmployeeIds) : { data: [] }
         ]);
 
         const workerMap = {};
@@ -672,47 +681,46 @@ const ExpiredDocumentsTable = ({ refreshTrigger, onUpdate, projectFilter }) => {
         const employeeMap = {};
         employeesRes.data?.forEach(e => employeeMap[e.id] = e);
 
-        let mappedDocs = documents.map(doc => {
+        // 4. Construir la lista final de personas con problemas
+        let finalList = Object.values(groupedMap).map(group => {
             let person = null;
             let roleDisplay = '';
             
-            if (doc.person_type === 'worker') {
-                person = workerMap[doc.person_id];
+            if (group.type === 'worker') {
+                person = workerMap[group.personId];
                 roleDisplay = person?.category || 'Obrero';
-                if (projectFilter && person && person.project_assigned !== projectFilter) {
-                    return null; 
-                }
+                if (projectFilter && person && person.project_assigned !== projectFilter) return null;
             } else {
-                person = employeeMap[doc.person_id];
+                person = employeeMap[group.personId];
                 roleDisplay = person?.position || 'Staff';
             }
 
             if (!person) return null;
 
             return {
-                ...doc,
+                id: group.personId,
                 owner_name: person.full_name,
                 role_display: roleDisplay,
-                person_data: { ...person, role_type: doc.person_type }
+                docs: group.docs, // Array de documentos vencidos
+                person_data: { ...person, role_type: group.type }
             };
         }).filter(Boolean);
 
-        setDocs(mappedDocs);
+        // Paginación local sobre la lista agrupada
+        const from = page * ITEMS_PER_PAGE;
+        const to = from + ITEMS_PER_PAGE;
+        const paginatedList = finalList.slice(from, to);
+        
+        setPeopleWithIssues(paginatedList);
+        setHasMore(to < finalList.length);
+
       } else { 
-        setDocs([]); 
+        setPeopleWithIssues([]); 
+        setHasMore(false);
       }
-      setHasMore(documents.length === ITEMS_PER_PAGE);
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
   
-  const getStatusBadge = (dateStr) => {
-    const today = new Date();
-    const expDate = new Date(dateStr);
-    const diffDays = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24)); 
-    if (diffDays < 0) return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-100 text-red-700 text-xs font-bold border border-red-200"><AlertTriangle size={12}/> Vencido</span>;
-    return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-orange-100 text-orange-700 text-xs font-bold border border-orange-200"><Clock size={12}/> Vence: {diffDays}d</span>;
-  };
-
   return (
     <div className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden flex flex-col h-full">
       <div className="px-6 py-4 border-b border-red-100 bg-red-50/30 flex justify-between items-center">
@@ -721,25 +729,45 @@ const ExpiredDocumentsTable = ({ refreshTrigger, onUpdate, projectFilter }) => {
       </div>
       <div className="overflow-x-auto flex-1">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100"><tr><th className="px-4 py-3">Personal</th><th className="px-4 py-3">Documento</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Acción</th></tr></thead>
+          <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">
+            <tr>
+              <th className="px-4 py-3">Personal</th>
+              <th className="px-4 py-3">Documentos Vencidos</th>
+              <th className="px-4 py-3 text-right">Revisar</th>
+            </tr>
+          </thead>
           <tbody className="divide-y divide-slate-50">
-            {loading ? <tr><td colSpan="4" className="px-4 py-6 text-center text-slate-400">Cargando...</td></tr> : 
-             docs.length === 0 ? <tr><td colSpan="4" className="px-4 py-6 text-center text-slate-400">Todo en orden.</td></tr> : 
-             docs.map(doc => (
-                <tr key={doc.id} className="hover:bg-red-50/40">
+            {loading ? <tr><td colSpan="3" className="px-4 py-6 text-center text-slate-400">Cargando...</td></tr> : 
+             peopleWithIssues.length === 0 ? <tr><td colSpan="3" className="px-4 py-6 text-center text-slate-400">Todo en orden.</td></tr> : 
+             peopleWithIssues.map(item => (
+                <tr key={item.id} className="hover:bg-red-50/40">
                     <td className="px-4 py-3">
-                        <p className="font-bold text-slate-700">{doc.owner_name}</p>
-                        <p className="text-[10px] text-slate-400">{doc.role_display}</p>
+                        <p className="font-bold text-slate-700">{item.owner_name}</p>
+                        <p className="text-[10px] text-slate-400">{item.role_display}</p>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 truncate max-w-[120px]" title={doc.doc_type}>{doc.doc_type}</td>
-                    <td className="px-4 py-3">{getStatusBadge(doc.expiration_date)}</td>
-                    <td className="px-4 py-3 text-right"><button onClick={() => onUpdate(doc.person_data)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border border-blue-200"><RefreshCw size={16}/></button></td>
+                    <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                            {item.docs.map((d, i) => (
+                                <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200" title={`Vence: ${d.expiration_date}`}>
+                                    {d.doc_type}
+                                </span>
+                            ))}
+                        </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                        <button onClick={() => onUpdate(item.person_data)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border border-blue-200" title="Ver Legajo">
+                            <RefreshCw size={16}/>
+                        </button>
+                    </td>
                 </tr>
              ))}
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-2 border-t border-slate-100 bg-slate-50 flex justify-end gap-2"><button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="p-1 rounded hover:bg-white text-slate-500"><ChevronLeft size={18}/></button><button onClick={() => setPage(p => p + 1)} disabled={!hasMore} className="p-1 rounded hover:bg-white text-slate-500"><ChevronRight size={18}/></button></div>
+      <div className="px-4 py-2 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="p-1 rounded hover:bg-white text-slate-500"><ChevronLeft size={18}/></button>
+          <button onClick={() => setPage(p => p + 1)} disabled={!hasMore} className="p-1 rounded hover:bg-white text-slate-500"><ChevronRight size={18}/></button>
+      </div>
     </div>
   );
 };

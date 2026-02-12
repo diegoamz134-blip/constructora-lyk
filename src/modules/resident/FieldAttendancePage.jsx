@@ -91,6 +91,7 @@ const FieldAttendancePage = () => {
 
         // C. Merge de datos
         const mergedList = workersData.map(w => {
+          // Buscamos si ya tiene registro (usando worker_id que es único para la persona)
           const existingRecord = attendanceData.find(a => a.worker_id === w.id);
 
           return {
@@ -154,8 +155,6 @@ const FieldAttendancePage = () => {
     
     if (timeValue) {
         // --- CORRECCIÓN HORA PERUANA AL GUARDAR ---
-        // Construimos la fecha ISO explícitamente con el offset de Perú (-05:00)
-        // Esto asegura que "08:00" signifique "08:00 en Perú" y no UTC.
         const fullDateTime = `${date}T${timeValue}:00-05:00`;
         newWorkers[index][field] = fullDateTime;
     } else {
@@ -213,6 +212,7 @@ const FieldAttendancePage = () => {
           validation_status: statusToSave 
         };
 
+        // Si ya tenemos ID, lo enviamos (aunque la restricción es la clave)
         if (w.attendanceId) {
             record.id = w.attendanceId;
         }
@@ -220,14 +220,17 @@ const FieldAttendancePage = () => {
         return record;
       });
 
+      // --- CAMBIO CLAVE AQUÍ ---
+      // Usamos onConflict: 'worker_id, date' para forzar la actualización si ya existe registro ese día
       const { data, error } = await supabase
         .from('attendance')
-        .upsert(recordsToUpsert, { onConflict: 'id' })
+        .upsert(recordsToUpsert, { onConflict: 'worker_id, date' }) 
         .select(); 
       
       if (error) throw error;
 
       if (data) {
+          // Actualizamos IDs locales para que la UI sepa que ya están guardados
           const updatedWorkers = [...workers];
           data.forEach(updatedRecord => {
               const index = updatedWorkers.findIndex(w => w.id === updatedRecord.worker_id);
@@ -246,7 +249,7 @@ const FieldAttendancePage = () => {
         type: 'success',
         title: isValidation ? '¡Enviado a RRHH!' : 'Guardado',
         message: isValidation 
-          ? `Se ha enviado la asistencia de ${workers.length} trabajadores.`
+          ? `Se ha actualizado y enviado la asistencia de ${workers.length} trabajadores.`
           : 'Cambios guardados localmente.',
       });
 
@@ -273,20 +276,14 @@ const FieldAttendancePage = () => {
   const getTimeInputValue = (isoString) => {
     if (!isoString) return '';
     try {
-        // Creamos la fecha a partir del string
         const d = new Date(isoString);
-        
-        // --- CORRECCIÓN HORA PERUANA VISUALIZACIÓN ---
-        // Usamos Intl.DateTimeFormat para forzar la zona horaria de Lima
-        // independientemente de la configuración de la PC del usuario.
         const formatter = new Intl.DateTimeFormat('en-US', {
             timeZone: 'America/Lima',
             hour: '2-digit',
             minute: '2-digit',
-            hour12: false // Formato 24h para el input type="time"
+            hour12: false
         });
         
-        // Extraemos las partes formateadas
         const parts = formatter.formatToParts(d);
         const hour = parts.find(p => p.type === 'hour').value;
         const minute = parts.find(p => p.type === 'minute').value;
@@ -333,7 +330,6 @@ const FieldAttendancePage = () => {
       <div className="p-6 max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            {/* TÍTULO CAMBIADO A "REVISIÓN DE ASISTENCIA" */}
             <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
               <ClipboardCheck className="text-[#f0c419]" size={32} /> Revisión de Asistencia
             </h1>
