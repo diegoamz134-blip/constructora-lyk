@@ -22,6 +22,9 @@ import CameraModal from '../../components/common/CameraModal';
 // COLORES PARA GRÁFICOS
 const COLORS = ['#003366', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
+// NOMBRE EXACTO DEL BUCKET EN SUPABASE
+const BUCKET_NAME = 'attendance_photos';
+
 const DashboardPage = () => {
   const { user: currentUser } = useAuth();
 
@@ -306,29 +309,31 @@ const DashboardPage = () => {
     const toastId = toast.loading("Procesando asistencia...");
 
     try {
-        // A. Subir Foto (Si falla la subida, avisamos pero no rompemos todo si no es crítico)
+        console.log("Iniciando subida de foto...");
+        // A. Subir Foto
         const photoBlob = dataURLtoBlob(imgSrc);
-        // Sanear nombre de archivo para evitar errores 400 por caracteres raros
         const safeDocNum = (currentUser.document_number || 'user').replace(/[^a-zA-Z0-9]/g, '');
+        // Forzamos la carpeta 'attendance/'
         const fileName = `attendance/${safeDocNum}_${Date.now()}_${attendanceType}.jpg`;
         
         let photoUrl = null;
 
-        const { error: uploadError } = await supabase.storage
-            .from('attendance_photos') 
+        // Intentar subir al bucket
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from(BUCKET_NAME) 
             .upload(fileName, photoBlob);
             
         if (uploadError) {
-             console.error("Error subiendo foto (Verifica que el Bucket 'attendance_photos' exista y sea Público):", uploadError);
-             toast.error("Error subiendo foto. Verifica el almacenamiento.", { id: toastId });
-             // Si quieres detener el proceso si la foto falla, descomenta la siguiente línea:
-             // throw new Error("Fallo al subir evidencia fotográfica.");
+             console.error("ERROR CRÍTICO AL SUBIR FOTO:", uploadError);
+             toast.error(`Error subiendo foto: ${uploadError.message}. Verifica permisos de Storage.`, { id: toastId });
+             // Si falla la foto, ¿detenemos? Por ahora continuamos pero sin foto.
         } else {
-             // Si subió bien, obtenemos la URL
+             console.log("Foto subida correctamente:", uploadData);
              const { data: publicUrlData } = supabase.storage
-                .from('attendance_photos')
+                .from(BUCKET_NAME)
                 .getPublicUrl(fileName);
              photoUrl = publicUrlData.publicUrl;
+             console.log("URL Pública generada:", photoUrl);
         }
 
         // B. Obtener Ubicación
@@ -343,7 +348,8 @@ const DashboardPage = () => {
                 project_name: residentProjectName || 'Oficina Central', 
                 check_in_location: location || 'Panel Web', 
                 status: 'Presente',
-                photo_url: photoUrl // Asegúrate de haber creado esta columna en Supabase (PASO 1)
+                check_in_photo: photoUrl, // Campo correcto
+                photo_url: photoUrl       // Campo legacy
             };
     
             if (currentUser.role === 'worker') {
@@ -351,29 +357,24 @@ const DashboardPage = () => {
             } else {
                 payload.employee_id = currentUser.id;
             }
-    
+            
+            console.log("Guardando en BD (Ingreso):", payload);
             const { data, error } = await supabase.from('attendance').insert([payload]).select().single();
-            if (error) {
-                // Manejo específico del error de columna faltante
-                if (error.code === 'PGRST204') {
-                    throw new Error("Falta la columna 'photo_url' en la base de datos.");
-                }
-                throw error;
-            }
+            if (error) throw error;
             
             setTodayRecord(data);
             setNotification({ isOpen: true, type: 'success', title: 'Entrada Registrada', message: `Foto capturada y asistencia marcada.` });
             toast.success("Entrada registrada", { id: toastId });
         
         } else if (attendanceType === 'Salida') {
-            // Actualizar registro existente
+            console.log("Actualizando en BD (Salida), URL Foto:", photoUrl);
             const { data, error } = await supabase
                 .from('attendance')
                 .update({ 
                     check_out_time: now.toISOString(), 
                     check_out_location: location || 'Panel Web',
-                    // Si creaste la columna check_out_photo_url descomenta esto:
-                    // check_out_photo_url: photoUrl 
+                    check_out_photo: photoUrl,     // Campo correcto
+                    check_out_photo_url: photoUrl  // Campo legacy (si existe)
                 })
                 .eq('id', todayRecord.id)
                 .select().single();

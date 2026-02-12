@@ -3,7 +3,8 @@ import {
   MapPin, Calendar, FileText, Filter, 
   User, HardHat, UserCog, Loader2, Search, 
   ArrowLeft, Building2, FileDown, 
-  X, ChevronLeft, ChevronRight, ChevronsLeft
+  X, ChevronLeft, ChevronRight, ChevronsLeft,
+  Building, Camera, CameraOff // Iconos adicionales
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../../services/supabase';
@@ -17,7 +18,10 @@ import {
   PieChart, Pie, Cell 
 } from 'recharts';
 
+// SERVICIOS
 import { getProjects } from '../../services/projectsService';
+import { getSedes } from '../../services/sedesService';
+
 // IMPORT PARA EXCEL
 import { generateTareoExcel } from '../../utils/excelTareoGenerator';
 
@@ -43,8 +47,11 @@ const ReportsPage = () => {
   // --- ESTADOS ---
   const [activeTab, setActiveTab] = useState('workers'); // 'workers' | 'staff'
   const [viewMode, setViewMode] = useState('projects'); 
+  
   const [projectsList, setProjectsList] = useState([]);
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [sedesList, setSedesList] = useState([]); 
+  
+  const [selectedProject, setSelectedProject] = useState(null); 
   
   const [attendanceData, setAttendanceData] = useState([]); 
   const [loading, setLoading] = useState(false);
@@ -69,7 +76,7 @@ const ReportsPage = () => {
   const [filterText, setFilterText] = useState('');
   const [filterRole, setFilterRole] = useState('Todos');
 
-  // Roles dinámicos según el Tab activo
+  // Roles dinámicos
   const ROLES = activeTab === 'workers' 
     ? ['Todos', 'Operario', 'Oficial', 'Peón', 'Capataz', 'Topógrafo'] 
     : ['Todos', 'Administrador', 'RR.HH.', 'Residente de Obra', 'SSOMA', 'Administrativo de Campo', 'Staff'];
@@ -78,34 +85,36 @@ const ReportsPage = () => {
 
   // --- 1. CARGA INICIAL ---
   useEffect(() => {
-    loadProjects();
-  }, []);
-
-  // --- EFECTO AL CAMBIAR PESTAÑA ---
-  useEffect(() => {
-    // Reiniciar filtros y datos al cambiar de pestaña
     setFilterText('');
     setFilterRole('Todos');
     setAttendanceData([]);
     setCurrentPage(1);
+    setSelectedProject(null);
+    setViewMode('projects'); 
 
-    if (activeTab === 'staff') {
-        // SI ES STAFF: Cargar datos directamente (sin seleccionar proyecto)
-        setSelectedProject(null);
-        setViewMode('detail'); 
-        fetchAttendance(1, null, 'staff');
+    if (activeTab === 'workers') {
+        loadProjects();
     } else {
-        // SI ES OBREROS: Mostrar lista de proyectos
-        setSelectedProject(null);
-        setViewMode('projects');
+        loadSedes(); 
     }
   }, [activeTab]);
 
   const loadProjects = async () => {
     try {
+      setLoading(true);
       const data = await getProjects();
-      setProjectsList(data);
+      setProjectsList(data || []);
     } catch (error) { console.error(error); }
+    finally { setLoading(false); }
+  };
+
+  const loadSedes = async () => {
+    try {
+      setLoading(true);
+      const data = await getSedes();
+      setSedesList(data || []);
+    } catch (error) { console.error(error); }
+    finally { setLoading(false); }
   };
 
   // --- 2. FETCH DE ASISTENCIA ---
@@ -114,36 +123,35 @@ const ReportsPage = () => {
     try {
       let query = supabase.from('attendance');
 
-      // A) SELECCIÓN DE COLUMNAS Y TABLA RELACIONADA SEGÚN TAB
       if (currentTab === 'workers') {
         query = query.select(`
           *,
           workers!inner ( id, full_name, category, document_number )
         `, { count: 'exact' });
       } else {
+        // Aseguramos traer todos los campos necesarios para Staff
         query = query.select(`
           *,
-          employees!inner ( id, full_name, position, document_number )
+          employees!inner ( id, full_name, position, document_number, sede_id )
         `, { count: 'exact' });
       }
 
-      // B) FILTROS DE FECHA
       query = query
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date', { ascending: true })
         .order('check_in_time', { ascending: true });
 
-      // C) FILTROS ESPECÍFICOS POR ROL
       if (currentTab === 'workers') {
-        // OBREROS: Solo validado y filtrado por proyecto si se seleccionó uno
         query = query.eq('validation_status', 'VALIDADO');
         if (project) {
             query = query.eq('project_name', project.name);
         }
       } else {
-        // STAFF: NO FILTRAMOS POR 'VALIDADO' para que salgan sus marcaciones automáticas
-        // STAFF: NO FILTRAMOS POR PROYECTO (Vista Global)
+        // Filtro por Sede para Staff
+        if (project) {
+            query = query.eq('employees.sede_id', project.id);
+        }
       }
 
       const { data, error } = await query;
@@ -151,7 +159,6 @@ const ReportsPage = () => {
 
       let finalData = data || [];
 
-      // Filtro de Texto (Local)
       if (filterText) {
          finalData = finalData.filter(item => {
             const u = getUserData(item, currentTab);
@@ -159,7 +166,6 @@ const ReportsPage = () => {
          });
       }
 
-      // Filtro de Rol (Local)
       if (filterRole !== 'Todos') {
          finalData = finalData.filter(item => {
             const u = getUserData(item, currentTab);
@@ -178,9 +184,8 @@ const ReportsPage = () => {
     }
   };
 
-  // Recarga automática al cambiar filtros (solo en modo detalle)
   useEffect(() => {
-    if (viewMode === 'detail' || activeTab === 'staff') {
+    if (viewMode === 'detail') {
        const timer = setTimeout(() => {
           fetchAttendance(1, selectedProject, activeTab);
        }, 500);
@@ -188,7 +193,7 @@ const ReportsPage = () => {
     }
   }, [dateRange, selectedProject, filterText, filterRole]);
 
-  // --- LÓGICA DE PAGINACIÓN LOCAL ---
+  // --- LÓGICA DE PAGINACIÓN ---
   const totalPages = Math.ceil(totalRecords / ITEMS_PER_PAGE);
   
   const paginatedTableData = useMemo(() => {
@@ -212,16 +217,29 @@ const ReportsPage = () => {
     return { name: 'Desconocido', role: '-', doc: '-', type: '?' };
   };
 
+  // --- FUNCIÓN SEGURA PARA LA FECHA (CORRECCIÓN) ---
+  const formatDateSafe = (dateStr) => {
+    if (!dateStr) return '-';
+    // Dividimos manualmente la cadena "YYYY-MM-DD" para evitar conversiones de zona horaria
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        const [year, month, day] = parts;
+        return `${day}/${month}/${year}`;
+    }
+    // Fallback por si llega en otro formato
+    return new Date(dateStr).toLocaleDateString('es-PE');
+  };
+
   // --- ESTADÍSTICAS ---
   const stats = useMemo(() => {
     const grouped = {};
     let presentCount = 0;
 
     attendanceData.forEach(item => {
-      const dateKey = new Date(item.date).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
+      // Usamos la misma lógica segura para la llave del gráfico
+      const dateKey = formatDateSafe(item.date).substring(0, 5); // DD/MM
       if (!grouped[dateKey]) grouped[dateKey] = { name: dateKey, Asistencia: 0 };
       
-      // LÓGICA DE JORNADA
       let dayValue = 0;
       if (item.check_in_time && item.check_out_time) {
           const diffMs = new Date(item.check_out_time) - new Date(item.check_in_time);
@@ -257,8 +275,8 @@ const ReportsPage = () => {
   }, [attendanceData, totalRecords]);
 
   // --- MANEJADORES ---
-  const handleProjectClick = (project) => {
-    setSelectedProject(project);
+  const handleProjectClick = (item) => {
+    setSelectedProject(item); 
     setViewMode('detail');
     setFilterText('');
     setFilterRole('Todos');
@@ -277,13 +295,14 @@ const ReportsPage = () => {
   const generatePDF = async () => {
     setIsGeneratingPdf(true);
     try {
-      // Reutilizamos la lógica de fetch para obtener TODOS los registros
       let query = supabase.from('attendance');
       if (activeTab === 'workers') {
         query = query.select(`*, workers(full_name,category,document_number)`);
-        query = query.eq('validation_status', 'VALIDADO'); // Validado solo para obreros
+        query = query.eq('validation_status', 'VALIDADO'); 
+        if (selectedProject) query = query.eq('project_name', selectedProject.name);
       } else {
-        query = query.select(`*, employees(full_name,position,document_number)`);
+        query = query.select(`*, employees!inner(full_name,position,document_number,sede_id)`);
+        if (selectedProject) query = query.eq('employees.sede_id', selectedProject.id);
       }
 
       query = query
@@ -292,8 +311,6 @@ const ReportsPage = () => {
         .order('date', { ascending: true })
         .range(0, 9999);
         
-      if (selectedProject && activeTab === 'workers') query = query.eq('project_name', selectedProject.name);
-      
       const { data: fullData, error } = await query;
       if (error || !fullData || fullData.length === 0) { alert("Sin datos para reportar."); return; }
 
@@ -324,7 +341,10 @@ const ReportsPage = () => {
 
       for (let i = 0; i < dates.length; i++) {
         const d = dates[i];
-        const dateObj = new Date(d + 'T00:00:00');
+        // Usamos también la corrección manual para mostrar la fecha en el título del PDF
+        const fechaMostrar = formatDateSafe(d);
+        const dateObj = new Date(d + 'T00:00:00'); // Forzamos hora para getWeekNumber
+
         if (i>0) doc.addPage();
         
         doc.addImage(imgLogo, 'PNG', 14, 10, 35, 12);
@@ -333,16 +353,14 @@ const ReportsPage = () => {
         doc.setDrawColor(0, 51, 102); doc.setLineWidth(0.5); doc.line(14, 25, 283, 25);
 
         doc.setFontSize(9); doc.setTextColor(50); doc.setFont("helvetica", "bold");
-        const fechaStr = dateObj.toLocaleDateString('es-PE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }).toUpperCase();
-        
-        doc.text("OBRA/ÁREA:", 14, 32); doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
+        doc.text("OBRA/SEDE:", 14, 32); doc.setFont("helvetica", "normal"); doc.setTextColor(0); 
         doc.text(selectedProject ? selectedProject.name.toUpperCase() : 'REPORTE GENERAL', 35, 32);
         
         doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("SEMANA:", 240, 32);
         doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(`${getWeekNumber(dateObj)}`, 260, 32);
 
         doc.setFont("helvetica", "bold"); doc.setTextColor(50); doc.text("FECHA:", 14, 38);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(fechaStr, 35, 38);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(0); doc.text(fechaMostrar, 35, 38);
 
         const dayRows = reportData.filter(x => x.date === d);
         const tableBody = [];
@@ -407,23 +425,22 @@ const ReportsPage = () => {
   const handleExportExcel = async () => {
     setIsGeneratingExcel(true);
     try {
-      // Cargamos master list solo de lo necesario
       let masterList = [];
       const { data } = await supabase.from(activeTab === 'workers' ? 'workers' : 'employees')
                                      .select('*').eq('status', 'Activo').range(0, 4999);
       masterList = data || [];
 
-      // Cargamos asistencia
       let query = supabase.from('attendance');
       if (activeTab === 'workers') {
           query = query.select(`*, workers(id, full_name, category, document_number, start_date)`);
-          query = query.eq('validation_status', 'VALIDADO'); // Filtro solo para workers
+          query = query.eq('validation_status', 'VALIDADO'); 
+          if (selectedProject) query = query.eq('project_name', selectedProject.name);
       } else {
-          query = query.select(`*, employees(id, full_name, position, document_number, entry_date)`);
+          query = query.select(`*, employees!inner(id, full_name, position, document_number, entry_date, sede_id)`);
+          if (selectedProject) query = query.eq('employees.sede_id', selectedProject.id);
       }
 
       query = query.gte('date', dateRange.start).lte('date', dateRange.end).order('date', { ascending: true }).range(0, 9999);
-      if (selectedProject && activeTab === 'workers') query = query.eq('project_name', selectedProject.name);
       
       const { data: attendanceData, error } = await query;
       if (error) throw error;
@@ -434,7 +451,7 @@ const ReportsPage = () => {
           activeTab === 'staff' ? masterList : [], 
           dateRange, 
           selectedProject,
-          projectsList || [] 
+          activeTab === 'workers' ? projectsList : sedesList
       );
 
     } catch (e) {
@@ -452,15 +469,18 @@ const ReportsPage = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
              <FileText className="text-[#003366]"/> 
-             {activeTab === 'staff' ? 'Control de Asistencia Staff' : (selectedProject ? `Obra: ${selectedProject.name}` : 'Reportes de Obra')}
+             {selectedProject 
+                ? (activeTab === 'staff' ? `Sede: ${selectedProject.name}` : `Obra: ${selectedProject.name}`)
+                : (activeTab === 'staff' ? 'Reportes de Staff por Sede' : 'Reportes de Obra')
+             }
           </h2>
           <p className="text-slate-500 text-sm">
-            {activeTab === 'staff' ? 'Vista general de asistencia administrativa.' : 'Gestión de tareos y horas en proyectos.'}
+            {activeTab === 'staff' ? 'Selecciona una sede para ver asistencia administrativa.' : 'Gestión de tareos y horas en proyectos.'}
           </p>
         </div>
-        {selectedProject && activeTab === 'workers' && (
+        {selectedProject && (
            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-[#003366] bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm font-bold text-sm">
-              <ArrowLeft size={16}/> Volver a Obras
+              <ArrowLeft size={16}/> Volver a Lista
            </button>
         )}
       </div>
@@ -541,33 +561,44 @@ const ReportsPage = () => {
          </div>
       </div>
 
-      {/* VISTA 1: LISTA DE PROYECTOS (SOLO PARA WORKERS) */}
-      {activeTab === 'workers' && !selectedProject && !isGlobalSearchMode && (
+      {/* VISTA 1: LISTA DE TARJETAS (PROYECTOS O SEDES) */}
+      {!selectedProject && !isGlobalSearchMode && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-           {loading && projectsList.length === 0 ? (
-             <div className="col-span-full py-20 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/> Cargando obras...</div>
+           {loading ? (
+             <div className="col-span-full py-20 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/> Cargando...</div>
            ) : (
-             projectsList.map(proj => (
-               <motion.div key={proj.id} whileHover={{ y: -5 }} onClick={() => handleProjectClick(proj)} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm cursor-pointer group hover:shadow-md hover:border-blue-200 relative overflow-hidden">
-                 <div className="absolute top-0 left-0 w-1.5 h-full bg-[#003366] group-hover:bg-[#f0c419] transition-colors"></div>
+             (activeTab === 'workers' ? projectsList : sedesList).map(item => {
+               const isProject = activeTab === 'workers';
+               const icon = isProject ? <Building2 size={24}/> : <Building size={24}/>;
+               const status = isProject ? item.status : (item.latitude ? 'Con GPS' : 'Sin GPS');
+               const statusColor = isProject 
+                  ? (item.status === 'En Ejecución' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-500 border-slate-100')
+                  : 'bg-yellow-50 text-yellow-700 border-yellow-100';
+
+               return (
+                <motion.div key={item.id} whileHover={{ y: -5 }} onClick={() => handleProjectClick(item)} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm cursor-pointer group hover:shadow-md hover:border-blue-200 relative overflow-hidden">
+                 <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${isProject ? 'bg-[#003366] group-hover:bg-blue-600' : 'bg-[#f0c419] group-hover:bg-yellow-500'}`}></div>
                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-3 bg-blue-50 text-[#003366] rounded-xl"><Building2 size={24}/></div>
-                    <span className={`px-3 py-1 text-xs font-bold rounded-full border ${proj.status === 'En Ejecución' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>{proj.status}</span>
+                    <div className={`p-3 rounded-xl ${isProject ? 'bg-blue-50 text-[#003366]' : 'bg-yellow-50 text-yellow-700'}`}>
+                      {icon}
+                    </div>
+                    <span className={`px-3 py-1 text-xs font-bold rounded-full border ${statusColor}`}>{status}</span>
                  </div>
-                 <h3 className="font-bold text-lg text-slate-800 mb-1">{proj.name}</h3>
-                 <p className="text-sm text-slate-500 flex items-center gap-1"><MapPin size={14}/> {proj.location}</p>
+                 <h3 className="font-bold text-lg text-slate-800 mb-1">{item.name}</h3>
+                 <p className="text-sm text-slate-500 flex items-center gap-1"><MapPin size={14}/> {item.location || 'Sin ubicación'}</p>
                  <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-xs font-bold text-slate-400">
-                    <span>Ver Reporte</span>
+                    <span>Ver {isProject ? 'Reporte Obra' : 'Personal Staff'}</span>
                     <ArrowLeft className="rotate-180" size={14}/>
                  </div>
                </motion.div>
-             ))
+               );
+             })
            )}
         </div>
       )}
 
-      {/* VISTA 2: DETALLE / TABLA (PARA WORKERS EN PROYECTO O STAFF SIEMPRE) */}
-      {(activeTab === 'staff' || selectedProject || isGlobalSearchMode) && (
+      {/* VISTA 2: DETALLE / TABLA */}
+      {(selectedProject || isGlobalSearchMode) && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
            
            {/* GRÁFICOS */}
@@ -616,8 +647,7 @@ const ReportsPage = () => {
                        <thead className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase">
                           <tr>
                              <th className="px-6 py-4">Personal</th>
-                             {/* PROYECTO: SOLO PARA OBREROS */}
-                             {activeTab === 'workers' && <th className="px-6 py-4">Proyecto</th>}
+                             <th className="px-6 py-4">{activeTab === 'workers' ? 'Proyecto' : 'Sede'}</th>
                              <th className="px-6 py-4">Fecha</th>
                              <th className="px-6 py-4">Entrada</th>
                              <th className="px-6 py-4">Salida</th>
@@ -635,6 +665,9 @@ const ReportsPage = () => {
                        >
                           {paginatedTableData.map(item => {
                              const u = getUserData(item);
+                             // CORRECCIÓN DE FECHA AQUÍ: Usamos formatDateSafe
+                             const formattedDate = formatDateSafe(item.date);
+
                              return (
                                 <motion.tr 
                                    key={item.id} 
@@ -648,11 +681,16 @@ const ReportsPage = () => {
                                       </div>
                                    </td>
                                    
-                                   {activeTab === 'workers' && (
-                                      <td className="px-6 py-4 text-xs font-bold text-slate-600">{item.project_name}</td>
-                                   )}
+                                   <td className="px-6 py-4 text-xs font-bold text-slate-600">
+                                      {activeTab === 'workers' 
+                                         ? (item.project_name || '-')
+                                         : (selectedProject ? selectedProject.name : 'Sede Asignada')
+                                      }
+                                   </td>
 
-                                   <td className="px-6 py-4 font-medium text-slate-600">{new Date(item.date).toLocaleDateString()}</td>
+                                   {/* AQUÍ SE APLICA LA FECHA CORREGIDA */}
+                                   <td className="px-6 py-4 font-medium text-slate-600">{formattedDate}</td>
+                                   
                                    <td className="px-6 py-4">
                                       {item.check_in_time ? (
                                          <div className="flex flex-col">
@@ -669,9 +707,28 @@ const ReportsPage = () => {
                                          </div>
                                       ) : <span className="text-[10px] italic text-slate-400">En turno</span>}
                                    </td>
+
+                                   {/* COLUMNA DE FOTOS MEJORADA */}
                                    <td className="px-6 py-4 text-center flex justify-center gap-2">
-                                      {item.check_in_photo && <a href={item.check_in_photo} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden hover:scale-110 transition shadow-sm"><img src={item.check_in_photo} className="w-full h-full object-cover"/></a>}
-                                      {item.check_out_photo && <a href={item.check_out_photo} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden hover:scale-110 transition shadow-sm"><img src={item.check_out_photo} className="w-full h-full object-cover"/></a>}
+                                      {item.check_in_photo ? (
+                                        <a href={item.check_in_photo} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden hover:scale-110 transition shadow-sm" title="Ver foto entrada">
+                                            <img src={item.check_in_photo} className="w-full h-full object-cover"/>
+                                        </a>
+                                      ) : (
+                                        <div className="w-8 h-8 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300" title="Sin foto entrada">
+                                            <CameraOff size={14}/>
+                                        </div>
+                                      )}
+                                      
+                                      {item.check_out_photo ? (
+                                        <a href={item.check_out_photo} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden hover:scale-110 transition shadow-sm" title="Ver foto salida">
+                                            <img src={item.check_out_photo} className="w-full h-full object-cover"/>
+                                        </a>
+                                      ) : (
+                                        <div className="w-8 h-8 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300" title="Sin foto salida">
+                                            <CameraOff size={14}/>
+                                        </div>
+                                      )}
                                    </td>
                                 </motion.tr>
                              )
