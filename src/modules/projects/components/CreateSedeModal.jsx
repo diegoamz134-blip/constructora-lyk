@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, MapPin, Building, AlertCircle } from 'lucide-react';
+import { X, Save, MapPin, Building, AlertCircle, Search, Loader2 } from 'lucide-react';
 import { createSede, updateSede } from '../../../services/sedesService';
 
 // --- IMPORTACIONES DE MAPA (Leaflet) ---
@@ -27,10 +27,10 @@ const LocationPicker = ({ position, onLocationSelect }) => {
     },
   });
 
-  // Si hay posición inicial, centrar el mapa ahí al cargar
+  // Si hay posición inicial o cambia, centrar el mapa
   useEffect(() => {
     if (position) {
-      map.setView(position, 15);
+      map.setView(position, 16);
     }
   }, [position, map]);
 
@@ -43,6 +43,7 @@ const LocationPicker = ({ position, onLocationSelect }) => {
 
 const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
   const [loading, setLoading] = useState(false);
+  const [searchingMap, setSearchingMap] = useState(false); // Estado para el loader de búsqueda
   const [errorMsg, setErrorMsg] = useState('');
   
   // Coordenadas por defecto (Lima)
@@ -59,6 +60,7 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
   useEffect(() => {
     if (isOpen) {
       setErrorMsg('');
+      setSearchingMap(false);
       if (sedeToEdit) {
         // MODO EDICIÓN: Cargar datos
         setFormData({
@@ -81,18 +83,18 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // --- LÓGICA CORREGIDA: Reverse Geocoding ---
+  // --- 1. CLIC EN MAPA -> OBTIENE DIRECCIÓN (Reverse Geocoding) ---
   const handleMapClick = async (latlng) => {
-    // 1. Actualización visual inmediata
+    // Actualización visual inmediata del punto
     setFormData(prev => ({
       ...prev,
       latitude: latlng.lat,
       longitude: latlng.lng
     }));
 
-    // 2. Buscar dirección
+    // Buscar dirección escrita
     try {
-        // CORRECCIÓN: latlng.lng (Leaflet) -> lon (API)
+        setSearchingMap(true);
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
         const data = await response.json();
 
@@ -104,6 +106,42 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
         }
     } catch (error) {
         console.error("Error al obtener dirección del mapa:", error);
+    } finally {
+        setSearchingMap(false);
+    }
+  };
+
+  // --- 2. BUSCAR TEXTO -> OBTIENE COORDENADAS (Forward Geocoding) ---
+  const handleAddressSearch = async () => {
+    if (!formData.location || formData.location.length < 3) {
+        return; // No buscar si es muy corto
+    }
+
+    setSearchingMap(true);
+    try {
+        // Buscamos la dirección agregando ", Peru" para mejorar precisión
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formData.location + ', Peru')}`);
+        const data = await response.json();
+
+        if (data && data.length > 0) {
+            const result = data[0];
+            const lat = parseFloat(result.lat);
+            const lon = parseFloat(result.lon);
+
+            // Actualizamos coordenadas para que el mapa vuele ahí
+            setFormData(prev => ({
+                ...prev,
+                latitude: lat,
+                longitude: lon
+            }));
+        } else {
+            alert("No pudimos encontrar esa dirección. Intenta ser más específico.");
+        }
+    } catch (error) {
+        console.error("Error buscando dirección:", error);
+        alert("Error de conexión con el mapa.");
+    } finally {
+        setSearchingMap(false);
     }
   };
 
@@ -114,6 +152,14 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
 
     try {
       if (!formData.name) throw new Error('El nombre de la sede es obligatorio.');
+
+      // Advertencia si no hay GPS (Opcional, pero recomendado)
+      if (!formData.latitude || !formData.longitude) {
+         if(!window.confirm("⚠️ No has seleccionado ubicación en el mapa.\nSin GPS, no se podrá validar la asistencia por ubicación.\n¿Guardar de todos modos?")) {
+            setLoading(false);
+            return;
+         }
+      }
 
       const payload = {
         name: formData.name,
@@ -174,18 +220,39 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
                 <input type="text" name="name" value={formData.name} onChange={handleChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-[#003366] outline-none font-medium" placeholder="Ej. Oficina Central" />
               </div>
 
+              {/* INPUT DE DIRECCIÓN CON BÚSQUEDA */}
               <div className="space-y-2">
-                 <label className="text-xs font-bold text-slate-600 uppercase">Dirección Escrita</label>
-                 <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                    <input type="text" name="location" value={formData.location} onChange={handleChange} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-[#003366] outline-none" placeholder="Av. Larco 123..." />
+                 <label className="text-xs font-bold text-slate-600 uppercase">Dirección y GPS</label>
+                 <div className="flex gap-2">
+                    <div className="relative flex-1">
+                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                        <input 
+                            type="text" 
+                            name="location" 
+                            value={formData.location} 
+                            onChange={handleChange} 
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddressSearch(); } }}
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:border-[#003366] outline-none" 
+                            placeholder="Escribe dirección y busca..." 
+                        />
+                    </div>
+                    <button 
+                        type="button" 
+                        onClick={handleAddressSearch}
+                        disabled={searchingMap}
+                        className="px-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl hover:bg-blue-100 transition flex items-center gap-2"
+                        title="Buscar en el mapa"
+                    >
+                        {searchingMap ? <Loader2 className="animate-spin" size={20}/> : <Search size={20}/>}
+                    </button>
                  </div>
+                 <p className="text-[10px] text-slate-400 pl-1">Presiona Enter o la lupa para ubicar.</p>
               </div>
 
               <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
                 <h4 className="text-blue-800 font-bold text-sm mb-2 flex items-center gap-2"><AlertCircle size={16}/> GPS para Asistencia</h4>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Asegúrate de marcar el punto exacto en el mapa. Este punto se usará para validar que el personal esté físicamente en la sede al marcar asistencia.
+                  El punto rojo en el mapa define la ubicación GPS exacta de la sede. Esto permitirá validar la asistencia del personal Staff asignado aquí.
                 </p>
               </div>
             </div>
@@ -201,8 +268,17 @@ const CreateSedeModal = ({ isOpen, onClose, onSuccess, sedeToEdit }) => {
                     />
                   </MapContainer>
                </div>
-               <div className="text-center text-xs text-slate-500 font-mono">
-                 Lat: {formData.latitude || '---'} | Lng: {formData.longitude || '---'}
+               
+               {/* Coordenadas Informativas */}
+               <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">
+                     <span className="block text-[10px] text-slate-400 uppercase font-bold">Latitud</span>
+                     <span className="text-xs font-mono text-slate-700">{formData.latitude || '---'}</span>
+                  </div>
+                  <div className="bg-slate-50 p-2 rounded border border-slate-100 text-center">
+                     <span className="block text-[10px] text-slate-400 uppercase font-bold">Longitud</span>
+                     <span className="text-xs font-mono text-slate-700">{formData.longitude || '---'}</span>
+                  </div>
                </div>
             </div>
           </div>
