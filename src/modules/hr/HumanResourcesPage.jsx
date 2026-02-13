@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Search, Filter, 
   Edit, Trash2, User, Building2, Phone, 
-  MapPin, HardHat, 
-  Construction, X, Users, Hammer, AlertTriangle, Activity 
+  HardHat, Activity, Users, Hammer, AlertTriangle 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -53,13 +52,21 @@ const HumanResourcesPage = () => {
       let data, error;
       
       if (activeTab === 'staff') {
+        // CONSULTA STAFF
         const response = await supabase
           .from('employees')
-          .select(`*, sedes ( name )`)
+          .select(`
+            *, 
+            sedes ( name ),
+            project_assignments (
+              projects ( name )
+            )
+          `)
           .order('created_at', { ascending: false });
         data = response.data;
         error = response.error;
       } else {
+        // CONSULTA OBREROS
         const response = await supabase
           .from('workers')
           .select('*')
@@ -78,7 +85,6 @@ const HumanResourcesPage = () => {
   };
 
   // --- MANEJADORES ---
-  
   const handleEdit = (e, person) => {
     if(e) { e.preventDefault(); e.stopPropagation(); }
     setSelectedPerson(person);
@@ -89,71 +95,35 @@ const HumanResourcesPage = () => {
     }
   };
 
-  // SOLICITAR ELIMINACIÓN
   const requestDelete = (e, id, name) => {
     if(e) { e.preventDefault(); e.stopPropagation(); }
     setConfirmDeleteModal({ isOpen: true, id, name });
   };
 
-  // EJECUTAR ELIMINACIÓN (CORREGIDO)
   const executeDelete = async () => {
     const idToDelete = confirmDeleteModal.id;
     if (!idToDelete) return;
-    
-    // Cerrar modal de confirmación
     setConfirmDeleteModal({ isOpen: false, id: null, name: '' });
 
     try {
       const table = activeTab === 'staff' ? 'employees' : 'workers';
       
-      // --- SOLUCIÓN ERROR FK (Foreign Key) ---
-      // Antes de borrar al usuario, borramos sus dependencias para evitar el error 409/23503.
-      
       if (activeTab === 'staff') {
-        // 1. Borrar Asistencias del Staff
-        // El error menciona 'attendance_employee_id_fkey', por lo tanto la columna es 'employee_id'
-        const { error: attendanceError } = await supabase
-          .from('attendance')
-          .delete()
-          .eq('employee_id', idToDelete);
-
-        if (attendanceError) {
-           console.error("Error limpiando asistencia:", attendanceError);
-           // Si falla esto, lanzamos error para no intentar borrar al usuario a medias
-           throw new Error("No se pudieron eliminar las asistencias vinculadas.");
-        }
-        
-        // NOTA: Si en el futuro tienes otras tablas (ej: 'payroll', 'documents'), agrégalas aquí.
-        
+        await supabase.from('attendance').delete().eq('employee_id', idToDelete);
+        await supabase.from('project_assignments').delete().eq('employee_id', idToDelete);
       } else {
-        // Lógica preventiva para Obreros (Workers)
-        // Intentamos borrar asistencias si existen bajo 'worker_id'
-        await supabase
-           .from('attendance')
-           .delete()
-           .eq('worker_id', idToDelete)
-           .catch(() => {}); // Ignoramos error si la columna no existe o no aplica
+        await supabase.from('attendance').delete().eq('worker_id', idToDelete).catch(() => {});
       }
 
-      // --- AHORA SÍ BORRAMOS AL USUARIO ---
       const { error } = await supabase.from(table).delete().eq('id', idToDelete);
-      
       if (error) throw error;
       
-      setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro y sus datos asociados eliminados correctamente.' });
+      setNotification({ isOpen: true, type: 'success', title: 'Eliminado', message: 'Registro eliminado correctamente.' });
       fetchData(); 
     } catch (error) {
       console.error('Error executing delete:', error);
-      
       let errorMsg = 'No se pudo eliminar.';
-      
-      // Si sigue saliendo error de llave foránea (quizás otra tabla que no vimos)
-      if (error.code === '23503') {
-         errorMsg = 'No se puede eliminar: El usuario tiene registros vinculados (Planillas, Contratos, etc.) activos.';
-      } else if (error.message) {
-         errorMsg = error.message;
-      }
-
+      if (error.code === '23503') errorMsg = 'El usuario tiene registros vinculados activos.';
       setNotification({ isOpen: true, type: 'error', title: 'Error', message: errorMsg });
     }
   };
@@ -170,13 +140,32 @@ const HumanResourcesPage = () => {
     setIsStatusModalOpen(true);
   };
 
+  // --- HELPER PARA MOSTRAR OBRAS ---
+  const getProjectDisplayInfo = (item) => {
+      if (activeTab === 'staff') {
+          const assignments = item.project_assignments || [];
+          if (assignments.length > 0) {
+              const firstName = assignments[0]?.projects?.name || 'Sin Nombre';
+              const extra = assignments.length > 1 ? assignments.length - 1 : 0;
+              return { name: firstName, extraCount: extra, isAssigned: true };
+          }
+          return { name: 'Sin Asignar', extraCount: 0, isAssigned: false };
+      } else {
+          const hasProject = item.project_assigned && item.project_assigned !== 'Sin asignar';
+          return { 
+              name: hasProject ? item.project_assigned : 'Sin Asignar', 
+              extraCount: 0, 
+              isAssigned: hasProject 
+          };
+      }
+  };
+
   // --- FILTROS ---
   const filteredList = listData.filter(item => {
     const term = searchTerm.toLowerCase();
     const fullName = item.full_name?.toLowerCase() || '';
     const docNum = item.document_number || '';
     const pos = (activeTab === 'staff' ? item.position : item.category)?.toLowerCase() || '';
-    
     return fullName.includes(term) || docNum.includes(term) || pos.includes(term);
   });
 
@@ -209,9 +198,7 @@ const HumanResourcesPage = () => {
            <button
              onClick={() => setActiveTab('staff')}
              className={`px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
-                activeTab === 'staff' 
-                ? 'bg-white text-[#003366] shadow-sm' 
-                : 'text-slate-500 hover:text-slate-700'
+                activeTab === 'staff' ? 'bg-white text-[#003366] shadow-sm' : 'text-slate-500 hover:text-slate-700'
              }`}
            >
              <Users size={18}/> Staff / Administrativo
@@ -219,9 +206,7 @@ const HumanResourcesPage = () => {
            <button
              onClick={() => setActiveTab('workers')}
              className={`px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
-                activeTab === 'workers' 
-                ? 'bg-white text-orange-700 shadow-sm' 
-                : 'text-slate-500 hover:text-slate-700'
+                activeTab === 'workers' ? 'bg-white text-orange-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
              }`}
            >
              <Hammer size={18}/> Obreros / Construcción
@@ -255,7 +240,7 @@ const HumanResourcesPage = () => {
                 <th className="px-6 py-4 min-w-[250px]">Nombre Completo</th>
                 <th className="px-4 py-4">DNI / CE</th>
                 <th className="px-4 py-4">Cargo</th>
-                <th className="px-4 py-4">Oficina</th>
+                <th className="px-4 py-4">Oficina / Sede</th>
                 <th className="px-4 py-4">F. Ingreso</th>
                 <th className="px-4 py-4 text-center">Estado</th>
                 <th className="px-4 py-4">Distrito</th>
@@ -276,24 +261,24 @@ const HumanResourcesPage = () => {
                 </tr>
               ) : filteredList.length === 0 ? (
                 <tr>
-                  <td colSpan="10" className="p-10 text-center text-slate-400 italic">
-                    No se encontraron registros.
-                  </td>
+                  <td colSpan="10" className="p-10 text-center text-slate-400 italic">No se encontraron registros.</td>
                 </tr>
               ) : (
                 filteredList.map((item) => {
                   const isStaff = activeTab === 'staff';
                   
                   const cargo = isStaff ? (item.position || 'Sin Cargo') : (item.category || 'Peón');
-                  const oficina = isStaff ? (item.sedes?.name || <span className="text-slate-400 italic text-xs">Sin Sede</span>) : (item.project_assigned || <span className="text-slate-400 italic text-xs">Sin Asignar</span>);
+                  const oficina = isStaff 
+                        ? (item.sedes?.name || <span className="text-slate-400 italic text-xs">Sin Sede</span>) 
+                        : (item.project_assigned || <span className="text-slate-400 italic text-xs">Sin Asignar</span>);
                   const fechaIngreso = isStaff ? item.entry_date : item.start_date;
                   const fechaFormat = fechaIngreso ? new Date(fechaIngreso + 'T12:00:00').toLocaleDateString('es-PE') : '-';
                   
-                  const cargoClass = isStaff 
-                     ? "text-slate-700 bg-slate-100 border-slate-200"
-                     : "text-orange-700 bg-orange-50 border-orange-200";
+                  // LÓGICA DE PROYECTOS Y DISEÑO ANIMADO
+                  const { name: projName, extraCount, isAssigned } = getProjectDisplayInfo(item);
 
-                  // Colores de estado
+                  const cargoClass = isStaff ? "text-slate-700 bg-slate-100 border-slate-200" : "text-orange-700 bg-orange-50 border-orange-200";
+                  
                   let statusColor = 'bg-slate-100 text-slate-500 border-slate-200';
                   if (item.status === 'Activo') statusColor = 'bg-emerald-50 text-emerald-600 border-emerald-100';
                   if (item.status === 'Vacaciones') statusColor = 'bg-blue-50 text-blue-600 border-blue-100';
@@ -303,7 +288,7 @@ const HumanResourcesPage = () => {
                   return (
                     <tr key={item.id} className="hover:bg-blue-50/30 transition-colors group">
                       
-                      {/* 1. Nombre */}
+                      {/* 1. Nombre y Avatar */}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 font-bold overflow-hidden shrink-0">
@@ -323,9 +308,7 @@ const HumanResourcesPage = () => {
                       <td className="px-4 py-4 text-sm font-mono text-slate-600">{item.document_number}</td>
 
                       <td className="px-4 py-4">
-                          <span className={`text-xs font-bold px-2 py-1 rounded-md border ${cargoClass}`}>
-                             {cargo}
-                          </span>
+                          <span className={`text-xs font-bold px-2 py-1 rounded-md border ${cargoClass}`}>{cargo}</span>
                       </td>
 
                       <td className="px-4 py-4 text-sm text-slate-600">
@@ -336,12 +319,8 @@ const HumanResourcesPage = () => {
 
                       <td className="px-4 py-4 text-sm text-slate-600">{fechaFormat}</td>
 
-                      {/* 6. Estado (Botón Clickeable para cambiar) */}
                       <td className="px-4 py-4 text-center">
-                          <button 
-                             onClick={(e) => handleChangeStatus(e, item)}
-                             className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border hover:brightness-95 transition-all ${statusColor}`}
-                          >
+                          <button onClick={(e) => handleChangeStatus(e, item)} className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border hover:brightness-95 transition-all ${statusColor}`}>
                              {item.status || 'Activo'}
                           </button>
                       </td>
@@ -349,61 +328,61 @@ const HumanResourcesPage = () => {
                       <td className="px-4 py-4 text-sm text-slate-600">{item.district || '-'}</td>
 
                       <td className="px-4 py-4 text-sm text-slate-600">
-                          {item.phone ? (
-                             <div className="flex items-center gap-1"><Phone size={14} className="text-slate-400"/> {item.phone}</div>
-                          ) : '-'}
+                          {item.phone ? (<div className="flex items-center gap-1"><Phone size={14} className="text-slate-400"/> {item.phone}</div>) : '-'}
                       </td>
 
+                      {/* --- COLUMNA DE OBRA ASIGNADA CON DISEÑO "PREMIUM" --- */}
                       <td className="px-4 py-4 text-center">
                           <div className="flex justify-center">
                               <button 
                                  type="button" 
                                  onClick={(e) => handleAssignProject(e, item)} 
                                  className={`
-                                    inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border
-                                    ${isStaff 
-                                       ? 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:scale-105 shadow-sm' 
-                                       : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50 hover:shadow-md'
+                                    relative overflow-hidden group/btn 
+                                    inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 border
+                                    ${isAssigned 
+                                       ? 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:shadow-md' // ESTADO NORMAL + HOVER
+                                       : 'bg-slate-50 text-slate-400 border-slate-200 border-dashed hover:bg-slate-100 hover:text-slate-600'
                                     }
                                  `}
-                                 title="Clic para cambiar asignación"
+                                 title="Clic para gestionar obras"
                               >
-                                 <HardHat size={14} className={!isStaff && item.project_assigned && item.project_assigned !== 'Sin asignar' ? "text-blue-500" : "text-slate-400"} /> 
-                                 <span className="truncate max-w-[180px]">
-                                    {isStaff 
-                                       ? 'Gestionar' 
-                                       : (item.project_assigned && item.project_assigned !== 'Sin asignar' ? item.project_assigned : 'Sin Asignar')
-                                    }
+                                 {/* ANIMACIÓN: Franja Azul que se desliza */}
+                                 {isAssigned && (
+                                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 transform -translate-x-full group-hover/btn:translate-x-0 transition-transform duration-300 ease-out"></span>
+                                 )}
+
+                                 <HardHat 
+                                    size={14} 
+                                    className={`transition-colors duration-300 ${isAssigned ? "text-slate-400 group-hover/btn:text-blue-600" : "text-slate-400"}`} 
+                                 /> 
+                                 
+                                 <span className={`truncate max-w-[150px] transition-colors duration-300 ${isAssigned ? "group-hover/btn:text-blue-700" : ""}`}>
+                                    {projName}
                                  </span>
+                                 
+                                 {/* INDICADOR EXTRA (+2) Animado */}
+                                 {extraCount > 0 && (
+                                     <span className={`
+                                        ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-black shadow-sm transition-colors duration-300
+                                        ${isAssigned ? "bg-slate-100 text-slate-500 group-hover/btn:bg-blue-600 group-hover/btn:text-white" : ""}
+                                     `}>
+                                        +{extraCount}
+                                     </span>
+                                 )}
                               </button>
                           </div>
                       </td>
 
                       <td className="px-4 py-4 text-center">
                          <div className="flex items-center justify-center gap-2">
-                             {/* Nuevo botón de actividad para cambiar estado también aquí */}
-                            <button 
-                               type="button" 
-                               onClick={(e) => handleChangeStatus(e, item)} 
-                               className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" 
-                               title="Cambiar Estado"
-                            >
+                            <button onClick={(e) => handleChangeStatus(e, item)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Cambiar Estado">
                                <Activity size={18} />
                             </button>
-                            <button 
-                               type="button" 
-                               onClick={(e) => handleEdit(e, item)} 
-                               className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
-                               title="Editar"
-                            >
+                            <button onClick={(e) => handleEdit(e, item)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
                                <Edit size={18} />
                             </button>
-                            <button 
-                               type="button" 
-                               onClick={(e) => requestDelete(e, item.id, item.full_name)} 
-                               className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" 
-                               title="Eliminar"
-                            >
+                            <button onClick={(e) => requestDelete(e, item.id, item.full_name)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Eliminar">
                                <Trash2 size={18} />
                             </button>
                          </div>
@@ -419,94 +398,30 @@ const HumanResourcesPage = () => {
       </div>
 
       {/* --- MODALES --- */}
-      
-      <AddEmployeeModal 
-        isOpen={isAddModalOpen} 
-        onClose={() => setIsAddModalOpen(false)}
-        userToEdit={selectedPerson}
-        onSuccess={fetchData}
-        onDelete={(id) => { setIsAddModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }}
-      />
-
-      <AddWorkerModal
-        isOpen={isAddWorkerModalOpen}
-        onClose={() => setIsAddWorkerModalOpen(false)}
-        userToEdit={selectedPerson}
-        onSuccess={fetchData}
-        onDelete={(id) => { setIsAddWorkerModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }}
-      />
-
-      {/* MODAL NUEVO DE ESTADO */}
-      <ChangeStatusModal
-        isOpen={isStatusModalOpen}
-        onClose={() => setIsStatusModalOpen(false)}
-        user={selectedPerson}
-        isWorker={activeTab === 'workers'}
-        onSuccess={fetchData}
-      />
+      <AddEmployeeModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} userToEdit={selectedPerson} onSuccess={fetchData} onDelete={(id) => { setIsAddModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }} />
+      <AddWorkerModal isOpen={isAddWorkerModalOpen} onClose={() => setIsAddWorkerModalOpen(false)} userToEdit={selectedPerson} onSuccess={fetchData} onDelete={(id) => { setIsAddWorkerModalOpen(false); requestDelete(null, id, selectedPerson?.full_name); }} />
+      <ChangeStatusModal isOpen={isStatusModalOpen} onClose={() => setIsStatusModalOpen(false)} user={selectedPerson} isWorker={activeTab === 'workers'} onSuccess={fetchData} />
+      <AssignProjectsModal isOpen={isProjectModalOpen} onClose={() => setIsProjectModalOpen(false)} user={selectedPerson} isWorker={activeTab === 'workers'} onSuccess={fetchData} />
+      <EmployeeDocumentsModal isOpen={isDocsModalOpen} onClose={() => setIsDocsModalOpen(false)} employee={selectedPerson} />
+      <StatusModal isOpen={notification.isOpen} onClose={() => setNotification({...notification, isOpen: false})} type={notification.type} title={notification.title} message={notification.message} />
 
       <AnimatePresence>
         {confirmDeleteModal.isOpen && (
            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={(e)=>e.stopPropagation()}>
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95 }} 
-                animate={{ opacity: 1, scale: 1 }} 
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm overflow-hidden"
-                onClick={(e)=>e.stopPropagation()}
-              >
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm overflow-hidden" onClick={(e)=>e.stopPropagation()}>
                   <div className="flex flex-col items-center text-center">
-                      <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
-                         <AlertTriangle size={28} />
-                      </div>
+                      <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4"><AlertTriangle size={28} /></div>
                       <h3 className="text-xl font-bold text-slate-800 mb-2">¿Eliminar registro?</h3>
-                      <p className="text-sm text-slate-500 mb-6">
-                        Estás a punto de eliminar a <span className="font-bold text-slate-700">{confirmDeleteModal.name}</span>. 
-                        Esta acción no se puede deshacer.
-                      </p>
-                      
+                      <p className="text-sm text-slate-500 mb-6">Estás a punto de eliminar a <span className="font-bold text-slate-700">{confirmDeleteModal.name}</span>. Esta acción no se puede deshacer.</p>
                       <div className="flex gap-3 w-full">
-                         <button 
-                           onClick={() => setConfirmDeleteModal({ isOpen: false, id: null, name: '' })}
-                           className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
-                         >
-                           Cancelar
-                         </button>
-                         <button 
-                           onClick={executeDelete}
-                           className="flex-1 py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 shadow-lg shadow-red-500/30 transition-all"
-                         >
-                           Sí, Eliminar
-                         </button>
+                         <button onClick={() => setConfirmDeleteModal({ isOpen: false, id: null, name: '' })} className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors">Cancelar</button>
+                         <button onClick={executeDelete} className="flex-1 py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 shadow-lg shadow-red-500/30 transition-all">Sí, Eliminar</button>
                       </div>
                   </div>
               </motion.div>
            </div>
         )}
       </AnimatePresence>
-
-      <AssignProjectsModal
-        isOpen={isProjectModalOpen}
-        onClose={() => setIsProjectModalOpen(false)}
-        user={selectedPerson}
-        isWorker={activeTab === 'workers'}
-        onSuccess={fetchData}
-      />
-
-      <EmployeeDocumentsModal
-        isOpen={isDocsModalOpen}
-        onClose={() => setIsDocsModalOpen(false)}
-        employee={selectedPerson}
-      />
-
-      <StatusModal 
-        isOpen={notification.isOpen} 
-        onClose={() => setNotification({...notification, isOpen: false})} 
-        type={notification.type} 
-        title={notification.title} 
-        message={notification.message}
-      />
-
     </div>
   );
 };

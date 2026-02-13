@@ -28,11 +28,7 @@ const TendersPage = React.lazy(() => import('./modules/licitaciones/TendersPage'
 const TenderDetail = React.lazy(() => import('./modules/licitaciones/TenderDetail'));
 const AccountingPage = React.lazy(() => import('./modules/admin-control/AccountingPage'));
 const FieldAttendancePage = React.lazy(() => import('./modules/resident/FieldAttendancePage'));
-
-// --- NUEVO IMPORT PARA LOGÍSTICA ---
 const LogisticsPage = React.lazy(() => import('./modules/logistics/LogisticsPage'));
-// -----------------------------------
-
 const SsomaPage = React.lazy(() => import('./modules/ssoma/SsomaPage'));
 
 // PÁGINAS DE ONBOARDING
@@ -62,18 +58,19 @@ function App() {
   return (
     <Suspense fallback={<LoadingSpinner />}>
       <Routes>
+        {/* RUTAS PÚBLICAS */}
         <Route path="/" element={<ClientLandingPage />} />
         <Route path="/libro-reclamaciones" element={<ComplaintsBookPage />} />
         <Route path="/login" element={<LoginPage />} />
 
-        {/* --- ONBOARDING STAFF --- */}
+        {/* ONBOARDING */}
         <Route path="/onboarding" element={<StaffOnboardingPage />} />
-
-        {/* --- ONBOARDING OBREROS --- */}
         <Route path="/worker/onboarding" element={<WorkerOnboardingPage />} />
 
-        {/* --- RUTAS PROTEGIDAS STAFF --- */}
+        {/* RUTAS PROTEGIDAS STAFF */}
         <Route element={<OnboardingGuard />}>
+          
+          {/* ACCESO GENERAL STAFF */}
           <Route element={<RoleProtectedRoute allowedRoles={[
               ...MANAGERS, 
               'contador', 'analista_contable', 'asistente_contabilidad', 'administrador', 
@@ -112,10 +109,9 @@ function App() {
              </Route>
           </Route>
 
-          {/* LOGÍSTICA - ACTUALIZADO */}
+          {/* LOGÍSTICA */}
           <Route element={<RoleProtectedRoute allowedRoles={[...MANAGERS, 'contador', 'analista_contable', 'administrador', 'asistente_logistica', 'encargado_almacen']} />}>
              <Route element={<CompanyProvider><MainLayout /></CompanyProvider>}>
-                {/* Aquí conectamos tu nueva página */}
                 <Route path="/logistica" element={<LogisticsPage />} />
              </Route>
           </Route>
@@ -152,9 +148,9 @@ function App() {
             </Route>
           </Route>
 
-        </Route> {/* FIN DEL ONBOARDING GUARD STAFF */}
+        </Route>
 
-        {/* --- RUTAS DE OBREROS (WORKERS) --- */}
+        {/* RUTAS DE OBREROS (WORKERS) */}
         <Route element={<WorkerOnboardingGuard />}>
           <Route path="/worker" element={<WorkerLayout />}>
             <Route path="dashboard" element={<WorkerDashboard />} />
@@ -165,6 +161,7 @@ function App() {
           </Route>
         </Route>
 
+        {/* ERROR 404 */}
         <Route path="*" element={<div className="p-10 text-center font-bold text-slate-600 mt-20">Página no encontrada (404)</div>} />
       </Routes>
     </Suspense>

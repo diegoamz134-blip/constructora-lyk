@@ -1,470 +1,452 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
 import { 
-  ClipboardCheck, Search, Calendar, 
-  Clock, UserCog, Filter, FileSpreadsheet,
-  Briefcase
+  Calendar, Search, Filter, CheckCircle, XCircle, 
+  Clock, Save, FileText, Download, Building2, 
+  CheckSquare, Bot, MapPin, ChevronDown 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
-import StatusModal from '../../components/common/StatusModal';
-
-// Librerías para Excel
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import { motion, AnimatePresence } from 'framer-motion';
+import * as XLSX from 'xlsx';
+import { Toaster, toast } from 'sonner';
 
 const AttendanceManagementPage = () => {
-  // YA NO HAY TABS, SIEMPRE ES STAFF
-  const [rawData, setRawData] = useState([]); 
-  const [loading, setLoading] = useState(true);
+  // --- ESTADOS ---
+  const [locations, setLocations] = useState([]); 
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   
-  // --- Fechas: Semana Actual por Defecto ---
-  const getStartOfWeek = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Lunes
-    const date = new Date(d.setDate(diff));
-    return date.toISOString().split('T')[0];
-  };
+  const [attendanceData, setAttendanceData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const getEndOfWeek = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1) + 6; // Domingo
-    const date = new Date(d.setDate(diff));
-    return date.toISOString().split('T')[0];
-  };
+  // Estadísticas
+  const [stats, setStats] = useState({ total: 0, presentes: 0, faltas: 0, validado: 0, aprobado: 0 });
 
-  const [dateRange, setDateRange] = useState({
-    start: getStartOfWeek(),
-    end: getEndOfWeek()
+  // Modal Confirmación
+  const [confirmModal, setConfirmModal] = useState({ 
+    isOpen: false, title: '', message: '', action: null, type: 'info' 
   });
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [notification, setNotification] = useState({ isOpen: false, type: '', title: '', message: '' });
-
-  // 1. Cargar Datos (SOLO STAFF)
+  // 1. CARGA INICIAL: OBRAS Y SEDES
   useEffect(() => {
-    fetchAttendanceRange();
-  }, [dateRange]);
+    loadLocations();
+  }, []);
 
-  const fetchAttendanceRange = async () => {
-    setLoading(true);
-    setRawData([]); 
+  const loadLocations = async () => {
     try {
-      // Consulta EXCLUSIVA para EMPLOYEES (Staff)
-      const { data, error } = await supabase
-        .from('attendance')
-        .select(`
-          *,
-          employees!inner (id, full_name, document_number, position, entry_date)
-        `)
-        .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
-        .not('employee_id', 'is', null);
+      // A. Proyectos
+      const { data: projects } = await supabase
+        .from('projects')
+        .select('id, name, status')
+        .eq('status', 'En Ejecución')
+        .order('name');
 
-      if (error) throw error;
-      setRawData(data || []);
+      // B. Sedes
+      const { data: sedes } = await supabase
+        .from('sedes')
+        .select('id, name')
+        .order('name');
+
+      const combined = [
+        ...(projects || []).map(p => ({ ...p, type: 'PROJECT' })),
+        ...(sedes || []).map(s => ({ ...s, type: 'SEDE' }))
+      ];
+
+      setLocations(combined);
+      if (combined.length > 0) setSelectedLocation(combined[0]);
 
     } catch (error) {
-      console.error("Error:", error);
-      setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudieron cargar los datos.' });
+      console.error("Error ubicaciones:", error);
+      toast.error("Error al cargar ubicaciones");
+    }
+  };
+
+  // 2. CARGA DE ASISTENCIA (INTELIGENTE)
+  useEffect(() => {
+    if (selectedLocation) {
+        loadAttendance();
+    }
+  }, [selectedLocation, date]);
+
+  const loadAttendance = async () => {
+    setLoading(true);
+    try {
+      let peopleData = [];
+
+      // === CORRECCIÓN CLAVE: Selección de Tabla según Tipo ===
+      if (selectedLocation.type === 'SEDE') {
+          // Si es SEDE -> Buscamos STAFF (Employees)
+          const { data: staff, error } = await supabase
+            .from('employees')
+            .select('id, full_name, document_number, position, sede_id')
+            .eq('sede_id', selectedLocation.id) // Match por ID de Sede
+            .eq('status', 'Activo')
+            .order('full_name');
+          
+          if (error) throw error;
+          
+          // Normalizamos para que parezca un "worker"
+          peopleData = staff.map(s => ({
+              id: s.id,
+              full_name: s.full_name,
+              document_number: s.document_number,
+              category: s.position || 'Administrativo', // Usamos Cargo como Categoría
+              is_staff: true
+          }));
+
+      } else {
+          // Si es PROYECTO -> Buscamos OBREROS (Workers)
+          const { data: workers, error } = await supabase
+            .from('workers')
+            .select('id, full_name, document_number, category, project_assigned')
+            .eq('project_assigned', selectedLocation.name.trim()) // Match por Nombre
+            .eq('status', 'Activo')
+            .order('full_name');
+
+          if (error) throw error;
+          
+          peopleData = workers.map(w => ({ ...w, is_staff: false }));
+      }
+
+      // B. Registros de Asistencia
+      // Buscamos por nombre de proyecto/sede O por ID de trabajador/empleado
+      const { data: records, error: recordsError } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('date', date)
+        .or(`project_name.eq.${selectedLocation.name}, check_in_location.eq.${selectedLocation.name}`); // Buscamos coincidencia flexible
+
+      if (recordsError) throw recordsError;
+
+      // --- LÓGICA AUTO-CIERRE ---
+      const today = new Date(); today.setHours(0,0,0,0);
+      const isPastDate = new Date(date + 'T00:00:00') < today;
+      let autoFixedCount = 0;
+
+      // C. Merge (Cruce de Datos)
+      const mergedData = peopleData.map(person => {
+          // Buscamos el registro de asistencia correspondiente (Worker ID o Employee ID)
+          const record = records.find(r => 
+              person.is_staff ? r.employee_id === person.id : r.worker_id === person.id
+          );
+          
+          let checkIn = record?.check_in_time || null;
+          let checkOut = record?.check_out_time || null;
+          let status = record?.status || 'Falta';
+          let validation = record?.validation_status || 'PENDIENTE';
+          let obs = record?.observation || '';
+          let isAutoFixed = false;
+
+          // Regla Auto-Cierre
+          if (isPastDate && checkIn && !checkOut && status === 'Presente') {
+              checkOut = `${date}T17:00:00-05:00`;
+              if (!obs.includes('CIERRE AUTOMÁTICO')) obs = obs ? `${obs} | 🤖 CIERRE AUTOMÁTICO` : '🤖 CIERRE AUTOMÁTICO - SISTEMA';
+              if (validation !== 'APROBADO') validation = 'VALIDADO';
+              isAutoFixed = true;
+              autoFixedCount++;
+          }
+
+          // Cálculo de Horas
+          let hoursWorked = 0;
+          let extraHours = 0;
+          if (checkIn && checkOut) {
+             const diffHrs = (new Date(checkOut) - new Date(checkIn)) / 3600000;
+             if (diffHrs > 0) {
+                 hoursWorked = parseFloat(diffHrs.toFixed(2));
+                 if (hoursWorked > 8.5) extraHours = parseFloat((hoursWorked - 8.5).toFixed(2));
+             }
+          }
+
+          return {
+              ...person, // Datos base (Nombre, DNI)
+              attendance_id: record?.id || null,
+              status, check_in_time: checkIn, check_out_time: checkOut,
+              hours_worked: record?.hours_worked || hoursWorked,
+              overtime_hours: record?.overtime_hours || extraHours,
+              validation_status: validation,
+              observation: obs,
+              has_record: !!record,
+              is_auto_fixed: isAutoFixed
+          };
+      });
+
+      setAttendanceData(mergedData);
+      calculateStats(mergedData);
+
+      if (autoFixedCount > 0) toast.info(`🤖 Se corrigieron ${autoFixedCount} registros automáticamente.`);
+
+    } catch (error) {
+      console.error("Error loading:", error);
+      toast.error("Error cargando datos");
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. Cálculo de Horas
-  const calculateDailyHours = (checkIn, checkOut) => {
-    if (!checkOut) return { worked: 0, extra: 0 };
-
-    const exitDate = new Date(checkOut);
-    const limitDate = new Date(exitDate);
-    limitDate.setHours(18, 0, 0, 0); // Asumimos salida 6:00 PM para Staff
-    
-    const entryDate = new Date(checkIn);
-    const diffTotalMs = exitDate - entryDate;
-    const hoursWorked = Math.max(0, (diffTotalMs / (1000 * 60 * 60)).toFixed(1));
-
-    let extra = 0;
-    if (exitDate > limitDate) {
-        const diffMs = exitDate - limitDate;
-        extra = Math.floor(diffMs / (1000 * 60 * 60)); 
-    }
-    return { worked: parseFloat(hoursWorked), extra };
+  const calculateStats = (data) => {
+      setStats({
+          total: data.length,
+          presentes: data.filter(d => d.status === 'Presente').length,
+          faltas: data.filter(d => d.status === 'Falta').length,
+          validado: data.filter(d => d.validation_status === 'VALIDADO').length,
+          aprobado: data.filter(d => d.validation_status === 'APROBADO').length
+      });
   };
 
-  // 3. Agrupación de Datos
-  const aggregatedData = useMemo(() => {
-    const grouped = {};
+  // --- ACTIONS ---
+  const handleInputChange = (id, field, value) => {
+      setAttendanceData(prev => prev.map(item => {
+          if (item.id !== id) return item;
+          const newItem = { ...item, [field]: value };
+          
+          if (['check_in_time', 'check_out_time'].includes(field)) {
+              if (newItem.check_in_time && newItem.check_out_time) {
+                  const diff = (new Date(newItem.check_out_time) - new Date(newItem.check_in_time)) / 3600000;
+                  const hrs = diff > 0 ? parseFloat(diff.toFixed(2)) : 0;
+                  newItem.hours_worked = hrs;
+                  newItem.overtime_hours = hrs > 8.5 ? parseFloat((hrs - 8.5).toFixed(2)) : 0;
+              }
+          }
+          return newItem;
+      }));
+  };
 
-    rawData.forEach(record => {
-      const person = record.employees; // Directamente employees
-      if (!person) return;
-      const personId = person.id;
+  const executeSave = async (isApproval = false) => {
+      setConfirmModal(prev => ({...prev, isOpen: false}));
+      setSaving(true);
+      try {
+          // Filtramos registros a guardar
+          const recordsToSave = attendanceData
+            .filter(d => d.has_record || d.status === 'Presente')
+            .map(d => ({
+                // ID condicional: Si es staff usa employee_id, si es obrero usa worker_id
+                ...(d.is_staff ? { employee_id: d.id } : { worker_id: d.id }),
+                project_name: selectedLocation.name,
+                date: date,
+                status: d.status,
+                check_in_time: d.check_in_time,
+                check_out_time: d.check_out_time,
+                hours_worked: d.hours_worked,
+                overtime_hours: d.overtime_hours,
+                validation_status: isApproval ? 'APROBADO' : d.validation_status,
+                observation: d.observation
+            }));
 
-      if (!grouped[personId]) {
-        grouped[personId] = {
-          id: personId,
-          full_name: person.full_name,
-          doc_number: person.document_number,
-          role: person.position,
-          start_date: person.entry_date,
-          // Para staff a veces no hay proyecto específico, ponemos "Oficina" si es null
-          project: record.project_name || 'Oficina Central',
-          worked_dates: new Set(),
-          total_hours: 0,
-          total_extra: 0,
-          status_counts: { Presente: 0, Falta: 0, Tardanza: 0 },
-          daily_records: {} 
-        };
+          // Upsert usando la lógica adecuada
+          // NOTA: Supabase upsert requiere constraint. 
+          // Si tienes restricción unique (worker_id, date), esto fallará para Staff.
+          // Recomendación: Hacer dos upserts separados si tu DB distingue indices.
+          // Para simplificar aquí, asumimos que attendance soporta ambos.
+          
+          const { error } = await supabase.from('attendance').upsert(recordsToSave); // Supabase manejará el ID si se envía
+          
+          if (error) throw error;
+          toast.success(isApproval ? "¡Asistencia Aprobada!" : "Cambios guardados");
+          loadAttendance();
+      } catch (err) {
+          console.error(err);
+          toast.error("Error al guardar");
+      } finally {
+          setSaving(false);
       }
+  };
 
-      const statusNormalizado = record.status ? record.status.trim() : '';
-      const tieneEntrada = !!record.check_in_time;
-      
-      if (tieneEntrada || statusNormalizado === 'Presente' || statusNormalizado === 'Tardanza') {
-         grouped[personId].worked_dates.add(record.date);
-      }
+  const handleExportExcel = () => {
+      const exportData = attendanceData.map(d => ({
+          Nombre: d.full_name,
+          DNI: d.document_number,
+          Cargo: d.category,
+          Estado: d.status,
+          Entrada: d.check_in_time ? new Date(d.check_in_time).toLocaleTimeString() : '-',
+          Salida: d.check_out_time ? new Date(d.check_out_time).toLocaleTimeString() : '-',
+          Horas_Trabajadas: d.hours_worked,
+          Validacion: d.validation_status
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Asistencia");
+      XLSX.writeFile(wb, `Tareo_${selectedLocation.name}_${date}.xlsx`);
+  };
 
-      if (grouped[personId].status_counts[statusNormalizado] !== undefined) {
-         grouped[personId].status_counts[statusNormalizado]++;
-      } else {
-         if (!tieneEntrada) grouped[personId].status_counts.Falta++; 
-      }
+  // UI Helpers
+  const timeToInput = (iso) => {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
+  };
+  const inputToIso = (timeStr) => timeStr ? `${date}T${timeStr}:00-05:00` : null;
 
-      const { worked, extra } = calculateDailyHours(record.check_in_time, record.check_out_time);
-      grouped[personId].total_hours += worked;
-      grouped[personId].total_extra += extra;
-
-      // Guardar para Excel
-      grouped[personId].daily_records[record.date] = { 
-          status: statusNormalizado,
-          worked,
-          extra
-      }; 
-    });
-
-    return Object.values(grouped).filter(item => 
+  const filteredData = attendanceData.filter(item => 
       item.full_name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [rawData, searchTerm]);
-
-
-  // =========================================================
-  //  EXPORTAR A EXCEL (SOLO STAFF)
-  // =========================================================
-  const exportToTareoExcel = async () => {
-    try {
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Asistencia Staff');
-
-        // Estilos
-        const fillHeader = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } }; 
-        const borderThin = { style: 'thin', color: { argb: 'FF000000' } };
-        const bordersAll = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
-        const fontTitle = { name: 'Arial', size: 14, bold: true };
-        const fontHeaderTable = { name: 'Arial', size: 9, bold: true };
-
-        // Anchos
-        worksheet.getColumn('A').width = 5;  
-        worksheet.getColumn('B').width = 12; 
-        worksheet.getColumn('C').width = 35; 
-        worksheet.getColumn('D').width = 25; 
-        
-        // Columnas de días
-        for(let c=5; c<=20; c++) worksheet.getColumn(c).width = 12; 
-
-        // Título
-        worksheet.mergeCells('A1:K1');
-        const title = worksheet.getCell('A1');
-        title.value = `REPORTE DE ASISTENCIA STAFF - SEMANA ${formatDateShort(new Date(dateRange.start))}`;
-        title.font = fontTitle;
-        title.alignment = { horizontal: 'center' };
-
-        // Cabeceras Tabla
-        const rHeader = 3;
-        const headers = ['ITEM', 'DNI', 'COLABORADOR', 'CARGO'];
-        
-        // Generar días
-        let currDate = new Date(dateRange.start);
-        // Ajuste zona horaria simple
-        currDate.setMinutes(currDate.getMinutes() + currDate.getTimezoneOffset());
-        
-        const datesOfWeek = [];
-        for(let i=0; i<7; i++) { // Lunes a Domingo
-            datesOfWeek.push(new Date(currDate));
-            currDate.setDate(currDate.getDate() + 1);
-        }
-
-        // Render Headers Fijos
-        headers.forEach((h, i) => {
-            const cell = worksheet.getCell(rHeader, i+1);
-            cell.value = h;
-            cell.fill = fillHeader;
-            cell.border = bordersAll;
-            cell.font = fontHeaderTable;
-        });
-
-        // Render Headers Días
-        let colIdx = 5;
-        datesOfWeek.forEach(d => {
-            const cell = worksheet.getCell(rHeader, colIdx);
-            cell.value = `${d.toLocaleDateString('es-PE', {weekday:'short'}).toUpperCase()} ${d.getDate()}`;
-            cell.fill = fillHeader;
-            cell.border = bordersAll;
-            cell.font = fontHeaderTable;
-            cell.alignment = { horizontal: 'center' };
-            colIdx++;
-        });
-
-        // Header Totales
-        const cellTotal = worksheet.getCell(rHeader, colIdx);
-        cellTotal.value = 'HORAS TOT.';
-        cellTotal.fill = fillHeader;
-        cellTotal.border = bordersAll;
-        cellTotal.font = fontHeaderTable;
-
-        // Datos
-        let currentRow = rHeader + 1;
-        aggregatedData.forEach((staff, idx) => {
-            worksheet.getCell(`A${currentRow}`).value = idx + 1;
-            worksheet.getCell(`B${currentRow}`).value = staff.doc_number;
-            worksheet.getCell(`C${currentRow}`).value = staff.full_name;
-            worksheet.getCell(`D${currentRow}`).value = staff.role;
-
-            // Pintar celdas fijas
-            ['A','B','C','D'].forEach(col => {
-                worksheet.getCell(`${col}${currentRow}`).border = bordersAll;
-            });
-
-            // Datos por día
-            let cDay = 5;
-            datesOfWeek.forEach(d => {
-                const dateKey = d.toISOString().split('T')[0];
-                const record = staff.daily_records[dateKey];
-                const cell = worksheet.getCell(currentRow, cDay);
-                
-                if (record) {
-                    cell.value = record.status === 'Presente' ? `${record.worked}h` : record.status;
-                    if(record.status === 'Falta') cell.font = { color: { argb: 'FFFF0000' } };
-                } else {
-                    cell.value = '-';
-                }
-                cell.alignment = { horizontal: 'center' };
-                cell.border = bordersAll;
-                cDay++;
-            });
-
-            // Total
-            const cTotal = worksheet.getCell(currentRow, cDay);
-            cTotal.value = staff.total_hours;
-            cTotal.font = { bold: true };
-            cTotal.alignment = { horizontal: 'center' };
-            cTotal.border = bordersAll;
-
-            currentRow++;
-        });
-
-        const buffer = await workbook.xlsx.writeBuffer();
-        saveAs(new Blob([buffer]), `Asistencia_Staff_${dateRange.start}.xlsx`);
-
-    } catch (error) {
-        console.error("Error Excel:", error);
-        setNotification({ isOpen: true, type: 'error', title: 'Error', message: 'Error generando Excel.' });
-    }
-  };
-
-  const formatDateShort = (d) => d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
+  );
 
   return (
-    <div className="space-y-6 pb-10">
-      
-      {/* Header */}
+    <div className="space-y-6 pb-20 animate-in fade-in zoom-in duration-300">
+      <Toaster position="top-right" richColors />
+
+      {/* HEADER + SELECTOR ARREGLADO */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <ClipboardCheck className="text-[#003366]" /> Control de Asistencia (Staff)
+          <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+            <Clock className="text-[#003366]" /> Control de Asistencia
           </h1>
-          <p className="text-slate-500 text-sm">
-            Monitoreo de ingresos, salidas y horas del personal administrativo.
-          </p>
+          <p className="text-slate-500 font-medium">Gestión de Obras y Sedes.</p>
         </div>
         
-        <div className="flex gap-2">
-            <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
-            <Calendar className="text-slate-400 ml-2" size={18} />
-            <input 
-                type="date" 
-                value={dateRange.start}
-                onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-                className="px-2 py-1 text-xs font-bold text-slate-600 outline-none bg-transparent w-28"
-            />
-            <span className="text-slate-300">-</span>
-            <input 
-                type="date" 
-                value={dateRange.end}
-                onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-                className="px-2 py-1 text-xs font-bold text-slate-600 outline-none bg-transparent w-28"
-            />
-            <button 
-                onClick={fetchAttendanceRange}
-                className="bg-[#003366] text-white p-1.5 rounded-lg hover:bg-blue-900 transition shadow-sm"
-            >
-                <Search size={14} />
-            </button>
-            </div>
+        {/* === SELECTOR CON Z-INDEX Y CAPAS CORREGIDAS === */}
+        <div className="bg-white p-1 rounded-2xl shadow-sm border border-slate-200 flex items-center relative">
+             
+             {/* 1. EL SELECT INVISIBLE CUBRE TODO EL CONTENEDOR PADRE */}
+             <select 
+                className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer"
+                value={selectedLocation?.id || ''}
+                onChange={(e) => {
+                    const loc = locations.find(l => l.id == e.target.value);
+                    if(loc) setSelectedLocation(loc);
+                }}
+             >
+                 <optgroup label="🏗️ Proyectos">
+                    {locations.filter(l => l.type === 'PROJECT').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                 </optgroup>
+                 <optgroup label="🏢 Sedes">
+                    {locations.filter(l => l.type === 'SEDE').map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                 </optgroup>
+             </select>
 
-            <button 
-                onClick={exportToTareoExcel}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-sm transition-all font-bold text-sm"
-            >
-                <FileSpreadsheet size={18}/> Exportar Reporte
-            </button>
+             {/* 2. UI VISUAL (Lo que se ve) */}
+             <div className="flex items-center gap-3 px-3 py-1.5 pointer-events-none"> 
+                 {selectedLocation?.type === 'SEDE' ? 
+                    <Building2 className="text-purple-500 shrink-0" size={20}/> : 
+                    <MapPin className="text-orange-500 shrink-0" size={20}/>
+                 }
+                 
+                 <div className="flex flex-col">
+                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ubicación</span>
+                     <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-800 truncate max-w-[150px]">
+                            {selectedLocation?.name || 'Cargando...'}
+                        </span>
+                        <ChevronDown size={14} className="text-slate-400"/>
+                     </div>
+                 </div>
+             </div>
+
+             <div className="w-px h-8 bg-slate-100 mx-1"></div>
+
+             {/* 3. INPUT FECHA (Debe estar POR ENCIMA del select global para poder clickearlo) */}
+             <div className="relative z-30"> 
+                <input 
+                    type="date" 
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="pl-8 pr-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none transition-colors cursor-pointer"
+                />
+                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14}/>
+             </div>
         </div>
       </div>
 
-      {/* Resumen STAFF */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-           <div className="p-3 rounded-xl bg-blue-50 text-blue-600">
-              <UserCog size={24}/>
-           </div>
-           <div>
-             <p className="text-2xl font-bold text-slate-800">{aggregatedData.length}</p>
-             <p className="text-xs font-bold text-slate-400 uppercase">Staff Activo</p>
-           </div>
-        </div>
-        
-        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-           <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><Calendar size={24}/></div>
-           <div>
-             <p className="text-2xl font-bold text-slate-800">
-                {aggregatedData.reduce((acc, curr) => acc + curr.worked_dates.size, 0)}
-             </p>
-             <p className="text-xs font-bold text-slate-400 uppercase">Días Laborados</p>
-           </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-           <div className="p-3 bg-red-50 text-red-600 rounded-xl"><Clock size={24}/></div>
-           <div>
-             <p className="text-2xl font-bold text-slate-800">
-                {aggregatedData.reduce((acc, curr) => acc + curr.status_counts.Falta, 0)}
-             </p>
-             <p className="text-xs font-bold text-slate-400 uppercase">Inasistencias</p>
-           </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
-           <div className="p-3 bg-purple-50 text-purple-600 rounded-xl"><Briefcase size={24}/></div>
-           <div>
-             <p className="text-2xl font-bold text-slate-800">
-                {aggregatedData.reduce((acc, curr) => acc + curr.total_extra, 0).toFixed(0)}h
-             </p>
-             <p className="text-xs font-bold text-slate-400 uppercase">Hrs. Extra Aprox.</p>
-           </div>
-        </div>
-      </div>
-
-      {/* Tabla Staff */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-50 flex flex-col md:flex-row gap-4 items-center bg-slate-50/30">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar por nombre o DNI..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-[#003366]/10 transition-all"
-            />
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+              <div><p className="text-slate-400 text-xs font-bold uppercase">Personal</p><p className="text-2xl font-black text-slate-800">{stats.total}</p></div>
+              <Filter size={24} className="text-slate-200"/>
           </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="px-6 py-4">Colaborador</th>
-                <th className="px-6 py-4">Cargo</th>
-                <th className="px-6 py-4 text-center">Asistencias</th>
-                <th className="px-6 py-4 text-center">Horas Laboradas</th>
-                <th className="px-6 py-4 text-center">Faltas</th>
-                <th className="px-6 py-4 text-center text-purple-600">Extra</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? (
-                <tr><td colSpan="6" className="py-12 text-center text-slate-400 animate-pulse font-medium">Cargando registros de staff...</td></tr>
-              ) : aggregatedData.length === 0 ? (
-                <tr><td colSpan="6" className="py-12 text-center text-slate-400 flex flex-col items-center gap-2">
-                    <Filter size={32} className="opacity-20"/>
-                    <span>No hay datos registrados en este periodo.</span>
-                </td></tr>
-              ) : (
-                aggregatedData.map((item) => (
-                  <motion.tr 
-                    key={item.id} 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }} 
-                    className="hover:bg-blue-50/30 transition-colors group cursor-default"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-full bg-blue-50 text-blue-600">
-                              <UserCog size={18}/>
-                          </div>
-                          <div className="flex flex-col">
-                              <span className="font-bold text-slate-700">{item.full_name}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">{item.doc_number}</span>
-                          </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                       <span className="text-xs font-bold px-2 py-1 rounded border bg-slate-100 text-slate-600 border-slate-200">
-                           {item.role || 'Staff'}
-                       </span>
-                    </td>
-                    
-                    <td className="px-6 py-4 text-center">
-                      <div className="inline-flex items-center gap-1 font-bold px-3 py-1 rounded-lg border bg-blue-50 text-blue-700 border-blue-100">
-                         <Calendar size={14}/> {item.worked_dates.size}
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-4 text-center font-bold text-slate-600">
-                      {item.total_hours.toFixed(1)}h
-                    </td>
-
-                    <td className="px-6 py-4 text-center">
-                       {item.status_counts.Falta > 0 ? (
-                           <span className="px-2 py-1 bg-red-100 text-red-700 rounded font-bold text-xs border border-red-200">
-                               {item.status_counts.Falta}
-                           </span>
-                       ) : (
-                           <span className="text-slate-300">-</span>
-                       )}
-                    </td>
-
-                    <td className="px-6 py-4 text-center font-bold text-purple-600">
-                      {item.total_extra > 0 ? `+${item.total_extra}h` : '-'}
-                    </td>
-
-                  </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+          <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-sm flex items-center justify-between">
+              <div><p className="text-emerald-600 text-xs font-bold uppercase">Presentes</p><p className="text-2xl font-black text-emerald-700">{stats.presentes}</p></div>
+              <CheckCircle size={24} className="text-emerald-200"/>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex items-center justify-between">
+              <div><p className="text-blue-600 text-xs font-bold uppercase">Validados</p><p className="text-2xl font-black text-blue-700">{stats.validado}</p></div>
+              <FileText size={24} className="text-blue-200"/>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm flex items-center justify-between">
+              <div><p className="text-indigo-600 text-xs font-bold uppercase">Aprobados</p><p className="text-2xl font-black text-indigo-700">{stats.aprobado}</p></div>
+              <CheckSquare size={24} className="text-indigo-200"/>
+          </div>
       </div>
 
-      <StatusModal 
-        isOpen={notification.isOpen}
-        onClose={() => setNotification({ ...notification, isOpen: false })}
-        type={notification.type}
-        title={notification.title}
-        message={notification.message}
-      />
+      {/* TABLA */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col min-h-[500px]">
+          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center gap-4 bg-slate-50/50">
+              <div className="relative w-80">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                  <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366]"/>
+              </div>
+              <div className="flex gap-2">
+                  <button onClick={handleExportExcel} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50"><Download size={16}/> Exportar</button>
+                  <button onClick={() => setConfirmModal({isOpen:true, title:'Guardar Cambios', message:'Se actualizarán los registros.', type:'info', action:()=>executeSave(false)})} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-[#003366] text-white rounded-xl text-sm font-bold hover:bg-blue-900 shadow-sm"><Save size={16}/> Guardar</button>
+                  <button onClick={() => setConfirmModal({isOpen:true, title:'Aprobar Todo', message:'Se validará toda la asistencia para pago.', type:'success', action:()=>executeSave(true)})} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-sm"><CheckSquare size={16}/> Aprobar</button>
+              </div>
+          </div>
+
+          <div className="flex-1 overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50 text-slate-500 text-xs font-extrabold uppercase sticky top-0 z-10">
+                      <tr>
+                          <th className="px-6 py-4">Personal</th>
+                          <th className="px-4 py-4 text-center">Estado</th>
+                          <th className="px-4 py-4 text-center">Horario</th>
+                          <th className="px-4 py-4 text-center">Hrs Total</th>
+                          <th className="px-4 py-4 text-center">Extras</th>
+                          <th className="px-4 py-4 text-center">Validación</th>
+                          <th className="px-6 py-4">Observaciones</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                      {loading ? <tr><td colSpan="7" className="p-10 text-center">Cargando...</td></tr> : filteredData.map((item) => (
+                          <tr key={item.id} className={`hover:bg-slate-50/50 ${item.is_auto_fixed ? 'bg-amber-50/40' : ''}`}>
+                              <td className="px-6 py-4">
+                                  <p className="font-bold text-slate-800">{item.full_name}</p>
+                                  <p className="text-xs text-slate-400">{item.document_number} • {item.category}</p>
+                                  {item.is_auto_fixed && <span className="text-[9px] font-bold text-amber-600 flex gap-1 mt-1"><Bot size={10}/> Auto-Cierre</span>}
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                  <select value={item.status} onChange={(e)=>handleInputChange(item.id,'status',e.target.value)} className={`px-2 py-1 rounded text-xs font-bold border outline-none ${item.status==='Presente'?'bg-emerald-50 text-emerald-700 border-emerald-200':'bg-red-50 text-red-700 border-red-200'}`}>
+                                      <option value="Presente">Presente</option><option value="Falta">Falta</option><option value="Permiso">Permiso</option>
+                                  </select>
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                  <div className="flex items-center gap-1 justify-center">
+                                      <input type="time" value={timeToInput(item.check_in_time)} onChange={(e)=>handleInputChange(item.id,'check_in_time',inputToIso(e.target.value))} className="w-20 text-center border rounded px-1 py-0.5 text-xs"/>
+                                      <span className="text-slate-300">-</span>
+                                      <input type="time" value={timeToInput(item.check_out_time)} onChange={(e)=>handleInputChange(item.id,'check_out_time',inputToIso(e.target.value))} className="w-20 text-center border rounded px-1 py-0.5 text-xs"/>
+                                  </div>
+                              </td>
+                              <td className="px-4 py-4 text-center font-bold text-slate-700">{item.hours_worked}</td>
+                              <td className="px-4 py-4 text-center">{item.overtime_hours > 0 ? <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-bold">+{item.overtime_hours}</span> : <span className="text-slate-300">-</span>}</td>
+                              <td className="px-4 py-4 text-center">
+                                  <span className={`px-2 py-1 rounded text-[10px] font-black border ${item.validation_status==='VALIDADO'?'bg-blue-100 text-blue-700 border-blue-200':item.validation_status==='APROBADO'?'bg-indigo-100 text-indigo-700 border-indigo-200':'bg-slate-100 text-slate-500'}`}>{item.validation_status}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                  <input type="text" value={item.observation} onChange={(e)=>handleInputChange(item.id,'observation',e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none text-xs text-slate-600" placeholder="..."/>
+                              </td>
+                          </tr>
+                      ))}
+                  </tbody>
+              </table>
+          </div>
+      </div>
+
+      {/* MODAL BONITO */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={()=>setConfirmModal(prev=>({...prev, isOpen:false}))}>
+             <motion.div initial={{opacity:0, scale:0.95}} animate={{opacity:1, scale:1}} className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl" onClick={e=>e.stopPropagation()}>
+                <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${confirmModal.type==='success'?'bg-indigo-50 text-indigo-600':'bg-blue-50 text-blue-600'}`}>
+                    {confirmModal.type==='success' ? <CheckSquare size={32}/> : <Save size={32}/>}
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">{confirmModal.title}</h3>
+                <p className="text-slate-500 text-sm mb-6">{confirmModal.message}</p>
+                <div className="flex gap-3">
+                    <button onClick={()=>setConfirmModal(prev=>({...prev, isOpen:false}))} className="flex-1 py-2.5 bg-slate-100 rounded-xl text-slate-600 font-bold hover:bg-slate-200">Cancelar</button>
+                    <button onClick={confirmModal.action} className={`flex-1 py-2.5 rounded-xl text-white font-bold shadow-lg ${confirmModal.type==='success'?'bg-indigo-600 hover:bg-indigo-700':'bg-[#003366] hover:bg-blue-900'}`}>Confirmar</button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 };

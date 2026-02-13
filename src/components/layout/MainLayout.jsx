@@ -15,7 +15,6 @@ import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 import OnboardingFloatingBtn from '../common/OnboardingFloatingBtn'; 
 import NotificationsMenu from '../common/NotificationsMenu';
 
-// CONFIGURACIÓN DE MENÚ (Se mantiene igual)
 const navItems = [
   { 
     path: '/dashboard', 
@@ -85,7 +84,6 @@ const navItems = [
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  
   const { currentUser, logout, isLoading } = useUnifiedAuth();
   
   const rawRole = currentUser?.role || currentUser?.position || 'staff';
@@ -303,7 +301,6 @@ const MainLayout = () => {
       </AnimatePresence>
 
       <main className="flex-1 h-full flex flex-col overflow-hidden relative bg-[#F1F5F9] w-full">
-        {/* --- CAMBIO AQUÍ: z-40 en el Header para que la campana flote sobre todo --- */}
         <header className="h-16 md:h-20 flex justify-between items-center px-4 md:px-6 bg-white md:bg-transparent shadow-sm md:shadow-none shrink-0 z-40 relative">
            <div className="flex items-center gap-3">
              <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden">
@@ -315,9 +312,7 @@ const MainLayout = () => {
            </div>
            
            <div className="flex items-center gap-2 md:gap-4">
-              
               <NotificationsMenu />
-
               <div onClick={() => navigate('/profile')} className="flex items-center gap-2 md:gap-3 bg-slate-50 md:bg-white pl-2 pr-2 md:pr-4 py-1.5 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:shadow-md transition-all group">
                 <div className="w-8 h-8 md:w-9 md:h-9 rounded-full overflow-hidden border border-slate-200 group-hover:border-[#0F172A] transition-all bg-slate-200 flex items-center justify-center shrink-0">
                   {displayPhoto ? (
@@ -340,9 +335,7 @@ const MainLayout = () => {
         <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-6 pt-4 md:pt-0 scrollbar-hide z-0">
            <Outlet />
         </div>
-        
         <OnboardingFloatingBtn />
-        
       </main>
 
       {isLoggingOut && (
