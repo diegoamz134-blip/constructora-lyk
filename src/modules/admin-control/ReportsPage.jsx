@@ -4,14 +4,14 @@ import {
   User, HardHat, UserCog, Loader2, Search, 
   ArrowLeft, Building2, FileDown, 
   X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Building, Camera, CameraOff, Edit2, Save, ExternalLink 
+  Building, Camera, CameraOff, Edit2, Save, ExternalLink, Clock, AlertTriangle 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../../services/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import logoFull from '../../assets/images/logo-lk-full.png';
-import { toast } from 'sonner'; // Asumiendo que usas sonner para notificaciones, sino puedes usar alert
+import { toast } from 'sonner'; 
 
 // LIBRERÍA DE GRÁFICOS
 import { 
@@ -59,10 +59,13 @@ const ReportsPage = () => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
   
+  // Estado para el cierre automático
+  const [isAutoClosing, setIsAutoClosing] = useState(false);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
-  // --- ESTADOS PARA EDICIÓN ---
+  // --- ESTADOS PARA EDICIÓN MANUAL ---
   const [editingRowId, setEditingRowId] = useState(null);
   const [editValues, setEditValues] = useState({ check_in: '', check_out: '' });
   const [savingRow, setSavingRow] = useState(false);
@@ -95,7 +98,7 @@ const ReportsPage = () => {
     setCurrentPage(1);
     setSelectedProject(null);
     setViewMode('projects'); 
-    setEditingRowId(null); // Resetear edición al cambiar tab
+    setEditingRowId(null); 
 
     if (activeTab === 'workers') {
         loadProjects();
@@ -142,7 +145,6 @@ const ReportsPage = () => {
         .order('check_in_time', { ascending: true });
 
       if (currentTab === 'workers') {
-        query = query.eq('validation_status', 'VALIDADO');
         if (project) query = query.eq('project_name', project.name);
       } else {
         if (project) query = query.eq('employees.sede_id', project.id);
@@ -218,13 +220,43 @@ const ReportsPage = () => {
     return new Date(dateStr).toLocaleDateString('es-PE');
   };
 
-  // --- EDICIÓN DE ASISTENCIA ---
+  // --- CIERRE AUTOMÁTICO DE ASISTENCIA (ACTUALIZADO PARA STAFF) ---
+  const handleAutoClose = async () => {
+    const typeLabel = activeTab === 'workers' ? 'OBREROS' : 'STAFF';
+    
+    if (!window.confirm(`¿Estás seguro? Esto cerrará las asistencias pendientes de ${typeLabel} de días anteriores a las 17:00.`)) {
+        return;
+    }
+
+    setIsAutoClosing(true);
+    try {
+        // Enviamos el parámetro 'grupo' para diferenciar
+        const { data, error } = await supabase.rpc('cerrar_asistencias_pendientes', { 
+            grupo: activeTab 
+        });
+        
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            toast.success(`Se cerraron ${data.length} asistencias de ${typeLabel}.`);
+            // Recargamos la tabla
+            fetchAttendance(1, selectedProject, activeTab);
+        } else {
+            toast.info(`No se encontraron asistencias pendientes de ${typeLabel} de días anteriores.`);
+        }
+    } catch (error) {
+        console.error("Error auto-cierre:", error);
+        toast.error("Error al procesar el cierre automático.");
+    } finally {
+        setIsAutoClosing(false);
+    }
+  };
+
+  // --- EDICIÓN MANUAL DE ASISTENCIA ---
   const startEditing = (item) => {
-    // Extraer hora HH:MM de los ISO strings
     const getHHMM = (isoString) => {
         if (!isoString) return '';
         const date = new Date(isoString);
-        // Asegurar formato 2 dígitos
         const hh = date.getHours().toString().padStart(2, '0');
         const mm = date.getMinutes().toString().padStart(2, '0');
         return `${hh}:${mm}`;
@@ -245,19 +277,10 @@ const ReportsPage = () => {
   const saveAttendance = async (item) => {
     setSavingRow(true);
     try {
-        const baseDate = item.date; // "YYYY-MM-DD"
+        const baseDate = item.date; 
         
-        // Función para reconstruir el ISO string conservando la fecha original pero cambiando la hora
-        const constructISO = (timeStr) => {
-            if (!timeStr) return null;
-            return `${baseDate}T${timeStr}:00`; // "YYYY-MM-DDTHH:MM:00" (Local time string simplificado)
-            // Nota: Supabase puede esperar timestamptz. Si hay problemas de zona horaria, 
-            // usar new Date(`${baseDate}T${timeStr}:00`).toISOString()
-        };
-
         const updates = {};
         if (editValues.check_in) {
-            // Convertimos a objeto Date y luego a ISO para asegurar formato correcto
             updates.check_in_time = new Date(`${baseDate}T${editValues.check_in}`).toISOString();
         }
         if (editValues.check_out) {
@@ -271,7 +294,6 @@ const ReportsPage = () => {
 
         if (error) throw error;
 
-        // Actualizar localmente
         const updatedData = attendanceData.map(d => 
             d.id === item.id ? { ...d, ...updates } : d
         );
@@ -290,7 +312,6 @@ const ReportsPage = () => {
   // --- GOOGLE MAPS LINK ---
   const openGoogleMaps = (locationStr) => {
       if (!locationStr) return;
-      // Intenta limpiar el string si viene con texto extra
       const cleanLoc = locationStr.replace('Lat:', '').replace('Lng:', '').trim();
       const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanLoc)}`;
       window.open(url, '_blank');
@@ -363,7 +384,6 @@ const ReportsPage = () => {
       let query = supabase.from('attendance');
       if (activeTab === 'workers') {
         query = query.select(`*, workers(full_name,category,document_number)`);
-        query = query.eq('validation_status', 'VALIDADO'); 
         if (selectedProject) query = query.eq('project_name', selectedProject.name);
       } else {
         query = query.select(`*, employees!inner(full_name,position,document_number,sede_id)`);
@@ -497,7 +517,6 @@ const ReportsPage = () => {
       let query = supabase.from('attendance');
       if (activeTab === 'workers') {
           query = query.select(`*, workers(id, full_name, category, document_number, start_date)`);
-          query = query.eq('validation_status', 'VALIDADO'); 
           if (selectedProject) query = query.eq('project_name', selectedProject.name);
       } else {
           query = query.select(`*, employees!inner(id, full_name, position, document_number, entry_date, sede_id)`);
@@ -569,10 +588,10 @@ const ReportsPage = () => {
         </button>
       </div>
 
-      {/* FILTROS */}
+      {/* FILTROS Y ACCIONES */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
          {/* FECHAS */}
-         <div className="md:col-span-4 flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+         <div className="md:col-span-3 flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
              <div className="relative flex-1">
                <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" size={14}/>
                <input type="date" value={dateRange.start} onChange={e=>setDateRange({...dateRange, start:e.target.value})} className="w-full pl-7 bg-transparent text-xs font-bold text-slate-700 outline-none"/>
@@ -598,29 +617,40 @@ const ReportsPage = () => {
          </div>
 
          {/* ROL */}
-         <div className="md:col-span-3 relative">
+         <div className="md:col-span-2 relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
             <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:border-[#003366] appearance-none cursor-pointer">
               {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
          </div>
 
-         {/* EXPORTAR */}
-         <div className="md:col-span-2 flex justify-end gap-2">
+         {/* ACCIONES (EXPORTAR + CIERRE AUTO) */}
+         <div className="md:col-span-4 flex justify-end gap-2">
+             {/* BOTÓN CIERRE AUTOMÁTICO (AHORA PARA AMBOS) */}
+               <button 
+                  onClick={handleAutoClose} 
+                  disabled={isAutoClosing} 
+                  className={`px-3 py-2.5 text-white rounded-xl font-bold text-xs shadow disabled:opacity-50 flex items-center gap-1.5 transition-colors ${activeTab === 'workers' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-yellow-600 hover:bg-yellow-700'}`}
+                  title={`Cerrar asistencia de ${activeTab} ayer a las 17:00`}
+               >
+                  {isAutoClosing ? <Loader2 className="animate-spin" size={14}/> : <Clock size={14}/>} 
+                  <span className="hidden lg:inline">Cierre {activeTab === 'workers' ? 'Obreros' : 'Staff'}</span>
+               </button>
+
              <button 
                 onClick={handleExportExcel} 
                 disabled={isGeneratingExcel} 
-                className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm shadow hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 py-2.5 bg-green-600 text-white rounded-xl font-bold text-xs shadow hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
              >
-                {isGeneratingExcel ? <Loader2 className="animate-spin" size={16}/> : <FileText size={16}/>} Excel
+                {isGeneratingExcel ? <Loader2 className="animate-spin" size={14}/> : <FileText size={14}/>} Excel
              </button>
 
              <button 
                 onClick={generatePDF} 
                 disabled={isGeneratingPdf || totalRecords === 0} 
-                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-sm shadow hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold text-xs shadow hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
              >
-                {isGeneratingPdf ? <Loader2 className="animate-spin" size={16}/> : <FileDown size={16}/>} PDF
+                {isGeneratingPdf ? <Loader2 className="animate-spin" size={14}/> : <FileDown size={14}/>} PDF
              </button>
          </div>
       </div>
@@ -732,17 +762,24 @@ const ReportsPage = () => {
                              const u = getUserData(item);
                              const formattedDate = formatDateSafe(item.date);
                              const isEditing = editingRowId === item.id;
+                             const isObservado = item.validation_status === 'OBSERVADO';
 
                              return (
                                 <motion.tr 
                                    key={item.id} 
                                    variants={itemVariants} 
-                                   className={`transition ${isEditing ? 'bg-blue-50' : 'hover:bg-slate-50/50'}`}
+                                   className={`transition ${isEditing ? 'bg-blue-50' : 'hover:bg-slate-50/50'} ${isObservado ? 'bg-red-50 hover:bg-red-100' : ''}`}
                                 >
                                    <td className="px-6 py-4">
                                       <div className="flex items-center gap-3">
                                          <div className={`p-2 rounded-full ${u.type==='STAFF'?'bg-yellow-100 text-yellow-700':'bg-blue-100 text-blue-700'}`}><User size={16}/></div>
-                                         <div><p className="font-bold text-slate-700">{u.name}</p><p className="text-xs text-slate-400">{u.role}</p></div>
+                                         <div>
+                                            <p className="font-bold text-slate-700 flex items-center gap-1">
+                                                {u.name}
+                                                {isObservado && <AlertTriangle size={12} className="text-red-500" title="Observado"/>}
+                                            </p>
+                                            <p className="text-xs text-slate-400">{u.role}</p>
+                                         </div>
                                       </div>
                                    </td>
                                    
@@ -830,7 +867,7 @@ const ReportsPage = () => {
                                       )}
                                    </td>
 
-                                   {/* COLUMNA ACCIONES (NUEVA) */}
+                                   {/* COLUMNA ACCIONES */}
                                    <td className="px-6 py-4 text-center">
                                        {isEditing ? (
                                            <div className="flex items-center justify-center gap-2">
