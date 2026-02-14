@@ -40,15 +40,10 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     const workersMap = {};
 
     const addToMap = (person, type) => {
-        // --- FILTRO ESTRICTO DE PERSONAL ---
-        // Si hay filtro de proyecto/sede (projectFilter), validamos pertenencia.
         if (projectFilter) {
-            // Caso STAFF: Validar sede_id
             if (type === 'staff' && person.sede_id !== projectFilter.id) return;
-            // Caso OBRERO: Validar project_assigned
             if (type === 'worker' && person.project_assigned !== projectFilter.name) return;
         }
-        // Si NO hay filtro (Master Global), agregamos a todos los que nos pasen.
 
         workersMap[person.id] = {
             id: person.id,
@@ -62,14 +57,12 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         };
     };
 
-    // Cargamos la lista base (allWorkers o allStaff según lo que llegue)
     allWorkers.forEach(w => addToMap(w, 'worker'));
     allStaff.forEach(s => addToMap(s, 'staff'));
 
     attendanceData.forEach(record => {
         if (!dateList.includes(record.date)) return;
 
-        // Filtro de asistencia
         if (projectFilter) {
             const matchesName = record.project_name === projectFilter.name;
             const matchesSede = record.employees && record.employees.sede_id === projectFilter.id;
@@ -80,11 +73,8 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         if (!person) return;
         const id = person.id;
 
-        // Si la persona no está en el mapa base, intentamos agregarla si corresponde al tipo de reporte
         if (!workersMap[id]) {
-             // Si estamos en reporte de Obreros (allStaff vacío) y es empleado -> Ignorar
              if (allStaff.length === 0 && record.employees) return;
-             // Si estamos en reporte de Staff (allWorkers vacío) y es obrero -> Ignorar
              if (allWorkers.length === 0 && record.workers) return;
 
              const role = record.workers ? record.workers.category : record.employees.position;
@@ -117,8 +107,15 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             totalHours -= 1; 
         }
 
+        // REDONDEO AL 0.5 INFERIOR (PISO)
+        if (totalHours > 0) {
+            totalHours = Math.floor(totalHours * 2) / 2;
+        }
+
         let nDisplay = ''; 
+        let nVal = 0;      
         let he60 = 0, he100 = 0;
+        
         let standardHours = 8.5; 
         if (isSaturday(record.date)) standardHours = 5.5; 
         
@@ -132,10 +129,12 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
 
             if (isSunday(record.date)) {
                 nDisplay = 1; 
+                nVal = 1; 
                 he100 = totalHours; 
             } else {
                 if (isFullDay) {
                     nDisplay = 1;
+                    nVal = 1; 
                     if (totalHours > standardHours) {
                         const extra = totalHours - standardHours;
                         if (extra <= 2) he60 = extra;
@@ -145,13 +144,17 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
                         }
                     }
                 } else {
-                    nDisplay = parseFloat(totalHours.toFixed(2));
+                    // DÍA INCOMPLETO
+                    nDisplay = parseFloat(totalHours.toFixed(2)); // Se ve la hora (ej 4.5)
+                    nVal = totalHours / standardHours;            // Vale fracción (ej 0.53)
+                    if (nVal > 1) nVal = 1;
                 }
             }
         }
 
         workersMap[id].days[record.date] = { 
             n: nDisplay, 
+            nVal: nVal, 
             he60: he60 > 0 ? parseFloat(he60.toFixed(2)) : '', 
             he100: he100 > 0 ? parseFloat(he100.toFixed(2)) : '' 
         };
@@ -159,6 +162,14 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
 
     let finalWorkersArray = Object.values(workersMap);
     finalWorkersArray.sort((a, b) => a.name.localeCompare(b.name));
+
+    // =========================================================
+    // NUEVO: PREPARAR ACUMULADORES VERTICALES (POR DÍA)
+    // =========================================================
+    const columnTotals = {};
+    dateList.forEach(d => {
+        columnTotals[d] = { nVal: 0, he60: 0, he100: 0 };
+    });
 
     // 2. DISEÑO DEL EXCEL
     sheet.getColumn('A').width = 5;  
@@ -244,13 +255,13 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     totalHeader.font = { size: 8, bold: true };
     totalHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
 
-    ['Horas', '60%', '100%'].forEach((subLabel, i) => {
+    ['Jornales', '60%', '100%'].forEach((subLabel, i) => {
         const subCell = sheet.getCell(subHeaderRow, totalColIdx + i);
         subCell.value = subLabel;
         subCell.alignment = centerAlign;
         subCell.border = borderStyle;
         subCell.font = { size: 7, bold: true };
-        sheet.getColumn(totalColIdx + i).width = 6;
+        sheet.getColumn(totalColIdx + i).width = 7; 
     });
 
     const obsColIdx = totalColIdx + 3;
@@ -280,18 +291,23 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         });
 
         let colCursor = 6;
-        let sumN = 0, sum60 = 0, sum100 = 0;
+        let sumNVal = 0, sum60 = 0, sum100 = 0;
 
         dateList.forEach(dateStr => {
-            const data = worker.days[dateStr] || { n: '', he60: '', he100: '' };
+            const data = worker.days[dateStr] || { n: '', nVal: 0, he60: '', he100: '' };
             
             sheet.getCell(currentRow, colCursor).value = data.n;
             sheet.getCell(currentRow, colCursor + 1).value = data.he60;
             sheet.getCell(currentRow, colCursor + 2).value = data.he100;
 
-            if (data.n) sumN += parseFloat(data.n);
+            if (data.nVal) sumNVal += data.nVal;
             if (data.he60) sum60 += parseFloat(data.he60);
             if (data.he100) sum100 += parseFloat(data.he100);
+
+            // --- ACUMULAR PARA EL FOOTER (TOTALES VERTICALES) ---
+            if (data.nVal) columnTotals[dateStr].nVal += data.nVal;
+            if (data.he60) columnTotals[dateStr].he60 += parseFloat(data.he60);
+            if (data.he100) columnTotals[dateStr].he100 += parseFloat(data.he100);
 
             [0, 1, 2].forEach(offset => {
                 const cell = sheet.getCell(currentRow, colCursor + offset);
@@ -304,7 +320,8 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         });
 
         const cellTotalN = sheet.getCell(currentRow, totalColIdx);
-        cellTotalN.value = sumN > 0 ? sumN : '';
+        cellTotalN.value = sumNVal > 0 ? parseFloat(sumNVal.toFixed(2)) : '';
+        
         const cellTotal60 = sheet.getCell(currentRow, totalColIdx + 1);
         cellTotal60.value = sum60 > 0 ? sum60 : '';
         const cellTotal100 = sheet.getCell(currentRow, totalColIdx + 2);
@@ -329,7 +346,7 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     const lastDataRow = currentRow - 1;
     const footerStartRow = currentRow + 2;
 
-    sheet.getCell(`C${footerStartRow}`).value = "TOTAL JORNALES (o Hrs)";
+    sheet.getCell(`C${footerStartRow}`).value = "TOTAL JORNALES / HRS";
     sheet.getCell(`C${footerStartRow + 1}`).value = "TOTAL PERSONAL";
     
     [footerStartRow, footerStartRow+1].forEach(r => {
@@ -339,19 +356,27 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     });
 
     let sumColCursor = 6;
-    dateList.forEach(() => {
+    dateList.forEach((dateStr) => {
         const colN = sheet.getColumn(sumColCursor).letter;
-        const col60 = sheet.getColumn(sumColCursor + 1).letter;
-        const col100 = sheet.getColumn(sumColCursor + 2).letter;
+        // const col60 = sheet.getColumn(sumColCursor + 1).letter;
+        // const col100 = sheet.getColumn(sumColCursor + 2).letter;
+
+        // =========================================================================
+        // CORRECCIÓN FINAL: Usar el valor acumulado en JS en lugar de fórmula SUM
+        // =========================================================================
+        const totals = columnTotals[dateStr];
 
         const cellSumN = sheet.getCell(footerStartRow, sumColCursor);
-        cellSumN.value = { formula: `SUM(${colN}${startDataRow}:${colN}${lastDataRow})` };
+        cellSumN.value = totals.nVal > 0 ? parseFloat(totals.nVal.toFixed(2)) : ''; 
+        // cellSumN.value = { formula: `SUM(${colN}${startDataRow}:${colN}${lastDataRow})` }; // <- REMOVIDO
         
         const cellSum60 = sheet.getCell(footerStartRow, sumColCursor + 1);
-        cellSum60.value = { formula: `SUM(${col60}${startDataRow}:${col60}${lastDataRow})` };
+        cellSum60.value = totals.he60 > 0 ? parseFloat(totals.he60.toFixed(2)) : '';
+        // cellSum60.value = { formula: `SUM(${col60}${startDataRow}:${col60}${lastDataRow})` };
         
         const cellSum100 = sheet.getCell(footerStartRow, sumColCursor + 2);
-        cellSum100.value = { formula: `SUM(${col100}${startDataRow}:${col100}${lastDataRow})` };
+        cellSum100.value = totals.he100 > 0 ? parseFloat(totals.he100.toFixed(2)) : '';
+        // cellSum100.value = { formula: `SUM(${col100}${startDataRow}:${col100}${lastDataRow})` };
 
         [cellSumN, cellSum60, cellSum100].forEach(c => {
             c.border = borderStyle;
@@ -360,6 +385,7 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
         });
 
+        // La cuenta de personal SÍ se mantiene con fórmula porque cuenta celdas no vacías
         sheet.mergeCells(footerStartRow + 1, sumColCursor, footerStartRow + 1, sumColCursor + 2);
         const cellCount = sheet.getCell(footerStartRow + 1, sumColCursor);
         cellCount.value = { formula: `COUNT(${colN}${startDataRow}:${colN}${lastDataRow})` };
@@ -388,15 +414,9 @@ export const generateTareoExcel = async (attendanceData, allWorkers, allStaff, d
     }
 
     if (selectedProject) {
-        // REPORTE POR SEDE/PROYECTO
-        // addTareoSheet usará allStaff y allWorkers, pero los filtrará por el ID del proyecto
         addTareoSheet(workbook, selectedProject.name, dateList, allWorkers, allStaff, attendanceData, selectedProject);
     } else {
-        // REPORTE GLOBAL (CORREGIDO)
-        // Ya NO bloqueamos Staff. Pasamos las listas que recibimos.
-        
         let filteredAttendance = attendanceData;
-        // Pequeña limpieza: Si estamos en modo Staff (allWorkers vacio), filtramos asistencia solo de employees
         if (allStaff.length > 0 && allWorkers.length === 0) {
             filteredAttendance = attendanceData ? attendanceData.filter(r => r.employees) : [];
         } else if (allWorkers.length > 0 && allStaff.length === 0) {

@@ -3,14 +3,15 @@ import {
   MapPin, Calendar, FileText, Filter, 
   User, HardHat, UserCog, Loader2, Search, 
   ArrowLeft, Building2, FileDown, 
-  X, ChevronLeft, ChevronRight, ChevronsLeft,
-  Building, Camera, CameraOff // Iconos adicionales
+  X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Building, Camera, CameraOff, Edit2, Save, ExternalLink 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../../services/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import logoFull from '../../assets/images/logo-lk-full.png';
+import { toast } from 'sonner'; // Asumiendo que usas sonner para notificaciones, sino puedes usar alert
 
 // LIBRERÍA DE GRÁFICOS
 import { 
@@ -61,9 +62,13 @@ const ReportsPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
 
+  // --- ESTADOS PARA EDICIÓN ---
+  const [editingRowId, setEditingRowId] = useState(null);
+  const [editValues, setEditValues] = useState({ check_in: '', check_out: '' });
+  const [savingRow, setSavingRow] = useState(false);
+
   // --- FILTROS ---
   const [dateRange, setDateRange] = useState(() => {
-    // Por defecto mostramos la semana actual
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 6); 
@@ -76,7 +81,6 @@ const ReportsPage = () => {
   const [filterText, setFilterText] = useState('');
   const [filterRole, setFilterRole] = useState('Todos');
 
-  // Roles dinámicos
   const ROLES = activeTab === 'workers' 
     ? ['Todos', 'Operario', 'Oficial', 'Peón', 'Capataz', 'Topógrafo'] 
     : ['Todos', 'Administrador', 'RR.HH.', 'Residente de Obra', 'SSOMA', 'Administrativo de Campo', 'Staff'];
@@ -91,6 +95,7 @@ const ReportsPage = () => {
     setCurrentPage(1);
     setSelectedProject(null);
     setViewMode('projects'); 
+    setEditingRowId(null); // Resetear edición al cambiar tab
 
     if (activeTab === 'workers') {
         loadProjects();
@@ -120,20 +125,14 @@ const ReportsPage = () => {
   // --- 2. FETCH DE ASISTENCIA ---
   const fetchAttendance = async (page = 1, project = selectedProject, currentTab = activeTab) => {
     setLoading(true);
+    setEditingRowId(null);
     try {
       let query = supabase.from('attendance');
 
       if (currentTab === 'workers') {
-        query = query.select(`
-          *,
-          workers!inner ( id, full_name, category, document_number )
-        `, { count: 'exact' });
+        query = query.select(`*, workers!inner ( id, full_name, category, document_number )`, { count: 'exact' });
       } else {
-        // Aseguramos traer todos los campos necesarios para Staff
-        query = query.select(`
-          *,
-          employees!inner ( id, full_name, position, document_number, sede_id )
-        `, { count: 'exact' });
+        query = query.select(`*, employees!inner ( id, full_name, position, document_number, sede_id )`, { count: 'exact' });
       }
 
       query = query
@@ -144,14 +143,9 @@ const ReportsPage = () => {
 
       if (currentTab === 'workers') {
         query = query.eq('validation_status', 'VALIDADO');
-        if (project) {
-            query = query.eq('project_name', project.name);
-        }
+        if (project) query = query.eq('project_name', project.name);
       } else {
-        // Filtro por Sede para Staff
-        if (project) {
-            query = query.eq('employees.sede_id', project.id);
-        }
+        if (project) query = query.eq('employees.sede_id', project.id);
       }
 
       const { data, error } = await query;
@@ -195,16 +189,13 @@ const ReportsPage = () => {
 
   // --- LÓGICA DE PAGINACIÓN ---
   const totalPages = Math.ceil(totalRecords / ITEMS_PER_PAGE);
-  
   const paginatedTableData = useMemo(() => {
       const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
       return attendanceData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [attendanceData, currentPage]);
 
   const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
   const getUserData = (item, tab = activeTab) => {
@@ -217,17 +208,92 @@ const ReportsPage = () => {
     return { name: 'Desconocido', role: '-', doc: '-', type: '?' };
   };
 
-  // --- FUNCIÓN SEGURA PARA LA FECHA (CORRECCIÓN) ---
   const formatDateSafe = (dateStr) => {
     if (!dateStr) return '-';
-    // Dividimos manualmente la cadena "YYYY-MM-DD" para evitar conversiones de zona horaria
     const parts = dateStr.split('-');
     if (parts.length === 3) {
         const [year, month, day] = parts;
         return `${day}/${month}/${year}`;
     }
-    // Fallback por si llega en otro formato
     return new Date(dateStr).toLocaleDateString('es-PE');
+  };
+
+  // --- EDICIÓN DE ASISTENCIA ---
+  const startEditing = (item) => {
+    // Extraer hora HH:MM de los ISO strings
+    const getHHMM = (isoString) => {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        // Asegurar formato 2 dígitos
+        const hh = date.getHours().toString().padStart(2, '0');
+        const mm = date.getMinutes().toString().padStart(2, '0');
+        return `${hh}:${mm}`;
+    };
+
+    setEditValues({
+        check_in: getHHMM(item.check_in_time),
+        check_out: getHHMM(item.check_out_time)
+    });
+    setEditingRowId(item.id);
+  };
+
+  const cancelEditing = () => {
+    setEditingRowId(null);
+    setEditValues({ check_in: '', check_out: '' });
+  };
+
+  const saveAttendance = async (item) => {
+    setSavingRow(true);
+    try {
+        const baseDate = item.date; // "YYYY-MM-DD"
+        
+        // Función para reconstruir el ISO string conservando la fecha original pero cambiando la hora
+        const constructISO = (timeStr) => {
+            if (!timeStr) return null;
+            return `${baseDate}T${timeStr}:00`; // "YYYY-MM-DDTHH:MM:00" (Local time string simplificado)
+            // Nota: Supabase puede esperar timestamptz. Si hay problemas de zona horaria, 
+            // usar new Date(`${baseDate}T${timeStr}:00`).toISOString()
+        };
+
+        const updates = {};
+        if (editValues.check_in) {
+            // Convertimos a objeto Date y luego a ISO para asegurar formato correcto
+            updates.check_in_time = new Date(`${baseDate}T${editValues.check_in}`).toISOString();
+        }
+        if (editValues.check_out) {
+            updates.check_out_time = new Date(`${baseDate}T${editValues.check_out}`).toISOString();
+        }
+
+        const { error } = await supabase
+            .from('attendance')
+            .update(updates)
+            .eq('id', item.id);
+
+        if (error) throw error;
+
+        // Actualizar localmente
+        const updatedData = attendanceData.map(d => 
+            d.id === item.id ? { ...d, ...updates } : d
+        );
+        setAttendanceData(updatedData);
+        setEditingRowId(null);
+        toast.success("Horas actualizadas correctamente");
+
+    } catch (error) {
+        console.error("Error al guardar:", error);
+        toast.error("Error al guardar los cambios");
+    } finally {
+        setSavingRow(false);
+    }
+  };
+
+  // --- GOOGLE MAPS LINK ---
+  const openGoogleMaps = (locationStr) => {
+      if (!locationStr) return;
+      // Intenta limpiar el string si viene con texto extra
+      const cleanLoc = locationStr.replace('Lat:', '').replace('Lng:', '').trim();
+      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanLoc)}`;
+      window.open(url, '_blank');
   };
 
   // --- ESTADÍSTICAS ---
@@ -236,8 +302,7 @@ const ReportsPage = () => {
     let presentCount = 0;
 
     attendanceData.forEach(item => {
-      // Usamos la misma lógica segura para la llave del gráfico
-      const dateKey = formatDateSafe(item.date).substring(0, 5); // DD/MM
+      const dateKey = formatDateSafe(item.date).substring(0, 5); 
       if (!grouped[dateKey]) grouped[dateKey] = { name: dateKey, Asistencia: 0 };
       
       let dayValue = 0;
@@ -341,9 +406,8 @@ const ReportsPage = () => {
 
       for (let i = 0; i < dates.length; i++) {
         const d = dates[i];
-        // Usamos también la corrección manual para mostrar la fecha en el título del PDF
         const fechaMostrar = formatDateSafe(d);
-        const dateObj = new Date(d + 'T00:00:00'); // Forzamos hora para getWeekNumber
+        const dateObj = new Date(d + 'T00:00:00'); 
 
         if (i>0) doc.addPage();
         
@@ -652,6 +716,7 @@ const ReportsPage = () => {
                              <th className="px-6 py-4">Entrada</th>
                              <th className="px-6 py-4">Salida</th>
                              <th className="px-6 py-4 text-center">Fotos</th>
+                             <th className="px-6 py-4 text-center">Acciones</th>
                           </tr>
                        </thead>
                        
@@ -665,14 +730,14 @@ const ReportsPage = () => {
                        >
                           {paginatedTableData.map(item => {
                              const u = getUserData(item);
-                             // CORRECCIÓN DE FECHA AQUÍ: Usamos formatDateSafe
                              const formattedDate = formatDateSafe(item.date);
+                             const isEditing = editingRowId === item.id;
 
                              return (
                                 <motion.tr 
                                    key={item.id} 
                                    variants={itemVariants} 
-                                   className="hover:bg-slate-50/50 transition"
+                                   className={`transition ${isEditing ? 'bg-blue-50' : 'hover:bg-slate-50/50'}`}
                                 >
                                    <td className="px-6 py-4">
                                       <div className="flex items-center gap-3">
@@ -688,27 +753,61 @@ const ReportsPage = () => {
                                       }
                                    </td>
 
-                                   {/* AQUÍ SE APLICA LA FECHA CORREGIDA */}
                                    <td className="px-6 py-4 font-medium text-slate-600">{formattedDate}</td>
                                    
+                                   {/* COLUMNA ENTRADA (EDITABLE) */}
                                    <td className="px-6 py-4">
-                                      {item.check_in_time ? (
-                                         <div className="flex flex-col">
-                                            <span className="text-green-700 font-bold text-xs">{new Date(item.check_in_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
-                                            <span className="text-[10px] text-slate-400 truncate max-w-[100px]" title={item.check_in_location}>{item.check_in_location||'Sin GPS'}</span>
-                                         </div>
-                                      ) : '-'}
-                                   </td>
-                                   <td className="px-6 py-4">
-                                      {item.check_out_time ? (
-                                         <div className="flex flex-col">
-                                            <span className="text-orange-700 font-bold text-xs">{new Date(item.check_out_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
-                                            <span className="text-[10px] text-slate-400 truncate max-w-[100px]" title={item.check_out_location}>{item.check_out_location||'Sin GPS'}</span>
-                                         </div>
-                                      ) : <span className="text-[10px] italic text-slate-400">En turno</span>}
+                                      {isEditing ? (
+                                         <input 
+                                            type="time" 
+                                            value={editValues.check_in}
+                                            onChange={(e) => setEditValues({...editValues, check_in: e.target.value})}
+                                            className="bg-white border border-blue-300 rounded px-2 py-1 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                         />
+                                      ) : (
+                                        item.check_in_time ? (
+                                           <div className="flex flex-col group/loc">
+                                              <span className="text-green-700 font-bold text-xs">{new Date(item.check_in_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                                              <button 
+                                                onClick={() => openGoogleMaps(item.check_in_location)} 
+                                                className="text-[10px] text-slate-400 truncate max-w-[100px] text-left hover:text-blue-500 hover:underline flex items-center gap-1"
+                                                title={item.check_in_location}
+                                              >
+                                                {item.check_in_location || 'Sin GPS'}
+                                                {item.check_in_location && <ExternalLink size={8} className="opacity-0 group-hover/loc:opacity-100"/>}
+                                              </button>
+                                           </div>
+                                        ) : '-'
+                                      )}
                                    </td>
 
-                                   {/* COLUMNA DE FOTOS MEJORADA */}
+                                   {/* COLUMNA SALIDA (EDITABLE) */}
+                                   <td className="px-6 py-4">
+                                      {isEditing ? (
+                                         <input 
+                                            type="time" 
+                                            value={editValues.check_out}
+                                            onChange={(e) => setEditValues({...editValues, check_out: e.target.value})}
+                                            className="bg-white border border-blue-300 rounded px-2 py-1 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                         />
+                                      ) : (
+                                        item.check_out_time ? (
+                                           <div className="flex flex-col group/loc">
+                                              <span className="text-orange-700 font-bold text-xs">{new Date(item.check_out_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
+                                              <button 
+                                                onClick={() => openGoogleMaps(item.check_out_location)} 
+                                                className="text-[10px] text-slate-400 truncate max-w-[100px] text-left hover:text-blue-500 hover:underline flex items-center gap-1"
+                                                title={item.check_out_location}
+                                              >
+                                                {item.check_out_location || 'Sin GPS'}
+                                                {item.check_out_location && <ExternalLink size={8} className="opacity-0 group-hover/loc:opacity-100"/>}
+                                              </button>
+                                           </div>
+                                        ) : <span className="text-[10px] italic text-slate-400">En turno</span>
+                                      )}
+                                   </td>
+
+                                   {/* COLUMNA DE FOTOS */}
                                    <td className="px-6 py-4 text-center flex justify-center gap-2">
                                       {item.check_in_photo ? (
                                         <a href={item.check_in_photo} target="_blank" rel="noreferrer" className="w-8 h-8 rounded bg-slate-100 border border-slate-200 overflow-hidden hover:scale-110 transition shadow-sm" title="Ver foto entrada">
@@ -729,6 +828,38 @@ const ReportsPage = () => {
                                             <CameraOff size={14}/>
                                         </div>
                                       )}
+                                   </td>
+
+                                   {/* COLUMNA ACCIONES (NUEVA) */}
+                                   <td className="px-6 py-4 text-center">
+                                       {isEditing ? (
+                                           <div className="flex items-center justify-center gap-2">
+                                               <button 
+                                                  onClick={() => saveAttendance(item)}
+                                                  disabled={savingRow}
+                                                  className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition"
+                                                  title="Guardar"
+                                               >
+                                                  {savingRow ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>}
+                                               </button>
+                                               <button 
+                                                  onClick={cancelEditing}
+                                                  disabled={savingRow}
+                                                  className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                                                  title="Cancelar"
+                                               >
+                                                  <X size={16}/>
+                                               </button>
+                                           </div>
+                                       ) : (
+                                           <button 
+                                              onClick={() => startEditing(item)}
+                                              className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition"
+                                              title="Editar Horas"
+                                           >
+                                              <Edit2 size={16}/>
+                                           </button>
+                                       )}
                                    </td>
                                 </motion.tr>
                              )
