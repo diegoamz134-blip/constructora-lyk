@@ -220,29 +220,30 @@ const ReportsPage = () => {
     return new Date(dateStr).toLocaleDateString('es-PE');
   };
 
-  // --- CIERRE AUTOMÁTICO DE ASISTENCIA (ACTUALIZADO PARA STAFF) ---
+  // --- CIERRE AUTOMÁTICO DE ASISTENCIA ACTUALIZADO (LUN-VIE 5PM / SÁB 1PM PERÚ) ---
   const handleAutoClose = async () => {
     const typeLabel = activeTab === 'workers' ? 'OBREROS' : 'STAFF';
     
-    if (!window.confirm(`¿Estás seguro? Esto cerrará las asistencias pendientes de ${typeLabel} de días anteriores a las 17:00.`)) {
+    if (!window.confirm(`¿Estás seguro? Esto cerrará las asistencias pendientes de ${typeLabel} usando el horario oficial de Perú:\n\n- Lunes a Viernes: 17:00 (5:00 PM)\n- Sábados: 13:00 (1:00 PM)`)) {
         return;
     }
 
     setIsAutoClosing(true);
     try {
-        // Enviamos el parámetro 'grupo' para diferenciar
+        // Ejecutamos el RPC cerrar_asistencias_pendientes que ya tiene la lógica de horarios
         const { data, error } = await supabase.rpc('cerrar_asistencias_pendientes', { 
             grupo: activeTab 
         });
         
         if (error) throw error;
 
+        // data contiene la lista de registros afectados según el RETURNS SETOF attendance
         if (data && data.length > 0) {
-            toast.success(`Se cerraron ${data.length} asistencias de ${typeLabel}.`);
-            // Recargamos la tabla
-            fetchAttendance(1, selectedProject, activeTab);
+            toast.success(`Se cerraron ${data.length} asistencias de ${typeLabel} con éxito.`);
+            // Forzamos la recarga de la tabla para ver las horas de salida aplicadas
+            fetchAttendance(currentPage, selectedProject, activeTab);
         } else {
-            toast.info(`No se encontraron asistencias pendientes de ${typeLabel} de días anteriores.`);
+            toast.info(`No se encontraron asistencias pendientes de ${typeLabel} en días anteriores.`);
         }
     } catch (error) {
         console.error("Error auto-cierre:", error);
@@ -294,12 +295,9 @@ const ReportsPage = () => {
 
         if (error) throw error;
 
-        const updatedData = attendanceData.map(d => 
-            d.id === item.id ? { ...d, ...updates } : d
-        );
-        setAttendanceData(updatedData);
-        setEditingRowId(null);
         toast.success("Horas actualizadas correctamente");
+        fetchAttendance(currentPage, selectedProject, activeTab);
+        setEditingRowId(null);
 
     } catch (error) {
         console.error("Error al guardar:", error);
@@ -313,7 +311,7 @@ const ReportsPage = () => {
   const openGoogleMaps = (locationStr) => {
       if (!locationStr) return;
       const cleanLoc = locationStr.replace('Lat:', '').replace('Lng:', '').trim();
-      const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanLoc)}`;
+      const url = `https://www.google.com/maps?q=${encodeURIComponent(cleanLoc)}`;
       window.open(url, '_blank');
   };
 
@@ -626,12 +624,12 @@ const ReportsPage = () => {
 
          {/* ACCIONES (EXPORTAR + CIERRE AUTO) */}
          <div className="md:col-span-4 flex justify-end gap-2">
-             {/* BOTÓN CIERRE AUTOMÁTICO (AHORA PARA AMBOS) */}
+             {/* BOTÓN CIERRE AUTOMÁTICO */}
                <button 
                   onClick={handleAutoClose} 
                   disabled={isAutoClosing} 
                   className={`px-3 py-2.5 text-white rounded-xl font-bold text-xs shadow disabled:opacity-50 flex items-center gap-1.5 transition-colors ${activeTab === 'workers' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-yellow-600 hover:bg-yellow-700'}`}
-                  title={`Cerrar asistencia de ${activeTab} ayer a las 17:00`}
+                  title={`Cerrar asistencias usando horario oficial`}
                >
                   {isAutoClosing ? <Loader2 className="animate-spin" size={14}/> : <Clock size={14}/>} 
                   <span className="hidden lg:inline">Cierre {activeTab === 'workers' ? 'Obreros' : 'Staff'}</span>

@@ -34,6 +34,8 @@ const getMondayOfWeek = (dateString) => {
 // --- FUNCIÓN PRINCIPAL PARA GENERAR UNA HOJA ---
 const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, attendanceData, projectFilter) => {
     const safeSheetName = sheetName.replace(/[\\/?*\[\]]/g, '').substring(0, 30) || 'Hoja';
+    
+    // CORRECCIÓN: Creamos la hoja al principio para evitar errores de referencia
     const sheet = workbook.addWorksheet(safeSheetName);
 
     // 1. PROCESAMIENTO DE DATOS
@@ -99,17 +101,19 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             workersMap[id].observations.push(`${dayName} ${obsDate.getDate()}: ${record.observation}`);
         }
 
-        // --- CÁLCULO DE HORAS ---
-        let totalHours = getHoursDiff(record.check_in_time, record.check_out_time);
+        // --- CÁLCULO DE HORAS ACTUALIZADO (LÓGICA SÁBADO FIX) ---
+        // 1. Obtenemos diferencia exacta
+        let rawHours = getHoursDiff(record.check_in_time, record.check_out_time);
         
-        // Descuento Almuerzo
-        if (!isSaturday(record.date) && totalHours >= 6) {
-            totalHours -= 1; 
+        // 2. Descuento Almuerzo (Solo Lun-Vie si trabaja 6h o más)
+        if (!isSaturday(record.date) && rawHours >= 6) {
+            rawHours -= 1; 
         }
 
-        // REDONDEO AL 0.5 INFERIOR (PISO)
-        if (totalHours > 0) {
-            totalHours = Math.floor(totalHours * 2) / 2;
+        // 3. Redondeo Visual (Para mostrar en Excel) - Piso al 0.5
+        let displayHours = rawHours;
+        if (displayHours > 0) {
+            displayHours = Math.floor(displayHours * 2) / 2;
         }
 
         let nDisplay = ''; 
@@ -119,24 +123,31 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
         let standardHours = 8.5; 
         if (isSaturday(record.date)) standardHours = 5.5; 
         
-        if (totalHours > 0) {
+        if (rawHours > 0) {
             let isFullDay = false;
+
+            // LÓGICA FLEXIBLE: Usamos rawHours para determinar cumplimiento
             if (isSaturday(record.date)) {
-                if (totalHours >= 5.0) isFullDay = true;
+                // Sábado: Si hizo al menos 4.5 horas reales, se considera día completo.
+                // Esto soluciona el problema de marcas a las 12:58 o 1:00 PM exactas.
+                if (rawHours >= 4.5) isFullDay = true;
             } else {
-                if (totalHours >= 8.0) isFullDay = true;
+                // Lunes-Viernes: Si hizo al menos 8.0 horas reales
+                if (rawHours >= 8.0) isFullDay = true;
             }
 
             if (isSunday(record.date)) {
                 nDisplay = 1; 
                 nVal = 1; 
-                he100 = totalHours; 
+                he100 = displayHours; 
             } else {
                 if (isFullDay) {
                     nDisplay = 1;
                     nVal = 1; 
-                    if (totalHours > standardHours) {
-                        const extra = totalHours - standardHours;
+                    
+                    // Cálculo de Extras (usando displayHours redondeado para pago ordenado)
+                    if (displayHours > standardHours) {
+                        const extra = displayHours - standardHours;
                         if (extra <= 2) he60 = extra;
                         else {
                             he60 = 2;
@@ -145,8 +156,8 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
                     }
                 } else {
                     // DÍA INCOMPLETO
-                    nDisplay = parseFloat(totalHours.toFixed(2)); // Se ve la hora (ej 4.5)
-                    nVal = totalHours / standardHours;            // Vale fracción (ej 0.53)
+                    nDisplay = parseFloat(displayHours.toFixed(2)); 
+                    nVal = displayHours / standardHours;            
                     if (nVal > 1) nVal = 1;
                 }
             }
@@ -163,15 +174,7 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     let finalWorkersArray = Object.values(workersMap);
     finalWorkersArray.sort((a, b) => a.name.localeCompare(b.name));
 
-    // =========================================================
-    // NUEVO: PREPARAR ACUMULADORES VERTICALES (POR DÍA)
-    // =========================================================
-    const columnTotals = {};
-    dateList.forEach(d => {
-        columnTotals[d] = { nVal: 0, he60: 0, he100: 0 };
-    });
-
-    // 2. DISEÑO DEL EXCEL
+    // 2. DISEÑO DEL EXCEL (Se mantiene idéntico al original)
     sheet.getColumn('A').width = 5;  
     sheet.getColumn('B').width = 12; 
     sheet.getColumn('C').width = 40; 
@@ -304,11 +307,6 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             if (data.he60) sum60 += parseFloat(data.he60);
             if (data.he100) sum100 += parseFloat(data.he100);
 
-            // --- ACUMULAR PARA EL FOOTER (TOTALES VERTICALES) ---
-            if (data.nVal) columnTotals[dateStr].nVal += data.nVal;
-            if (data.he60) columnTotals[dateStr].he60 += parseFloat(data.he60);
-            if (data.he100) columnTotals[dateStr].he100 += parseFloat(data.he100);
-
             [0, 1, 2].forEach(offset => {
                 const cell = sheet.getCell(currentRow, colCursor + offset);
                 cell.border = borderStyle;
@@ -356,27 +354,19 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
     });
 
     let sumColCursor = 6;
-    dateList.forEach((dateStr) => {
+    dateList.forEach(() => {
         const colN = sheet.getColumn(sumColCursor).letter;
-        // const col60 = sheet.getColumn(sumColCursor + 1).letter;
-        // const col100 = sheet.getColumn(sumColCursor + 2).letter;
-
-        // =========================================================================
-        // CORRECCIÓN FINAL: Usar el valor acumulado en JS en lugar de fórmula SUM
-        // =========================================================================
-        const totals = columnTotals[dateStr];
+        const col60 = sheet.getColumn(sumColCursor + 1).letter;
+        const col100 = sheet.getColumn(sumColCursor + 2).letter;
 
         const cellSumN = sheet.getCell(footerStartRow, sumColCursor);
-        cellSumN.value = totals.nVal > 0 ? parseFloat(totals.nVal.toFixed(2)) : ''; 
-        // cellSumN.value = { formula: `SUM(${colN}${startDataRow}:${colN}${lastDataRow})` }; // <- REMOVIDO
+        cellSumN.value = { formula: `SUM(${colN}${startDataRow}:${colN}${lastDataRow})` };
         
         const cellSum60 = sheet.getCell(footerStartRow, sumColCursor + 1);
-        cellSum60.value = totals.he60 > 0 ? parseFloat(totals.he60.toFixed(2)) : '';
-        // cellSum60.value = { formula: `SUM(${col60}${startDataRow}:${col60}${lastDataRow})` };
+        cellSum60.value = { formula: `SUM(${col60}${startDataRow}:${col60}${lastDataRow})` };
         
         const cellSum100 = sheet.getCell(footerStartRow, sumColCursor + 2);
-        cellSum100.value = totals.he100 > 0 ? parseFloat(totals.he100.toFixed(2)) : '';
-        // cellSum100.value = { formula: `SUM(${col100}${startDataRow}:${col100}${lastDataRow})` };
+        cellSum100.value = { formula: `SUM(${col100}${startDataRow}:${col100}${lastDataRow})` };
 
         [cellSumN, cellSum60, cellSum100].forEach(c => {
             c.border = borderStyle;
@@ -385,7 +375,6 @@ const addTareoSheet = (workbook, sheetName, dateList, allWorkers, allStaff, atte
             c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
         });
 
-        // La cuenta de personal SÍ se mantiene con fórmula porque cuenta celdas no vacías
         sheet.mergeCells(footerStartRow + 1, sumColCursor, footerStartRow + 1, sumColCursor + 2);
         const cellCount = sheet.getCell(footerStartRow + 1, sumColCursor);
         cellCount.value = { formula: `COUNT(${colN}${startDataRow}:${colN}${lastDataRow})` };
