@@ -83,10 +83,11 @@ const FieldAttendancePage = () => {
         const mergedList = workersData.map(w => {
           const record = attendanceData.find(a => a.worker_id === w.id);
 
-          // REGLA CLAVE (NOTA 2): Si tiene Ingreso Pendiente, visualmente es FALTA INJUSTIFICADA
           let mappedStatus = record ? (record.status || 'Presente') : 'Presente';
+          
+          // REGLA CLAVE (NOTA 2): Si tiene Ingreso Pendiente, visualmente es TARDANZA
           if (record && record.approval_status === 'Pendiente' && !record.check_out_time) {
-              mappedStatus = 'Falta'; // Castigo automático hasta que el jefe apruebe
+              mappedStatus = 'Tardanza'; 
           }
 
           return {
@@ -101,6 +102,8 @@ const FieldAttendancePage = () => {
             checkOutTime: record ? record.check_out_time : null,
             checkOutLocation: record ? record.check_out_location : null,
             checkOutPhoto: record ? record.check_out_photo : null,
+            
+            evidencePhoto: record ? record.evidence_photo : null, // NUEVO: Evidencia fotográfica
             
             isLocationValid: record ? record.is_location_valid : true,
             justificationReason: record ? record.justification_reason : '',
@@ -140,6 +143,9 @@ const FieldAttendancePage = () => {
         worker.checkInTime = `${date}T07:30:00-05:00`;
         worker.checkOutTime = `${date}T17:00:00-05:00`;
         worker.observation = 'Justificado por Residente - Paga día normal';
+    } else if (newStatus === 'Tardanza') {
+        // En caso manual, dejamos las horas para que anoten la tardanza, pero cambiamos obs.
+        worker.observation = worker.observation || 'Tardanza Injustificada - Debe recuperar horas';
     } else {
         worker.checkInTime = null; worker.checkOutTime = null;
         worker.observation = newStatus === 'Falta' ? 'Inasistencia injustificada' : '';
@@ -152,7 +158,7 @@ const FieldAttendancePage = () => {
     const newWorkers = [...workers];
     newWorkers[index][field] = timeValue ? `${date}T${timeValue}:00-05:00` : null;
     
-    if (!['Presente', 'Falta Justificada'].includes(newWorkers[index].attendanceStatus)) {
+    if (!['Presente', 'Falta Justificada', 'Tardanza'].includes(newWorkers[index].attendanceStatus)) {
         newWorkers[index].attendanceStatus = 'Presente';
     }
     setWorkers(newWorkers);
@@ -193,16 +199,29 @@ const FieldAttendancePage = () => {
                 w.checkOutTime = `${date}T17:00:00-05:00`;
              }
          } else {
-             // Es justificación de Ingreso (Tardanza/Ubicación) o Salida (Ubicación)
+             // Es justificación de Ingreso (Tardanza Justificada/Ubicación) o Salida (Ubicación)
              if (isApproved) {
                  w.approvalStatus = 'Aprobado';
-                 w.attendanceStatus = 'Presente'; // Si estaba castigado como Falta, se vuelve Presente
+                 w.attendanceStatus = 'Presente'; // Si estaba como Tardanza o Falta, se vuelve Presente
                  w.observation += ` [SOLICITUD APROBADA]`;
+
+                 // --- NOTA 3: SI LO APRUEBA DEBERÁ APARECER COMO HORA DE INGRESO 7:30am ---
+                 if (w.justificationType === 'TARDANZA_JUSTIFICADA') {
+                     w.checkInTime = `${date}T07:30:00-05:00`;
+                 }
+
              } else {
                  w.approvalStatus = 'Rechazado';
-                 w.attendanceStatus = 'Falta'; // Queda permanentemente como falta injustificada
-                 if (!w.checkOutTime) w.checkInTime = null; // Anula la hora de entrada si solo marcó entrada
-                 w.observation += ` [SOLICITUD RECHAZADA]`;
+                 
+                 // Si se rechaza una tardanza justificada, se vuelve injustificada (Tardanza normal)
+                 if (w.justificationType === 'TARDANZA_JUSTIFICADA') {
+                     w.attendanceStatus = 'Tardanza';
+                     w.observation += ` [JUSTIFICACIÓN RECHAZADA - DEBE RECUPERAR]`;
+                 } else {
+                     w.attendanceStatus = 'Falta'; // Queda permanentemente como falta injustificada
+                     if (!w.checkOutTime) w.checkInTime = null; // Anula la hora de entrada si solo marcó entrada
+                     w.observation += ` [SOLICITUD RECHAZADA]`;
+                 }
              }
          }
      }
@@ -235,7 +254,7 @@ const FieldAttendancePage = () => {
         let finalCheckIn = w.checkInTime;
         let finalCheckOut = w.checkOutTime;
 
-        if (!['Presente', 'Falta Justificada'].includes(w.attendanceStatus)) {
+        if (!['Presente', 'Falta Justificada', 'Tardanza'].includes(w.attendanceStatus)) {
             finalCheckIn = null; finalCheckOut = null;
         }
 
@@ -246,6 +265,7 @@ const FieldAttendancePage = () => {
           check_in_location: w.checkInLocation || 'Validado por Residente', 
           observation: w.observation || '', validation_status: statusToSave,
           approval_status: w.approvalStatus || 'Aprobado', overtime_status: w.overtimeStatus || 'Ninguno'
+          // Nota: La evidencia no se sobrescribe aquí porque solo se actualizan status y observaciones.
         };
       });
 
@@ -291,14 +311,15 @@ const FieldAttendancePage = () => {
   };
 
   const openMap = (coords) => {
-    if (!coords || !coords.includes(',')) return; window.open(`http://maps.google.com/maps?q=${coords}`, '_blank');
+    if (!coords || !coords.includes(',')) return; window.open(`http://googleusercontent.com/maps.google.com/?q=${coords}`, '_blank');
   };
 
   const getStats = () => {
     const total = workers.length;
     const presentes = workers.filter(w => ['Presente', 'Falta Justificada'].includes(w.attendanceStatus)).length;
     const faltas = workers.filter(w => w.attendanceStatus === 'Falta').length;
-    return { total, presentes, faltas };
+    const tardanzas = workers.filter(w => w.attendanceStatus === 'Tardanza').length;
+    return { total, presentes, faltas, tardanzas };
   };
 
   const filteredWorkers = workers.filter(w => w.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || w.document_number.includes(searchTerm));
@@ -308,6 +329,7 @@ const FieldAttendancePage = () => {
     switch(status) {
         case 'Presente': return 'bg-emerald-50 text-emerald-700 border-emerald-200 focus:ring-emerald-500 font-bold';
         case 'Falta Justificada': return 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500 font-bold';
+        case 'Tardanza': return 'bg-amber-50 text-amber-700 border-amber-200 focus:ring-amber-500 font-bold';
         case 'Falta': return 'bg-red-50 text-red-700 border-red-200 focus:ring-red-500 font-bold';
         case 'Permiso': return 'bg-orange-50 text-orange-700 border-orange-200 focus:ring-orange-500';
         case 'Bajada': return 'bg-slate-100 text-slate-700 border-slate-300 focus:ring-slate-500';
@@ -370,9 +392,10 @@ const FieldAttendancePage = () => {
         </div>
         
         <div className="flex gap-2 md:gap-4 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto">
-            <div className="px-5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</span><span className="text-xl font-black text-slate-700">{stats.total}</span></div>
-            <div className="px-5 py-2 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Presentes</span><span className="text-xl font-black text-emerald-700">{stats.presentes}</span></div>
-            <div className="px-5 py-2 bg-red-50 rounded-xl border border-red-100 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Faltas</span><span className="text-xl font-black text-red-600">{stats.faltas}</span></div>
+            <div className="px-5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</span><span className="text-xl font-black text-slate-700">{stats.total}</span></div>
+            <div className="px-5 py-2 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Presentes</span><span className="text-xl font-black text-emerald-700">{stats.presentes}</span></div>
+            <div className="px-5 py-2 bg-amber-50 rounded-xl border border-amber-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Tardanzas</span><span className="text-xl font-black text-amber-700">{stats.tardanzas}</span></div>
+            <div className="px-5 py-2 bg-red-50 rounded-xl border border-red-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Faltas</span><span className="text-xl font-black text-red-600">{stats.faltas}</span></div>
         </div>
       </div>
 
@@ -439,7 +462,7 @@ const FieldAttendancePage = () => {
                                 type="time"
                                 value={getTimeInputValue(worker.checkInTime)}
                                 onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkInTime', e.target.value)}
-                                disabled={!['Presente', 'Falta Justificada'].includes(worker.attendanceStatus)}
+                                disabled={!['Presente', 'Falta Justificada', 'Tardanza'].includes(worker.attendanceStatus)}
                                 className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                         </div>
@@ -457,7 +480,7 @@ const FieldAttendancePage = () => {
                                 type="time"
                                 value={getTimeInputValue(worker.checkOutTime)}
                                 onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkOutTime', e.target.value)}
-                                disabled={!['Presente', 'Falta Justificada'].includes(worker.attendanceStatus)}
+                                disabled={!['Presente', 'Falta Justificada', 'Tardanza'].includes(worker.attendanceStatus)}
                                 className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                         </div>
@@ -471,7 +494,7 @@ const FieldAttendancePage = () => {
                     <div className="flex flex-col items-center gap-2">
                         {(worker.checkInPhoto || worker.checkOutPhoto) && (
                         <button onClick={() => setPhotoModal({ isOpen: true, worker })} className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200 text-xs font-bold">
-                            <ImageIcon size={14}/> Fotos
+                            <ImageIcon size={14}/> Fotos {worker.evidencePhoto && '(+Evidencia)'}
                         </button>
                         )}
                         
@@ -483,6 +506,8 @@ const FieldAttendancePage = () => {
 
                         {worker.overtimeStatus === 'Aprobado' && <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">H.E. Aprobadas</span>}
                         {worker.justificationType === 'OLVIDO' && <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Cierre 17:00</span>}
+                        {worker.justificationType === 'TARDANZA_INJUSTIFICADA' && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">Tardanza Injustif.</span>}
+                        {worker.justificationType === 'TARDANZA_JUSTIFICADA' && worker.approvalStatus === 'Aprobado' && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">Tardanza Justif.</span>}
                         {worker.approvalStatus === 'Rechazado' && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200">Rechazado</span>}
                     </div>
                   </td>
@@ -496,6 +521,7 @@ const FieldAttendancePage = () => {
                             className={`w-full appearance-none py-2 pl-2 pr-6 rounded-lg text-xs border cursor-pointer outline-none transition-all text-center shadow-sm uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed ${getStatusStyles(worker.attendanceStatus)}`}
                         >
                             <option value="Presente">Presente</option>
+                            <option value="Tardanza">Tardanza</option>
                             <option value="Falta Justificada">Falta Justificada</option>
                             <option value="Falta">Falta Injustif.</option>
                             <option value="Permiso">Permiso</option>
@@ -532,10 +558,11 @@ const FieldAttendancePage = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setPhotoModal({ isOpen: false, worker: null })}>
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
                <div className="p-4 border-b flex justify-between items-center bg-slate-50">
-                 <h3 className="font-bold text-slate-800 flex items-center gap-2"><ImageIcon size={20} className="text-[#003366]"/> Evidencia: {photoModal.worker.full_name}</h3>
+                 <h3 className="font-bold text-slate-800 flex items-center gap-2"><ImageIcon size={20} className="text-[#003366]"/> Evidencia de Asistencia: {photoModal.worker.full_name}</h3>
                  <button onClick={() => setPhotoModal({isOpen:false, worker:null})} className="p-1 hover:bg-slate-100 rounded-full"><X size={20}/></button>
                </div>
-               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-100">
+               
+               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-100 max-h-[75vh] overflow-y-auto">
                   <div className="bg-white p-3 rounded-xl shadow-sm">
                       <p className="font-bold text-xs mb-2 text-green-700 bg-green-50 inline-block px-2 py-1 rounded">ENTRADA</p>
                       {photoModal.worker.checkInPhoto ? (
@@ -545,6 +572,7 @@ const FieldAttendancePage = () => {
                         </div>
                       ) : <div className="h-64 bg-slate-50 flex items-center justify-center text-xs text-slate-400 border-2 border-dashed rounded-lg">Sin foto</div>}
                   </div>
+                  
                   <div className="bg-white p-3 rounded-xl shadow-sm">
                       <p className="font-bold text-xs mb-2 text-red-700 bg-red-50 inline-block px-2 py-1 rounded">SALIDA</p>
                       {photoModal.worker.checkOutPhoto ? (
@@ -554,6 +582,17 @@ const FieldAttendancePage = () => {
                         </div>
                       ) : <div className="h-64 bg-slate-50 flex items-center justify-center text-xs text-slate-400 border-2 border-dashed rounded-lg">Sin foto</div>}
                   </div>
+
+                  {/* BLOQUE DE EVIDENCIA EXTRA SI EXISTE */}
+                  {photoModal.worker.evidencePhoto && (
+                      <div className="bg-white p-3 rounded-xl shadow-sm md:col-span-2 mt-2">
+                          <p className="font-bold text-xs mb-2 text-amber-700 bg-amber-50 inline-block px-2 py-1 rounded">EVIDENCIA DE JUSTIFICACIÓN / HORAS EXTRAS</p>
+                          <div className="aspect-[21/9] bg-slate-200 rounded-lg overflow-hidden relative group">
+                              <img src={photoModal.worker.evidencePhoto} className="w-full h-full object-cover"/>
+                              <a href={photoModal.worker.evidencePhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2"><ExternalLink size={20}/> Abrir Evidencia</a>
+                          </div>
+                      </div>
+                  )}
                </div>
             </motion.div>
           </div>
@@ -572,7 +611,7 @@ const FieldAttendancePage = () => {
                   <button onClick={() => setValidationModal({isOpen:false, worker:null})} className="absolute top-4 right-4 p-2 text-purple-400 hover:bg-white rounded-full"><X size={20}/></button>
                </div>
                
-               <div className="p-6 bg-slate-50 space-y-4">
+               <div className="p-6 bg-slate-50 space-y-4 max-h-[50vh] overflow-y-auto">
                   <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold text-slate-400 mb-1 uppercase tracking-wider">Motivo indicado:</p>
                       <p className="text-slate-700 font-medium italic">"{validationModal.worker.justificationReason || 'Sin motivo escrito'}"</p>
@@ -582,7 +621,9 @@ const FieldAttendancePage = () => {
                       <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
                           <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo de Alerta</p>
                           <span className={`px-2 py-1 rounded text-xs font-bold ${validationModal.worker.justificationType === 'HORA_EXTRA' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                             {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Horas Extras' : (validationModal.worker.justificationType === 'UBICACION' ? 'Ubicación Incorrecta' : 'Tardanza / Fuera de Hora')}
+                              {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Horas Extras' : 
+                              (validationModal.worker.justificationType === 'UBICACION' ? 'Ubicación Incorrecta' : 
+                              (validationModal.worker.justificationType === 'TARDANZA_JUSTIFICADA' ? 'Tardanza Justificada' : 'Tardanza / Fuera de Hora'))}
                           </span>
                       </div>
                       <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
@@ -591,6 +632,17 @@ const FieldAttendancePage = () => {
                           <p className="text-lg font-bold text-slate-800">{getTimeInputValue(validationModal.worker.checkOutTime || validationModal.worker.checkInTime) || '--:--'}</p>
                       </div>
                   </div>
+
+                  {/* BLOQUE PARA MOSTRAR LA EVIDENCIA AL RESIDENTE SI FUE ADJUNTA */}
+                  {validationModal.worker.evidencePhoto && (
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mt-4">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Evidencia Adjunta</p>
+                          <div className="aspect-video bg-slate-100 rounded-lg overflow-hidden relative group border">
+                              <img src={validationModal.worker.evidencePhoto} className="w-full h-full object-cover"/>
+                              <a href={validationModal.worker.evidencePhoto} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold gap-2"><ExternalLink size={20}/> Ver Pantalla Completa</a>
+                          </div>
+                      </div>
+                  )}
                </div>
 
                <div className="p-6 flex gap-4 bg-white border-t border-slate-100">
