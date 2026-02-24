@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
   Building2, ArrowLeft, Image as ImageIcon,
   ExternalLink, Eye, X, ChevronDown, Coffee, Send, Clock,
-  CheckSquare
+  CheckSquare, AlertTriangle, UserCheck, UserX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -29,30 +29,21 @@ const FieldAttendancePage = () => {
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Estado para el Modal de Fotos
+  // Estados de Modales
   const [photoModal, setPhotoModal] = useState({ isOpen: false, worker: null });
-  
-  // Estado para Modal de Confirmación
+  const [validationModal, setValidationModal] = useState({ isOpen: false, worker: null });
   const [confirmActionType, setConfirmActionType] = useState(null); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-
-  // Estado para el StatusModal
   const [statusModal, setStatusModal] = useState({ 
-    isOpen: false, 
-    type: 'success', 
-    title: '', 
-    message: '',
-    onCloseAction: null 
+    isOpen: false, type: 'success', title: '', message: '', onCloseAction: null 
   });
 
   // 1. Cargar Proyectos Activos
   useEffect(() => {
     const loadProjects = async () => {
       if (!currentUser) return;
-
       try {
         const data = await getProjectsForUser(currentUser);
-        // Filtramos solo los que están en ejecución
         const activeProjects = data.filter(p => p.status === 'En Ejecución');
         setProjects(activeProjects || []);
       } catch (err) {
@@ -72,18 +63,15 @@ const FieldAttendancePage = () => {
     const loadTeamAndAttendance = async () => {
       setLoading(true);
       try {
-        // A. Traer trabajadores ASIGNADOS A ESTA OBRA
-        // Usamos trim() para asegurar match exacto con lo que guardamos en el modal
         const { data: workersData, error: workersError } = await supabase
           .from('workers')
           .select('*')
           .eq('project_assigned', selectedProject.name.trim()) 
           .eq('status', 'Activo')
-          .order('full_name', { ascending: true }); // Orden alfabético
+          .order('full_name', { ascending: true });
 
         if (workersError) throw workersError;
 
-        // B. Traer asistencias DE HOY para esta obra
         const { data: attendanceData, error: attendanceError } = await supabase
           .from('attendance')
           .select('*')
@@ -92,30 +80,37 @@ const FieldAttendancePage = () => {
         
         if (attendanceError) throw attendanceError;
 
-        // C. Merge de datos (Cruzar Trabajadores vs Asistencia Existente)
         const mergedList = workersData.map(w => {
-          // Buscamos si ya tiene registro hoy
-          const existingRecord = attendanceData.find(a => a.worker_id === w.id);
+          const record = attendanceData.find(a => a.worker_id === w.id);
+
+          // REGLA CLAVE (NOTA 2): Si tiene Ingreso Pendiente, visualmente es FALTA INJUSTIFICADA
+          let mappedStatus = record ? (record.status || 'Presente') : 'Presente';
+          if (record && record.approval_status === 'Pendiente' && !record.check_out_time) {
+              mappedStatus = 'Falta'; // Castigo automático hasta que el jefe apruebe
+          }
 
           return {
             ...w,
-            attendanceId: existingRecord ? existingRecord.id : null, 
-            // Si ya existe registro, usa ese estado. Si es nuevo, por defecto mostramos "Presente" visualmente pero sin guardar aun
-            attendanceStatus: existingRecord ? (existingRecord.status || 'Presente') : 'Presente',
+            attendanceId: record ? record.id : null, 
+            attendanceStatus: mappedStatus,
             
-            // Datos de Entrada
-            checkInTime: existingRecord ? existingRecord.check_in_time : null,
-            checkInLocation: existingRecord ? existingRecord.check_in_location : null,
-            checkInPhoto: existingRecord ? existingRecord.check_in_photo : null,
+            checkInTime: record ? record.check_in_time : null,
+            checkInLocation: record ? record.check_in_location : null,
+            checkInPhoto: record ? record.check_in_photo : null,
 
-            // Datos de Salida
-            checkOutTime: existingRecord ? existingRecord.check_out_time : null,
-            checkOutLocation: existingRecord ? existingRecord.check_out_location : null,
-            checkOutPhoto: existingRecord ? existingRecord.check_out_photo : null,
+            checkOutTime: record ? record.check_out_time : null,
+            checkOutLocation: record ? record.check_out_location : null,
+            checkOutPhoto: record ? record.check_out_photo : null,
             
-            origin: existingRecord && existingRecord.check_in_photo ? 'APP' : 'MANUAL',
-            observation: existingRecord ? (existingRecord.observation || '') : '',
-            saved: !!existingRecord 
+            isLocationValid: record ? record.is_location_valid : true,
+            justificationReason: record ? record.justification_reason : '',
+            justificationType: record ? record.justification_type : '',
+            overtimeStatus: record ? record.overtime_status : 'Ninguno',
+            approvalStatus: record ? record.approval_status : 'Aprobado',
+
+            origin: record && record.check_in_photo ? 'APP' : 'MANUAL',
+            observation: record ? (record.observation || '') : '',
+            saved: !!record 
           };
         });
         
@@ -123,10 +118,7 @@ const FieldAttendancePage = () => {
       } catch (err) {
         console.error("Error cargando personal:", err);
         setStatusModal({
-            isOpen: true,
-            type: 'error',
-            title: 'Error de Carga',
-            message: 'No se pudo cargar la lista de trabajadores.'
+            isOpen: true, type: 'error', title: 'Error de Carga', message: 'No se pudo cargar la lista de trabajadores.'
         });
       } finally {
         setLoading(false);
@@ -135,30 +127,21 @@ const FieldAttendancePage = () => {
     loadTeamAndAttendance();
   }, [selectedProject, date]);
 
-  // --- LÓGICA DE INTERACCIÓN ---
-
+  // --- LÓGICA DE INTERACCIÓN Y ESTADOS ---
   const handleStatusChange = (index, newStatus) => {
     const newWorkers = [...workers];
     const worker = newWorkers[index];
-    
     worker.attendanceStatus = newStatus;
     
-    // Si cambia a Presente y no tenía hora, sugerimos hora por defecto para agilizar
-    // (Opcional: puedes quitar esto si prefieres que escriban la hora exacta)
-    if (newStatus === 'Presente' && !worker.checkInTime) {
-        // Hora por defecto: 07:30 AM
+    if (newStatus === 'Presente') {
+        if (!worker.checkInTime) worker.checkInTime = `${date}T07:30:00-05:00`;
+        if (!worker.checkOutTime) worker.checkOutTime = `${date}T17:00:00-05:00`;
+    } else if (newStatus === 'Falta Justificada') {
         worker.checkInTime = `${date}T07:30:00-05:00`;
-    }
-
-    if (newStatus === 'Presente' && !worker.checkOutTime) {
-         // Hora salida por defecto: 17:00 PM
-         worker.checkOutTime = `${date}T17:00:00-05:00`;
-    }
-
-    // Si NO es presente, limpiamos las horas
-    if (newStatus !== 'Presente') {
-        worker.checkInTime = null;
-        worker.checkOutTime = null;
+        worker.checkOutTime = `${date}T17:00:00-05:00`;
+        worker.observation = 'Justificado por Residente - Paga día normal';
+    } else {
+        worker.checkInTime = null; worker.checkOutTime = null;
         worker.observation = newStatus === 'Falta' ? 'Inasistencia injustificada' : '';
     }
     
@@ -167,20 +150,11 @@ const FieldAttendancePage = () => {
 
   const handleTimeChange = (index, field, timeValue) => {
     const newWorkers = [...workers];
+    newWorkers[index][field] = timeValue ? `${date}T${timeValue}:00-05:00` : null;
     
-    if (timeValue) {
-        // Formato ISO con zona horaria Perú (-05:00)
-        const fullDateTime = `${date}T${timeValue}:00-05:00`;
-        newWorkers[index][field] = fullDateTime;
-    } else {
-        newWorkers[index][field] = null;
-    }
-
-    // Si editamos hora, forzamos estado a "Presente"
-    if (newWorkers[index].attendanceStatus !== 'Presente') {
+    if (!['Presente', 'Falta Justificada'].includes(newWorkers[index].attendanceStatus)) {
         newWorkers[index].attendanceStatus = 'Presente';
     }
-
     setWorkers(newWorkers);
   };
 
@@ -190,16 +164,11 @@ const FieldAttendancePage = () => {
     setWorkers(newWorkers);
   };
 
-  // --- NUEVA FUNCIÓN: MARCAR TODOS ---
   const handleMarkAllPresent = () => {
       const updated = workers.map(w => {
-          // Solo modificamos si no tiene fotos de la APP (respetamos lo que viene de campo real)
           if (w.origin === 'APP') return w;
-
           return {
-              ...w,
-              attendanceStatus: 'Presente',
-              // Seteamos horas por defecto si están vacías
+              ...w, attendanceStatus: 'Presente',
               checkInTime: w.checkInTime || `${date}T07:30:00-05:00`,
               checkOutTime: w.checkOutTime || `${date}T17:00:00-05:00`,
               observation: ''
@@ -208,17 +177,56 @@ const FieldAttendancePage = () => {
       setWorkers(updated);
   };
 
+  // --- APROBAR / RECHAZAR JUSTIFICACIÓN GENERAL ---
+  const processJustification = (workerId, isApproved) => {
+     const newWorkers = [...workers];
+     const index = newWorkers.findIndex(w => w.id === workerId);
+     
+     if (index !== -1) {
+         const w = newWorkers[index];
+         
+         if (w.justificationType === 'HORA_EXTRA') {
+             if (isApproved) {
+                w.overtimeStatus = 'Aprobado'; w.approvalStatus = 'Aprobado'; w.observation += ` [HE APROBADAS]`;
+             } else {
+                w.overtimeStatus = 'Rechazado'; w.approvalStatus = 'Aprobado'; w.observation += ` [HE RECHAZADAS: Ajustado a 17:00]`;
+                w.checkOutTime = `${date}T17:00:00-05:00`;
+             }
+         } else {
+             // Es justificación de Ingreso (Tardanza/Ubicación) o Salida (Ubicación)
+             if (isApproved) {
+                 w.approvalStatus = 'Aprobado';
+                 w.attendanceStatus = 'Presente'; // Si estaba castigado como Falta, se vuelve Presente
+                 w.observation += ` [SOLICITUD APROBADA]`;
+             } else {
+                 w.approvalStatus = 'Rechazado';
+                 w.attendanceStatus = 'Falta'; // Queda permanentemente como falta injustificada
+                 if (!w.checkOutTime) w.checkInTime = null; // Anula la hora de entrada si solo marcó entrada
+                 w.observation += ` [SOLICITUD RECHAZADA]`;
+             }
+         }
+     }
+     setWorkers(newWorkers);
+     setValidationModal({ isOpen: false, worker: null });
+  };
+
   // --- GUARDADO ---
-  
   const handleSaveClick = (type) => {
     if (!selectedProject || workers.length === 0) return;
-    setConfirmActionType(type);
-    setShowConfirmModal(true);
+    
+    const pendingCount = workers.filter(w => w.approvalStatus === 'Pendiente' || w.overtimeStatus === 'Pendiente').length;
+    if (type === 'VALIDADO' && pendingCount > 0) {
+        setStatusModal({
+            isOpen: true, type: 'error', title: 'Existen Pendientes', 
+            message: `Tienes ${pendingCount} justificaciones sin evaluar. Apruébalas o recházalas antes de enviar el tareo a RRHH.`
+        });
+        return;
+    }
+    setConfirmActionType(type); setShowConfirmModal(true);
   };
 
   const executeSaveTareo = async () => {
-    setShowConfirmModal(false); 
-    setSaving(true);
+    setShowConfirmModal(false); setSaving(true);
     
     try {
       const statusToSave = confirmActionType === 'VALIDADO' ? 'VALIDADO' : 'BORRADOR';
@@ -227,72 +235,39 @@ const FieldAttendancePage = () => {
         let finalCheckIn = w.checkInTime;
         let finalCheckOut = w.checkOutTime;
 
-        // Limpieza de seguridad: Si no es presente, no debe haber horas
-        if (w.attendanceStatus !== 'Presente') {
-            finalCheckIn = null;
-            finalCheckOut = null;
+        if (!['Presente', 'Falta Justificada'].includes(w.attendanceStatus)) {
+            finalCheckIn = null; finalCheckOut = null;
         }
 
-        const record = {
-          worker_id: w.id,
-          project_name: selectedProject.name,
-          date: date,
-          status: w.attendanceStatus,
-          check_in_time: finalCheckIn,
-          check_out_time: finalCheckOut,
-          check_in_location: w.checkInLocation || 'Validado por Residente', // Marca administrativa
-          observation: w.observation || '',
-          validation_status: statusToSave 
+        return {
+          id: w.attendanceId || undefined,
+          worker_id: w.id, project_name: selectedProject.name, date: date,
+          status: w.attendanceStatus, check_in_time: finalCheckIn, check_out_time: finalCheckOut,
+          check_in_location: w.checkInLocation || 'Validado por Residente', 
+          observation: w.observation || '', validation_status: statusToSave,
+          approval_status: w.approvalStatus || 'Aprobado', overtime_status: w.overtimeStatus || 'Ninguno'
         };
-
-        // Si ya existe ID (update), lo incluimos
-        if (w.attendanceId) {
-            record.id = w.attendanceId;
-        }
-
-        return record;
       });
 
-      // Guardamos (Upsert) basado en worker_id + date
-      const { data, error } = await supabase
-        .from('attendance')
-        .upsert(recordsToUpsert, { onConflict: 'worker_id, date' }) 
-        .select(); 
-      
+      const { data, error } = await supabase.from('attendance').upsert(recordsToUpsert, { onConflict: 'worker_id, date' }).select(); 
       if (error) throw error;
 
       if (data) {
-          // Actualizamos estado local
           const updatedWorkers = [...workers];
           data.forEach(updatedRecord => {
               const index = updatedWorkers.findIndex(w => w.id === updatedRecord.worker_id);
-              if (index !== -1) {
-                  updatedWorkers[index].attendanceId = updatedRecord.id;
-                  updatedWorkers[index].saved = true;
-              }
+              if (index !== -1) { updatedWorkers[index].attendanceId = updatedRecord.id; updatedWorkers[index].saved = true; }
           });
           setWorkers(updatedWorkers);
       }
 
-      const isValidation = statusToSave === 'VALIDADO';
-      
       setStatusModal({
-        isOpen: true,
-        type: 'success',
-        title: isValidation ? '¡Tareo Enviado!' : 'Guardado',
-        message: isValidation 
-          ? `Se ha validado y enviado la asistencia de ${workers.length} trabajadores a Oficina Técnica/RRHH.`
-          : 'La asistencia se ha guardado como borrador.',
+        isOpen: true, type: 'success', title: confirmActionType === 'VALIDADO' ? '¡Tareo Enviado!' : 'Guardado',
+        message: confirmActionType === 'VALIDADO' ? 'Se ha validado y enviado la asistencia a RRHH.' : 'La asistencia se ha guardado como borrador.'
       });
 
     } catch (e) {
-      console.error(e);
-      setStatusModal({
-        isOpen: true,
-        type: 'error',
-        title: 'Error al guardar',
-        message: e.message || 'No se pudo procesar la solicitud.'
-      });
+      setStatusModal({ isOpen: true, type: 'error', title: 'Error al guardar', message: e.message });
     } finally {
       setSaving(false);
     }
@@ -309,74 +284,49 @@ const FieldAttendancePage = () => {
     if (!isoString) return '';
     try {
         const d = new Date(isoString);
-        // Ajustamos visualización a hora local
-        const formatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/Lima',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-        
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false });
         const parts = formatter.formatToParts(d);
-        const hour = parts.find(p => p.type === 'hour').value;
-        const minute = parts.find(p => p.type === 'minute').value;
-        
-        return `${hour}:${minute}`;
-    } catch (e) {
-        return '';
-    }
+        return `${parts.find(p => p.type === 'hour').value}:${parts.find(p => p.type === 'minute').value}`;
+    } catch (e) { return ''; }
   };
 
   const openMap = (coords) => {
-    if (!coords || !coords.includes(',')) return;
-    window.open(`http://maps.google.com/maps?q=${coords}`, '_blank');
+    if (!coords || !coords.includes(',')) return; window.open(`http://maps.google.com/maps?q=${coords}`, '_blank');
   };
 
   const getStats = () => {
     const total = workers.length;
-    const presentes = workers.filter(w => w.attendanceStatus === 'Presente').length;
+    const presentes = workers.filter(w => ['Presente', 'Falta Justificada'].includes(w.attendanceStatus)).length;
     const faltas = workers.filter(w => w.attendanceStatus === 'Falta').length;
     return { total, presentes, faltas };
   };
 
-  const filteredWorkers = workers.filter(w => 
-    w.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    w.document_number.includes(searchTerm)
-  );
-
+  const filteredWorkers = workers.filter(w => w.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || w.document_number.includes(searchTerm));
   const stats = getStats();
 
   const getStatusStyles = (status) => {
     switch(status) {
         case 'Presente': return 'bg-emerald-50 text-emerald-700 border-emerald-200 focus:ring-emerald-500 font-bold';
+        case 'Falta Justificada': return 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500 font-bold';
         case 'Falta': return 'bg-red-50 text-red-700 border-red-200 focus:ring-red-500 font-bold';
         case 'Permiso': return 'bg-orange-50 text-orange-700 border-orange-200 focus:ring-orange-500';
-        case 'Bajada': return 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500';
-        default: return 'bg-slate-50 text-slate-700 border-slate-200';
+        case 'Bajada': return 'bg-slate-100 text-slate-700 border-slate-300 focus:ring-slate-500';
+        default: return 'bg-white text-slate-700 border-slate-200';
     }
   };
 
-  // --- RENDER ---
-  
-  // VISTA 1: SELECCIÓN DE PROYECTO
+  // --- RENDER VISTA 1: SELECCIÓN DE PROYECTO ---
   if (!selectedProject) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-8 animate-in fade-in zoom-in duration-300">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h1 className="text-3xl font-black text-slate-800 flex items-center gap-3 tracking-tight">
-              <ClipboardCheck className="text-[#f0c419]" size={32} /> Tareo de Campo
-            </h1>
+            <h1 className="text-3xl font-black text-slate-800 flex items-center gap-3 tracking-tight"><ClipboardCheck className="text-[#f0c419]" size={32} /> Tareo de Campo</h1>
             <p className="text-slate-500 mt-2 font-medium">Selecciona una obra para gestionar la asistencia diaria.</p>
           </div>
           <div className="bg-white p-2 px-4 rounded-xl shadow-sm border border-slate-200 flex items-center gap-3">
              <Calendar className="text-slate-400" size={18}/>
-             <input 
-                type="date" 
-                value={date} 
-                onChange={(e) => setDate(e.target.value)}
-                className="bg-transparent font-bold text-slate-700 outline-none text-sm uppercase"
-             />
+             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent font-bold text-slate-700 outline-none text-sm uppercase cursor-pointer"/>
           </div>
         </div>
 
@@ -389,24 +339,14 @@ const FieldAttendancePage = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map(proj => (
-              <div 
-                key={proj.id} 
-                onClick={() => setSelectedProject(proj)}
-                className="group bg-white rounded-2xl border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-[#003366]/20 transition-all cursor-pointer relative overflow-hidden"
-              >
+              <div key={proj.id} onClick={() => setSelectedProject(proj)} className="group bg-white rounded-2xl border border-slate-100 p-6 shadow-sm hover:shadow-xl hover:border-[#003366]/20 transition-all cursor-pointer relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-[#003366] opacity-0 group-hover:opacity-100 transition-opacity"/>
                 <div className="flex justify-between items-start mb-4">
-                   <div className="p-3 bg-blue-50 text-[#003366] rounded-xl group-hover:bg-[#003366] group-hover:text-white transition-colors">
-                      <Building2 size={24} />
-                   </div>
-                   <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded border border-slate-200">
-                      {proj.project_code || 'OBRA'}
-                   </span>
+                   <div className="p-3 bg-blue-50 text-[#003366] rounded-xl group-hover:bg-[#003366] group-hover:text-white transition-colors"><Building2 size={24} /></div>
+                   <span className="bg-slate-100 text-slate-500 text-xs font-bold px-2 py-1 rounded border border-slate-200">{proj.project_code || 'OBRA'}</span>
                 </div>
                 <h3 className="text-lg font-bold text-slate-800 mb-1">{proj.name}</h3>
-                <p className="flex items-center gap-2 text-sm text-slate-500 truncate">
-                    <MapPin size={14} className="text-[#f0c419]"/> {proj.location || 'Ubicación pendiente'}
-                </p>
+                <p className="flex items-center gap-2 text-sm text-slate-500 truncate"><MapPin size={14} className="text-[#f0c419]"/> {proj.location || 'Ubicación pendiente'}</p>
               </div>
             ))}
           </div>
@@ -415,73 +355,42 @@ const FieldAttendancePage = () => {
     );
   }
 
-  // VISTA 2: TABLA DE ASISTENCIA
+  // --- RENDER VISTA 2: TABLA DE ASISTENCIA ---
   return (
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto space-y-6 animate-in slide-in-from-right duration-300">
       
       {/* HEADER CONTEXTUAL */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-4 w-full md:w-auto">
-          <button onClick={() => setSelectedProject(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-[#003366]">
-            <ArrowLeft size={24} />
-          </button>
+          <button onClick={() => setSelectedProject(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-[#003366]"><ArrowLeft size={24} /></button>
           <div>
-            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Building2 size={20} className="text-blue-600"/> {selectedProject.name}
-            </h1>
+            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-blue-600"/> {selectedProject.name}</h1>
             <p className="text-xs text-slate-500 font-medium ml-7">Tareo del día: <span className="text-slate-800 font-bold">{date}</span></p>
           </div>
         </div>
         
-        {/* RESUMEN ESTADÍSTICO */}
         <div className="flex gap-2 md:gap-4 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto">
-            <div className="px-5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center min-w-[90px]">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</span>
-                <span className="text-xl font-black text-slate-700">{stats.total}</span>
-            </div>
-            <div className="px-5 py-2 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col items-center min-w-[90px]">
-                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Presentes</span>
-                <span className="text-xl font-black text-emerald-700">{stats.presentes}</span>
-            </div>
-            <div className="px-5 py-2 bg-red-50 rounded-xl border border-red-100 flex flex-col items-center min-w-[90px]">
-                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Faltas</span>
-                <span className="text-xl font-black text-red-600">{stats.faltas}</span>
-            </div>
+            <div className="px-5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</span><span className="text-xl font-black text-slate-700">{stats.total}</span></div>
+            <div className="px-5 py-2 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Presentes</span><span className="text-xl font-black text-emerald-700">{stats.presentes}</span></div>
+            <div className="px-5 py-2 bg-red-50 rounded-xl border border-red-100 flex flex-col items-center min-w-[90px]"><span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Faltas</span><span className="text-xl font-black text-red-600">{stats.faltas}</span></div>
         </div>
       </div>
 
-      {/* CONTENEDOR PRINCIPAL */}
       <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden flex flex-col min-h-[600px]">
         
         {/* BARRA DE HERRAMIENTAS */}
         <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/50">
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-            <input 
-              type="text" 
-              placeholder="Buscar obrero..." 
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
-            />
+            <input type="text" placeholder="Buscar obrero..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-[#003366] focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"/>
           </div>
           
           <div className="flex items-center gap-3 w-full md:w-auto">
-               <button 
-                  onClick={handleMarkAllPresent}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold hover:bg-emerald-50 transition-colors shadow-sm"
-               >
-                   <CheckSquare size={16}/> Todos Presentes
-               </button>
+               <button onClick={handleMarkAllPresent} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold hover:bg-emerald-50 transition-colors shadow-sm"><CheckSquare size={16}/> Todos Presentes</button>
                <div className="h-8 w-px bg-slate-300 hidden md:block"></div>
                <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                   <span className="text-xs font-bold text-slate-400 uppercase">Fecha:</span>
-                  <input 
-                    type="date" 
-                    value={date} 
-                    onChange={(e) => setDate(e.target.value)} 
-                    className="text-sm font-bold text-slate-700 outline-none cursor-pointer"
-                  />
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm font-bold text-slate-700 outline-none cursor-pointer"/>
                </div>
           </div>
         </div>
@@ -494,7 +403,7 @@ const FieldAttendancePage = () => {
                 <th className="px-6 py-4">Obrero</th>
                 <th className="px-4 py-4 text-center">Entrada</th>
                 <th className="px-4 py-4 text-center">Salida</th>
-                <th className="px-4 py-4 text-center">Evidencia</th>
+                <th className="px-4 py-4 text-center">Evidencia / Alertas</th>
                 <th className="px-4 py-4 text-center w-40">Estado</th>
                 <th className="px-6 py-4">Observaciones</th>
               </tr>
@@ -505,12 +414,11 @@ const FieldAttendancePage = () => {
               ) : filteredWorkers.length === 0 ? (
                 <tr><td colSpan="6" className="py-20 text-center text-slate-400 italic">No se encontraron trabajadores asignados a esta obra.</td></tr>
               ) : filteredWorkers.map((worker) => (
-                <tr key={worker.id} className="hover:bg-blue-50/30 transition-colors group">
+                <tr key={worker.id} className={`transition-colors group ${worker.approvalStatus === 'Pendiente' || worker.overtimeStatus === 'Pendiente' ? 'bg-amber-50/50' : 'hover:bg-blue-50/30'}`}>
                   
-                  {/* 1. OBRERO */}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-[#003366] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm border-2 border-white ring-1 ring-slate-100">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 shadow-sm border-2 ring-1 ring-slate-100 ${worker.approvalStatus === 'Pendiente' || worker.overtimeStatus === 'Pendiente' ? 'bg-amber-500 text-white border-white' : 'bg-[#003366] text-white border-white'}`}>
                         {worker.first_name?.[0]}{worker.paternal_surname?.[0]}
                       </div>
                       <div>
@@ -523,7 +431,6 @@ const FieldAttendancePage = () => {
                     </div>
                   </td>
 
-                  {/* 2. ENTRADA */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -532,19 +439,16 @@ const FieldAttendancePage = () => {
                                 type="time"
                                 value={getTimeInputValue(worker.checkInTime)}
                                 onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkInTime', e.target.value)}
-                                disabled={worker.attendanceStatus !== 'Presente'}
+                                disabled={!['Presente', 'Falta Justificada'].includes(worker.attendanceStatus)}
                                 className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                         </div>
                         {worker.checkInLocation && worker.checkInLocation.includes(',') && (
-                           <button onClick={() => openMap(worker.checkInLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
-                              <MapPin size={10}/> Ver Mapa
-                           </button>
+                           <button onClick={() => openMap(worker.checkInLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
                     </div>
                   </td>
 
-                  {/* 3. SALIDA */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -553,62 +457,56 @@ const FieldAttendancePage = () => {
                                 type="time"
                                 value={getTimeInputValue(worker.checkOutTime)}
                                 onChange={(e) => handleTimeChange(workers.indexOf(worker), 'checkOutTime', e.target.value)}
-                                disabled={worker.attendanceStatus !== 'Presente'}
+                                disabled={!['Presente', 'Falta Justificada'].includes(worker.attendanceStatus)}
                                 className="pl-8 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/10 transition-all w-28 text-center disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                         </div>
                         {worker.checkOutLocation && worker.checkOutLocation.includes(',') && (
-                           <button onClick={() => openMap(worker.checkOutLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline">
-                              <MapPin size={10}/> Ver Mapa
-                           </button>
+                           <button onClick={() => openMap(worker.checkOutLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
                       </div>
                   </td>
 
-                  {/* 4. EVIDENCIA */}
                   <td className="px-4 py-4 text-center">
-                    {(worker.checkInPhoto || worker.checkOutPhoto) ? (
-                      <button 
-                        onClick={() => setPhotoModal({ isOpen: true, worker })}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200 text-xs font-bold"
-                      >
-                        <ImageIcon size={14}/> Fotos
-                      </button>
-                    ) : (
-                      <span className="text-[10px] text-slate-300 font-medium">--</span>
-                    )}
-                  </td>
+                    <div className="flex flex-col items-center gap-2">
+                        {(worker.checkInPhoto || worker.checkOutPhoto) && (
+                        <button onClick={() => setPhotoModal({ isOpen: true, worker })} className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200 text-xs font-bold">
+                            <ImageIcon size={14}/> Fotos
+                        </button>
+                        )}
+                        
+                        {(worker.approvalStatus === 'Pendiente' || worker.overtimeStatus === 'Pendiente') && (
+                           <button onClick={() => setValidationModal({ isOpen: true, worker })} className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-[10px] font-bold border border-purple-300 animate-pulse hover:bg-purple-200">
+                              <AlertTriangle size={12}/> {worker.checkOutTime ? 'Evaluar Salida' : 'Evaluar Ingreso'}
+                           </button>
+                        )}
 
-                  {/* 5. ESTADO */}
-                  <td className="px-4 py-4 text-center">
-                    <div className="relative inline-block w-32">
-                        <select
-                            value={worker.attendanceStatus}
-                            onChange={(e) => handleStatusChange(workers.indexOf(worker), e.target.value)}
-                            className={`w-full appearance-none py-2 pl-3 pr-8 rounded-lg text-xs border cursor-pointer outline-none transition-all text-center shadow-sm uppercase tracking-wide
-                                ${getStatusStyles(worker.attendanceStatus)}`}
-                        >
-                            <option value="Presente">Presente</option>
-                            <option value="Falta">Falta</option>
-                            <option value="Permiso">Permiso</option>
-                            <option value="Bajada">Bajada</option>
-                        </select>
-                        <div className={`absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none opacity-50 
-                            ${worker.attendanceStatus === 'Presente' ? 'text-emerald-800' : 'text-slate-700'}`}>
-                            <ChevronDown size={14} />
-                        </div>
+                        {worker.overtimeStatus === 'Aprobado' && <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">H.E. Aprobadas</span>}
+                        {worker.justificationType === 'OLVIDO' && <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Cierre 17:00</span>}
+                        {worker.approvalStatus === 'Rechazado' && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200">Rechazado</span>}
                     </div>
                   </td>
 
-                  {/* 6. OBSERVACIONES */}
+                  <td className="px-4 py-4 text-center">
+                    <div className="relative inline-block w-full max-w-[140px]">
+                        <select
+                            value={worker.attendanceStatus}
+                            onChange={(e) => handleStatusChange(workers.indexOf(worker), e.target.value)}
+                            disabled={worker.approvalStatus === 'Pendiente' || worker.overtimeStatus === 'Pendiente'}
+                            className={`w-full appearance-none py-2 pl-2 pr-6 rounded-lg text-xs border cursor-pointer outline-none transition-all text-center shadow-sm uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed ${getStatusStyles(worker.attendanceStatus)}`}
+                        >
+                            <option value="Presente">Presente</option>
+                            <option value="Falta Justificada">Falta Justificada</option>
+                            <option value="Falta">Falta Injustif.</option>
+                            <option value="Permiso">Permiso</option>
+                            <option value="Bajada">Bajada</option>
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none opacity-50 text-slate-700"><ChevronDown size={14} /></div>
+                    </div>
+                  </td>
+
                   <td className="px-6 py-4">
-                    <input 
-                      type="text" 
-                      placeholder="Añadir nota..."
-                      value={worker.observation}
-                      onChange={(e) => handleObservationChange(workers.indexOf(worker), e.target.value)}
-                      className="w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-[#003366] outline-none text-sm py-1 transition-colors text-slate-600 placeholder:text-slate-300"
-                    />
+                    <input type="text" placeholder="Añadir nota..." value={worker.observation} onChange={(e) => handleObservationChange(workers.indexOf(worker), e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-[#003366] outline-none text-sm py-1 transition-colors text-slate-600 placeholder:text-slate-300"/>
                   </td>
 
                 </tr>
@@ -619,22 +517,11 @@ const FieldAttendancePage = () => {
 
         {/* FOOTER DE ACCIONES */}
         <div className="p-5 border-t border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-end gap-4 sticky bottom-0 z-20">
-            <button 
-              onClick={() => handleSaveClick('BORRADOR')}
-              disabled={saving || filteredWorkers.length === 0}
-              className="bg-white text-slate-600 border border-slate-300 px-6 py-3 rounded-xl font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 shadow-sm"
-            >
-              {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
-              <span>Guardar Borrador</span>
+            <button onClick={() => handleSaveClick('BORRADOR')} disabled={saving || filteredWorkers.length === 0} className="bg-white text-slate-600 border border-slate-300 px-6 py-3 rounded-xl font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 shadow-sm">
+              {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} Guardar Borrador
             </button>
-
-            <button 
-              onClick={() => handleSaveClick('VALIDADO')}
-              disabled={saving || filteredWorkers.length === 0}
-              className="bg-[#003366] text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:bg-blue-900 transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
-            >
-              <Send size={20}/>
-              <span>ENVIAR TAREO A RRHH</span>
+            <button onClick={() => handleSaveClick('VALIDADO')} disabled={saving || filteredWorkers.length === 0} className="bg-[#003366] text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-900/20 hover:bg-blue-900 transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95">
+              <Send size={20}/> ENVIAR TAREO A RRHH
             </button>
         </div>
       </div>
@@ -673,7 +560,59 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* MODAL CONFIRMACIÓN */}
+      {/* MODAL DE VALIDACIÓN DE SOLICITUDES */}
+      <AnimatePresence>
+        {validationModal.isOpen && validationModal.worker && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setValidationModal({ isOpen: false, worker: null })}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y:0 }} className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+               <div className="p-6 text-center border-b border-slate-100 relative bg-purple-50">
+                  <div className="w-16 h-16 bg-white text-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm"><AlertTriangle size={32} /></div>
+                  <h3 className="text-2xl font-bold text-purple-900">Evaluar Solicitud de {validationModal.worker.checkOutTime ? 'Salida' : 'Ingreso'}</h3>
+                  <p className="text-purple-700 font-medium text-sm mt-1">{validationModal.worker.full_name}</p>
+                  <button onClick={() => setValidationModal({isOpen:false, worker:null})} className="absolute top-4 right-4 p-2 text-purple-400 hover:bg-white rounded-full"><X size={20}/></button>
+               </div>
+               
+               <div className="p-6 bg-slate-50 space-y-4">
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                      <p className="text-xs font-bold text-slate-400 mb-1 uppercase tracking-wider">Motivo indicado:</p>
+                      <p className="text-slate-700 font-medium italic">"{validationModal.worker.justificationReason || 'Sin motivo escrito'}"</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo de Alerta</p>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${validationModal.worker.justificationType === 'HORA_EXTRA' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                             {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Horas Extras' : (validationModal.worker.justificationType === 'UBICACION' ? 'Ubicación Incorrecta' : 'Tardanza / Fuera de Hora')}
+                          </span>
+                      </div>
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
+                          <Clock size={20} className="text-slate-400 mb-1"/>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Hora Marcada</p>
+                          <p className="text-lg font-bold text-slate-800">{getTimeInputValue(validationModal.worker.checkOutTime || validationModal.worker.checkInTime) || '--:--'}</p>
+                      </div>
+                  </div>
+               </div>
+
+               <div className="p-6 flex gap-4 bg-white border-t border-slate-100">
+                  <button 
+                     onClick={() => processJustification(validationModal.worker.id, false)}
+                     className="flex-1 py-3.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-100 transition-colors flex justify-center items-center gap-2"
+                  >
+                     <UserX size={18}/> {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Rechazar H.E.' : 'Rechazar Solicitud'}
+                  </button>
+                  <button 
+                     onClick={() => processJustification(validationModal.worker.id, true)}
+                     className="flex-1 py-3.5 bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/30 hover:bg-emerald-600 transition-colors flex justify-center items-center gap-2"
+                  >
+                     <UserCheck size={18}/> Aprobar Solicitud
+                  </button>
+               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL CONFIRMACIÓN GLOBAL */}
       <AnimatePresence>
         {showConfirmModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

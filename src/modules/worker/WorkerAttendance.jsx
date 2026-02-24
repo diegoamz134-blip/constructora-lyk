@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CheckCircle, LogIn, LogOut, ArrowLeft, 
-  MapPin, AlertTriangle, Lock, Loader2 
+  MapPin, AlertTriangle, Lock, Loader2, Clock 
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { compressImage } from '../../utils/imageCompressor';
@@ -26,12 +26,15 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c; // Retorna distancia en metros
 };
 
+// Límite de distancia permitido
+const MAX_DISTANCE_METERS = 200; 
+
 const WorkerAttendance = () => {
   const { worker, loading: authLoading } = useWorkerAuth();
   const navigate = useNavigate();
 
   // Estados de flujo
-  const [step, setStep] = useState('confirm'); // 'confirm' | 'camera' | 'success'
+  const [step, setStep] = useState('confirm'); // 'confirm' | 'camera' | 'justification' | 'success'
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -40,10 +43,15 @@ const WorkerAttendance = () => {
   const [projectLocation, setProjectLocation] = useState(null); 
   const [actionType, setActionType] = useState(null); // 'CHECK_IN' | 'CHECK_OUT'
   
-  // Estados de GPS
+  // Estados de GPS y Validación
   const [currentLocation, setCurrentLocation] = useState(null);
   const [distanceToProject, setDistanceToProject] = useState(null);
-  const [isOutOfRange, setIsOutOfRange] = useState(false);
+  const [isLocationValid, setIsLocationValid] = useState(true);
+  const [isTimeValid, setIsTimeValid] = useState(true);
+  
+  // Estados de Justificación
+  const [justificationText, setJustificationText] = useState('');
+  const [lateReasonType, setLateReasonType] = useState('HORA_EXTRA'); // 'HORA_EXTRA' o 'OLVIDO'
   
   // Estados de Cámara
   const [photoBlob, setPhotoBlob] = useState(null);
@@ -101,6 +109,25 @@ const WorkerAttendance = () => {
     }
   };
 
+  // --- LÓGICA DE TIEMPO (TOLERANCIAS) ---
+  const checkTimeTolerance = (type) => {
+     const now = new Date();
+     const hours = now.getHours();
+     const minutes = now.getMinutes();
+     
+     if (type === 'CHECK_IN') {
+         // Tolerancia INGRESO: Hasta las 07:45 AM
+         if (hours < 7) return true;
+         if (hours === 7 && minutes <= 45) return true;
+         return false; // Es Tardanza
+     } else {
+         // Tolerancia SALIDA: Hasta las 17:30 PM
+         if (hours < 17) return true;
+         if (hours === 17 && minutes <= 30) return true;
+         return false; // Requiere justificar H.E o Olvido
+     }
+  };
+
   const startProcess = async (type) => {
     if (attendanceToday?.validation_status === 'VALIDADO') {
       alert("🔒 El supervisor ya cerró y validó tu asistencia de hoy. No puedes realizar más cambios.");
@@ -110,8 +137,11 @@ const WorkerAttendance = () => {
     setActionType(type);
     setLoading(true);
     setErrorMsg('');
-    setIsOutOfRange(false);
+    setIsLocationValid(true);
+    setIsTimeValid(true);
     setDistanceToProject(null);
+    setJustificationText('');
+    setLateReasonType('HORA_EXTRA');
 
     if (!navigator.geolocation) {
       setErrorMsg('Tu dispositivo no soporta geolocalización.');
@@ -127,11 +157,16 @@ const WorkerAttendance = () => {
         
         setCurrentLocation(locString);
         
+        let validLocation = true;
         if (projectLocation?.latitude && projectLocation?.longitude) {
            const dist = calculateDistance(lat, lng, projectLocation.latitude, projectLocation.longitude);
            setDistanceToProject(Math.round(dist));
-           if (dist > 500) setIsOutOfRange(true);
+           validLocation = dist <= MAX_DISTANCE_METERS;
+           setIsLocationValid(validLocation);
         }
+
+        let validTime = checkTimeTolerance(type);
+        setIsTimeValid(validTime);
 
         setStep('camera');
         startCamera();
@@ -184,22 +219,29 @@ const WorkerAttendance = () => {
     }
   };
 
-  const submitAttendance = async () => {
-    // 1. Validaciones
+  const proceedWithSubmit = async () => {
     if (!worker) {
-      alert("Error: Sesión no válida. Recarga la página.");
-      return;
+      alert("Error: Sesión no válida. Recarga la página."); return;
     }
     if (!photoBlob) {
-      setErrorMsg("Error: No hay foto procesada. Inténtalo de nuevo.");
-      return;
+      setErrorMsg("Error: No hay foto procesada. Inténtalo de nuevo."); return;
     }
     if (!currentLocation) {
-      alert("⚠️ Error de GPS: Se perdió tu ubicación. Debes volver al inicio para activar el GPS.");
-      setStep('confirm'); 
-      return;
+      alert("⚠️ Error de GPS: Se perdió tu ubicación. Debes volver al inicio.");
+      setStep('confirm'); return;
     }
 
+    const requiresJustification = (!isLocationValid || !isTimeValid);
+
+    if (requiresJustification && justificationText.trim() === '') {
+        setStep('justification');
+        return;
+    }
+
+    executeDatabaseSave(requiresJustification);
+  };
+
+  const executeDatabaseSave = async (requiresJustification) => {
     setLoading(true);
 
     try {
@@ -207,9 +249,8 @@ const WorkerAttendance = () => {
       const docNum = worker.document_number || 'sin_dni';
       const fileName = `${docNum}_${actionType}_${timestamp}.jpg`;
       
-      // --- CORRECCIÓN: Nombre exacto 'attendance_photos' ---
       const { error: uploadError } = await supabase.storage
-        .from('attendance_photos') // <--- CAMBIADO AQUÍ (Guion bajo)
+        .from('attendance_photos')
         .upload(fileName, photoBlob, {
            contentType: 'image/jpeg',
            upsert: false
@@ -223,26 +264,61 @@ const WorkerAttendance = () => {
       }
 
       const { data: { publicUrl } } = supabase.storage
-        .from('attendance_photos') // <--- CAMBIADO AQUÍ TAMBIÉN
+        .from('attendance_photos')
         .getPublicUrl(fileName);
 
-      const now = new Date().toISOString(); 
+      const now = new Date(); 
+      let finalCheckOutTime = now.toISOString();
       let observationText = '';
-      if (isOutOfRange) {
-        observationText = `⚠️ FUERA DE RANGO (${distanceToProject}m). `;
+      let finalJustificationType = null;
+      let finalOvertimeStatus = 'Ninguno';
+      let finalApprovalStatus = 'Aprobado';
+
+      // EVALUAR REGLAS Y ESTADOS
+      if (!isLocationValid) {
+          observationText += actionType === 'CHECK_IN' ? `[GPS INGRESO: ${distanceToProject}m] ` : `[GPS SALIDA: ${distanceToProject}m] `;
+          finalJustificationType = 'UBICACION';
+          finalApprovalStatus = 'Pendiente';
       }
 
+      if (!isTimeValid) {
+          if (actionType === 'CHECK_IN') {
+              observationText += `[TARDANZA] `;
+              finalJustificationType = finalJustificationType || 'TARDANZA'; 
+              finalApprovalStatus = 'Pendiente';
+          } 
+          else if (actionType === 'CHECK_OUT') {
+              if (lateReasonType === 'HORA_EXTRA') {
+                  observationText += `[HORAS EXTRAS SOLICITADAS] `;
+                  finalJustificationType = 'HORA_EXTRA';
+                  finalOvertimeStatus = 'Pendiente';
+                  finalApprovalStatus = 'Pendiente';
+              } else if (lateReasonType === 'OLVIDO') {
+                  observationText += `[OLVIDO DE MARCACIÓN] `;
+                  finalJustificationType = 'OLVIDO';
+                  const standardOut = new Date();
+                  standardOut.setHours(17, 0, 0, 0);
+                  finalCheckOutTime = standardOut.toISOString();
+              }
+          }
+      }
+
+      // GUARDADO EN SUPABASE
       if (actionType === 'CHECK_IN') {
         const { error: insertError } = await supabase
           .from('attendance')
           .insert([{
             worker_id: worker.id,
-            date: new Date().toISOString().split('T')[0],
-            check_in_time: now,
+            date: now.toISOString().split('T')[0],
+            check_in_time: now.toISOString(),
             check_in_photo: publicUrl,
             check_in_location: currentLocation,
             project_name: worker.project_assigned,
-            observation: observationText
+            observation: observationText,
+            is_location_valid: isLocationValid,
+            justification_reason: requiresJustification ? justificationText : null,
+            justification_type: finalJustificationType,
+            approval_status: finalApprovalStatus 
           }]);
         if (insertError) throw insertError;
       } else {
@@ -253,10 +329,15 @@ const WorkerAttendance = () => {
         const { error: updateError } = await supabase
           .from('attendance')
           .update({
-            check_out_time: now,
+            check_out_time: finalCheckOutTime,
             check_out_photo: publicUrl,
             check_out_location: currentLocation,
-            observation: newObs
+            observation: newObs,
+            is_location_valid: isLocationValid,
+            justification_reason: requiresJustification ? justificationText : null,
+            justification_type: finalJustificationType,
+            overtime_status: finalOvertimeStatus,
+            approval_status: finalApprovalStatus
           })
           .eq('id', attendanceToday.id);
         if (updateError) throw updateError;
@@ -302,12 +383,11 @@ const WorkerAttendance = () => {
       </div>
 
       <AnimatePresence mode="wait">
+        
+        {/* --- PASO 1: CONFIRMACIÓN --- */}
         {step === 'confirm' && (
           <motion.div 
-            key="confirm"
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -20, opacity: 0 }}
+            key="confirm" initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }}
             className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20 shadow-xl"
           >
             <button onClick={goBackToDashboard} className="absolute top-6 left-6 p-2 text-slate-400 hover:text-[#003366] bg-slate-50 hover:bg-slate-100 rounded-full transition-all">
@@ -366,18 +446,16 @@ const WorkerAttendance = () => {
           </motion.div>
         )}
 
+        {/* --- PASO 2: CÁMARA --- */}
         {step === 'camera' && (
           <motion.div 
-            key="camera"
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
+            key="camera" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
             className="w-full max-w-sm bg-black h-[70vh] rounded-[2.5rem] overflow-hidden relative flex flex-col z-20 shadow-2xl"
           >
-            <div className="absolute top-4 left-0 right-0 z-30 flex justify-center pointer-events-none px-4">
-                {isOutOfRange ? (
+            <div className="absolute top-4 left-0 right-0 z-30 flex flex-col gap-2 items-center pointer-events-none px-4">
+                {!isLocationValid ? (
                     <div className="bg-red-500/90 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 backdrop-blur-sm animate-pulse shadow-lg">
-                        <AlertTriangle size={14} /> Distancia: {distanceToProject}m (Lejos de obra)
+                        <AlertTriangle size={14} /> Distancia: {distanceToProject}m (Fuera de rango)
                     </div>
                 ) : distanceToProject ? (
                     <div className="bg-emerald-500/90 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 backdrop-blur-sm shadow-lg">
@@ -385,6 +463,12 @@ const WorkerAttendance = () => {
                     </div>
                 ) : (
                    <div className="bg-slate-700/50 text-white px-3 py-1 rounded-full text-[10px] backdrop-blur-sm">GPS Detectado</div>
+                )}
+
+                {!isTimeValid && (
+                    <div className="bg-amber-500/90 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 backdrop-blur-sm shadow-lg">
+                        <AlertTriangle size={14} /> {actionType === 'CHECK_IN' ? 'Llegada Tarde' : 'Fuera de horario tolerado'}
+                    </div>
                 )}
             </div>
 
@@ -411,15 +495,15 @@ const WorkerAttendance = () => {
             ) : (
               <div className="flex flex-col h-full bg-slate-900 relative">
                 <img src={URL.createObjectURL(photoBlob)} className="flex-1 object-cover" alt="Preview" />
-                {isOutOfRange && (
-                    <div className="absolute bottom-28 left-4 right-4 bg-red-500/90 text-white p-3 rounded-xl text-xs text-center font-bold backdrop-blur-md">
-                       ⚠️ Advertencia: Estás marcando fuera del rango permitido. Esto generará una observación.
+                {(!isLocationValid || !isTimeValid) && (
+                    <div className="absolute bottom-28 left-4 right-4 bg-red-500/90 text-white p-3 rounded-xl text-xs text-center font-bold backdrop-blur-md shadow-lg">
+                       ⚠️ Requiere Justificación. Su {actionType === 'CHECK_IN' ? 'ingreso' : 'salida'} quedará pendiente de aprobación de su Residente.
                     </div>
                 )}
                 <div className="p-6 bg-white rounded-t-[2rem] flex gap-4 shadow-[0_-10px_40px_rgba(0,0,0,0.2)]">
                   <button onClick={retryPhoto} className="flex-1 py-4 text-slate-600 font-bold bg-slate-100 rounded-2xl text-sm hover:bg-slate-200 transition-colors">Repetir Foto</button>
-                  <button onClick={submitAttendance} disabled={loading} className={`flex-1 py-4 text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg active:scale-95 transition-transform gap-2 ${isOutOfRange ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#003366] hover:bg-blue-900'}`}>
-                     {loading ? <Loader2 className="animate-spin" size={20} /> : <><CheckCircle size={20}/> {isOutOfRange ? 'Enviar (Obs)' : 'Confirmar'}</>}
+                  <button onClick={proceedWithSubmit} disabled={loading} className={`flex-1 py-4 text-white rounded-2xl font-bold text-sm flex justify-center items-center shadow-lg active:scale-95 transition-transform gap-2 ${(!isLocationValid || !isTimeValid) ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#003366] hover:bg-blue-900'}`}>
+                     {loading ? <Loader2 className="animate-spin" size={20} /> : <><CheckCircle size={20}/> {(!isLocationValid || !isTimeValid) ? 'Siguiente' : 'Confirmar'}</>}
                   </button>
                 </div>
               </div>
@@ -428,6 +512,75 @@ const WorkerAttendance = () => {
           </motion.div>
         )}
 
+        {/* --- PASO 3: MODAL DE JUSTIFICACIÓN DINÁMICO --- */}
+        {step === 'justification' && (
+           <motion.div 
+             key="justification" initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }}
+             className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-20 shadow-xl"
+           >
+             <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Clock size={32} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">
+                    {actionType === 'CHECK_IN' ? 'Justificar Ingreso' : 'Alerta de Horario / GPS'}
+                </h2>
+                <p className="text-slate-500 text-xs mt-2">
+                    {actionType === 'CHECK_IN' 
+                        ? 'Estás marcando fuera de la obra o pasada la hora de tolerancia (07:45 AM).' 
+                        : 'Estás marcando salida fuera del horario regular (5:30 PM) o fuera del rango de la obra.'}
+                </p>
+             </div>
+
+             {/* OPCIONES SOLO SI ES FUERA DE HORA EN SALIDA */}
+             {!isTimeValid && actionType === 'CHECK_OUT' && (
+                 <div className="space-y-3 mb-6">
+                     <p className="text-sm font-bold text-slate-700">Selecciona el motivo de tu demora:</p>
+                     
+                     <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${lateReasonType === 'HORA_EXTRA' ? 'border-blue-600 bg-blue-50' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                        <input type="radio" name="reason" className="mt-1" checked={lateReasonType === 'HORA_EXTRA'} onChange={() => setLateReasonType('HORA_EXTRA')}/>
+                        <div>
+                            <span className="block text-sm font-bold text-slate-800">Solicitar Horas Extras</span>
+                            <span className="text-[10px] text-slate-500 leading-tight block mt-0.5">Me quedé trabajando a solicitud del residente.</span>
+                        </div>
+                     </label>
+
+                     <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${lateReasonType === 'OLVIDO' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 bg-white hover:border-amber-300'}`}>
+                        <input type="radio" name="reason" className="mt-1" checked={lateReasonType === 'OLVIDO'} onChange={() => setLateReasonType('OLVIDO')}/>
+                        <div>
+                            <span className="block text-sm font-bold text-slate-800">Me olvidé de marcar a mi hora</span>
+                            <span className="text-[10px] text-slate-500 leading-tight block mt-0.5">Mi salida se registrará automáticamente a las 5:00 PM.</span>
+                        </div>
+                     </label>
+                 </div>
+             )}
+
+             <textarea 
+                rows="3"
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 resize-none transition-all mb-6"
+                placeholder={
+                    actionType === 'CHECK_IN' 
+                    ? "¿Cuál es el motivo de la tardanza o cambio de ubicación? (Ej. Tráfico, reubicación a otra sede...)" 
+                    : (lateReasonType === 'HORA_EXTRA' ? "¿Qué trabajo realizaste en estas horas extras?" : "¿Escribe aquí una nota para el Residente?")
+                }
+                value={justificationText}
+                onChange={(e) => setJustificationText(e.target.value)}
+             ></textarea>
+
+             <div className="flex gap-3">
+                 <button onClick={() => setStep('camera')} className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Atrás</button>
+                 <button 
+                    onClick={() => executeDatabaseSave(true)} 
+                    disabled={justificationText.trim().length < 5 || loading}
+                    className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-lg disabled:opacity-50 transition-colors flex justify-center items-center"
+                 >
+                    {loading ? <Loader2 className="animate-spin" size={18} /> : 'Enviar Justificación'}
+                 </button>
+             </div>
+           </motion.div>
+        )}
+
+        {/* --- PASO 4: ÉXITO --- */}
         {step === 'success' && (
           <motion.div 
             key="success"
@@ -435,14 +588,27 @@ const WorkerAttendance = () => {
             animate={{ scale: 1, opacity: 1 }}
             className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20 shadow-xl"
           >
-            <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 ${isOutOfRange ? 'bg-amber-50 text-amber-500' : 'bg-green-50 text-green-500'}`}>
-              {isOutOfRange ? <AlertTriangle size={48} strokeWidth={2} /> : <CheckCircle size={48} strokeWidth={2} />}
-            </div>
-            
-            <h2 className="text-3xl font-bold text-slate-800 mb-2">{isOutOfRange ? 'Registrado' : '¡Excelente!'}</h2>
-            <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-              {isOutOfRange ? 'Tu asistencia se guardó con una observación de distancia.' : 'Tu asistencia ha sido registrada exitosamente en el sistema.'}
-            </p>
+            {(!isLocationValid || (!isTimeValid && lateReasonType === 'HORA_EXTRA') || (!isTimeValid && actionType === 'CHECK_IN')) ? (
+                <>
+                  <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-amber-50 text-amber-500">
+                    <AlertTriangle size={48} strokeWidth={2} />
+                  </div>
+                  <h2 className="text-2xl font-bold text-slate-800 mb-2">Pendiente de Aprobación</h2>
+                  <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+                    Tu {actionType === 'CHECK_IN' ? 'ingreso' : 'salida'} se registró. Las alertas (GPS o Horario) están pendientes de revisión por tu Residente.
+                  </p>
+                </>
+            ) : (
+                <>
+                  <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-green-50 text-green-500">
+                    <CheckCircle size={48} strokeWidth={2} />
+                  </div>
+                  <h2 className="text-3xl font-bold text-slate-800 mb-2">¡Excelente!</h2>
+                  <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+                    Tu asistencia ha sido registrada exitosamente en el sistema.
+                  </p>
+                </>
+            )}
             
             <button onClick={goBackToDashboard} className="w-full py-4 bg-[#003366] text-white rounded-2xl font-bold text-sm shadow-lg shadow-blue-900/20 active:scale-95 transition-transform">
               Volver al Inicio
