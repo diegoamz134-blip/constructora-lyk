@@ -4,8 +4,8 @@ import {
   Calendar, Save, MapPin, CheckCircle, XCircle, 
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
   Building2, ArrowLeft, Image as ImageIcon,
-  ExternalLink, Eye, X, ChevronDown, Coffee, Send, Clock,
-  CheckSquare, AlertTriangle, UserCheck, UserX
+  ExternalLink, Eye, X, ChevronDown, ChevronRight, Coffee, Send, Clock,
+  CheckSquare, AlertTriangle, UserCheck, UserX, FileText, BellRing
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,10 +17,9 @@ import { getProjectsForUser } from '../../services/projectsService';
 import { useUnifiedAuth } from '../../hooks/useUnifiedAuth';
 
 const FieldAttendancePage = () => {
-  // Obtenemos el usuario actual para filtrar sus obras
   const { currentUser } = useUnifiedAuth();
 
-  // Estados
+  // Estados Generales
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -29,9 +28,13 @@ const FieldAttendancePage = () => {
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Estados de Modales
+  // ESTADOS DE BANDEJA DE PERMISOS (Caso 6)
+  const [pendingAbsences, setPendingAbsences] = useState([]);
+  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
+
+  // Estados de Modales (Modificado para saber qué estamos evaluando: 'ENTRY' o 'EXIT')
   const [photoModal, setPhotoModal] = useState({ isOpen: false, worker: null });
-  const [validationModal, setValidationModal] = useState({ isOpen: false, worker: null });
+  const [validationModal, setValidationModal] = useState({ isOpen: false, worker: null, evaluationType: null });
   const [confirmActionType, setConfirmActionType] = useState(null); 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [statusModal, setStatusModal] = useState({ 
@@ -53,16 +56,18 @@ const FieldAttendancePage = () => {
     loadProjects();
   }, [currentUser]);
 
-  // 2. Cargar Cuadrilla y Cruzar con Asistencia
+  // 2. Cargar Cuadrilla y Permisos Pendientes
   useEffect(() => {
     if (!selectedProject) {
       setWorkers([]);
+      setPendingAbsences([]);
       return;
     }
     
-    const loadTeamAndAttendance = async () => {
+    const loadData = async () => {
       setLoading(true);
       try {
+        // A) Cargar Trabajadores Activos
         const { data: workersData, error: workersError } = await supabase
           .from('workers')
           .select('*')
@@ -72,6 +77,7 @@ const FieldAttendancePage = () => {
 
         if (workersError) throw workersError;
 
+        // B) Cargar Asistencia del Día
         const { data: attendanceData, error: attendanceError } = await supabase
           .from('attendance')
           .select('*')
@@ -80,12 +86,22 @@ const FieldAttendancePage = () => {
         
         if (attendanceError) throw attendanceError;
 
+        // C) CARGAR PERMISOS PENDIENTES DEL RESIDENTE
+        const { data: absencesData, error: absencesError } = await supabase
+          .from('absences')
+          .select(`*, workers ( full_name, document_number, category )`)
+          .eq('project_name', selectedProject.name)
+          .eq('boss_approval', 'Pendiente');
+          
+        if (!absencesError && absencesData) {
+            setPendingAbsences(absencesData);
+        }
+
+        // Mapear Asistencia
         const mergedList = workersData.map(w => {
           const record = attendanceData.find(a => a.worker_id === w.id);
-
           let mappedStatus = record ? (record.status || 'Presente') : 'Presente';
           
-          // REGLA CLAVE (NOTA 2): Si tiene Ingreso Pendiente, visualmente es TARDANZA
           if (record && record.approval_status === 'Pendiente' && !record.check_out_time) {
               mappedStatus = 'Tardanza'; 
           }
@@ -94,23 +110,18 @@ const FieldAttendancePage = () => {
             ...w,
             attendanceId: record ? record.id : null, 
             attendanceStatus: mappedStatus,
-            
             checkInTime: record ? record.check_in_time : null,
             checkInLocation: record ? record.check_in_location : null,
             checkInPhoto: record ? record.check_in_photo : null,
-
             checkOutTime: record ? record.check_out_time : null,
             checkOutLocation: record ? record.check_out_location : null,
             checkOutPhoto: record ? record.check_out_photo : null,
-            
-            evidencePhoto: record ? record.evidence_photo : null, // NUEVO: Evidencia fotográfica
-            
+            evidencePhoto: record ? record.evidence_photo : null,
             isLocationValid: record ? record.is_location_valid : true,
             justificationReason: record ? record.justification_reason : '',
             justificationType: record ? record.justification_type : '',
             overtimeStatus: record ? record.overtime_status : 'Ninguno',
             approvalStatus: record ? record.approval_status : 'Aprobado',
-
             origin: record && record.check_in_photo ? 'APP' : 'MANUAL',
             observation: record ? (record.observation || '') : '',
             saved: !!record 
@@ -119,18 +130,38 @@ const FieldAttendancePage = () => {
         
         setWorkers(mergedList || []);
       } catch (err) {
-        console.error("Error cargando personal:", err);
-        setStatusModal({
-            isOpen: true, type: 'error', title: 'Error de Carga', message: 'No se pudo cargar la lista de trabajadores.'
-        });
+        console.error("Error cargando datos:", err);
       } finally {
         setLoading(false);
       }
     };
-    loadTeamAndAttendance();
+    loadData();
   }, [selectedProject, date]);
 
-  // --- LÓGICA DE INTERACCIÓN Y ESTADOS ---
+  // --- LÓGICA DE APROBACIÓN DE PERMISOS (CASO 6) ---
+  const handleAbsenceApproval = async (absenceId, isApproved) => {
+      try {
+          const newBossStatus = isApproved ? 'Aprobado' : 'Rechazado';
+          const overallStatus = isApproved ? 'Pendiente' : 'Rechazado'; 
+
+          const { error } = await supabase
+              .from('absences')
+              .update({ boss_approval: newBossStatus, status: overallStatus })
+              .eq('id', absenceId);
+
+          if (error) throw error;
+
+          setPendingAbsences(prev => prev.filter(a => a.id !== absenceId));
+          if (pendingAbsences.length === 1) setShowAbsenceModal(false);
+
+          setStatusModal({ isOpen: true, type: 'success', title: 'Evaluado', message: 'La solicitud fue procesada con éxito.' });
+      } catch (err) {
+          console.error(err);
+          setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo procesar la solicitud.' });
+      }
+  };
+
+  // --- LÓGICA DE INTERACCIÓN TABLA DIARIA ---
   const handleStatusChange = (index, newStatus) => {
     const newWorkers = [...workers];
     const worker = newWorkers[index];
@@ -144,20 +175,17 @@ const FieldAttendancePage = () => {
         worker.checkOutTime = `${date}T17:00:00-05:00`;
         worker.observation = 'Justificado por Residente - Paga día normal';
     } else if (newStatus === 'Tardanza') {
-        // En caso manual, dejamos las horas para que anoten la tardanza, pero cambiamos obs.
         worker.observation = worker.observation || 'Tardanza Injustificada - Debe recuperar horas';
     } else {
         worker.checkInTime = null; worker.checkOutTime = null;
         worker.observation = newStatus === 'Falta' ? 'Inasistencia injustificada' : '';
     }
-    
     setWorkers(newWorkers);
   };
 
   const handleTimeChange = (index, field, timeValue) => {
     const newWorkers = [...workers];
     newWorkers[index][field] = timeValue ? `${date}T${timeValue}:00-05:00` : null;
-    
     if (!['Presente', 'Falta Justificada', 'Tardanza'].includes(newWorkers[index].attendanceStatus)) {
         newWorkers[index].attendanceStatus = 'Presente';
     }
@@ -183,53 +211,76 @@ const FieldAttendancePage = () => {
       setWorkers(updated);
   };
 
-  // --- APROBAR / RECHAZAR JUSTIFICACIÓN GENERAL ---
-  const processJustification = (workerId, isApproved) => {
+  // --- APROBAR / RECHAZAR ALERTAS DIARIAS SEPARADAS (INGRESO O SALIDA) ---
+  const processJustification = async (workerId, isApproved, evaluationType) => {
      const newWorkers = [...workers];
      const index = newWorkers.findIndex(w => w.id === workerId);
      
      if (index !== -1) {
          const w = newWorkers[index];
+         let updatePayload = {};
          
-         if (w.justificationType === 'HORA_EXTRA') {
+         // 1. EVALUAR SALIDA (Horas Extras u Olvido)
+         if (evaluationType === 'EXIT') {
              if (isApproved) {
-                w.overtimeStatus = 'Aprobado'; w.approvalStatus = 'Aprobado'; w.observation += ` [HE APROBADAS]`;
+                w.overtimeStatus = 'Aprobado'; 
+                w.observation += ` [H.E. APROBADAS]`;
              } else {
-                w.overtimeStatus = 'Rechazado'; w.approvalStatus = 'Aprobado'; w.observation += ` [HE RECHAZADAS: Ajustado a 17:00]`;
+                w.overtimeStatus = 'Rechazado'; 
+                w.observation += ` [H.E. RECHAZADAS: Ajustado a 17:00]`;
                 w.checkOutTime = `${date}T17:00:00-05:00`;
              }
-         } else {
-             // Es justificación de Ingreso (Tardanza Justificada/Ubicación) o Salida (Ubicación)
+             // Solo mandamos actualizar lo relacionado a la salida
+             updatePayload = { overtime_status: w.overtimeStatus, observation: w.observation, check_out_time: w.checkOutTime };
+         } 
+         // 2. EVALUAR INGRESO (Tardanzas o Ubicación)
+         else if (evaluationType === 'ENTRY') {
              if (isApproved) {
                  w.approvalStatus = 'Aprobado';
-                 w.attendanceStatus = 'Presente'; // Si estaba como Tardanza o Falta, se vuelve Presente
-                 w.observation += ` [SOLICITUD APROBADA]`;
+                 w.attendanceStatus = 'Presente';
+                 w.observation += ` [INGRESO APROBADO]`;
 
-                 // --- NOTA 3: SI LO APRUEBA DEBERÁ APARECER COMO HORA DE INGRESO 7:30am ---
+                 // MAGIA 7:30 AM
                  if (w.justificationType === 'TARDANZA_JUSTIFICADA') {
                      w.checkInTime = `${date}T07:30:00-05:00`;
                  }
-
+                 // Solo mandamos actualizar lo relacionado a la entrada
+                 updatePayload = { approval_status: w.approvalStatus, status: w.attendanceStatus, observation: w.observation, check_in_time: w.checkInTime };
              } else {
                  w.approvalStatus = 'Rechazado';
-                 
-                 // Si se rechaza una tardanza justificada, se vuelve injustificada (Tardanza normal)
                  if (w.justificationType === 'TARDANZA_JUSTIFICADA') {
                      w.attendanceStatus = 'Tardanza';
                      w.observation += ` [JUSTIFICACIÓN RECHAZADA - DEBE RECUPERAR]`;
                  } else {
-                     w.attendanceStatus = 'Falta'; // Queda permanentemente como falta injustificada
-                     if (!w.checkOutTime) w.checkInTime = null; // Anula la hora de entrada si solo marcó entrada
-                     w.observation += ` [SOLICITUD RECHAZADA]`;
+                     w.attendanceStatus = 'Falta'; 
+                     if (!w.checkOutTime) w.checkInTime = null; 
+                     w.observation += ` [INGRESO RECHAZADO]`;
                  }
+                 updatePayload = { approval_status: w.approvalStatus, status: w.attendanceStatus, observation: w.observation, check_in_time: w.checkInTime };
+             }
+         }
+
+         // GUARDADO INMEDIATO EN LA BASE DE DATOS
+         if (w.attendanceId) {
+             try {
+                 const { error } = await supabase
+                     .from('attendance')
+                     .update(updatePayload)
+                     .eq('id', w.attendanceId);
+                     
+                 if (error) throw error;
+             } catch (error) {
+                 console.error("Error al auto-guardar la evaluación:", error);
+                 alert("Hubo un error al guardar en la base de datos. Por favor intenta de nuevo.");
+                 return; // Detener ejecución si falla
              }
          }
      }
+     
      setWorkers(newWorkers);
-     setValidationModal({ isOpen: false, worker: null });
+     setValidationModal({ isOpen: false, worker: null, evaluationType: null });
   };
 
-  // --- GUARDADO ---
   const handleSaveClick = (type) => {
     if (!selectedProject || workers.length === 0) return;
     
@@ -265,7 +316,6 @@ const FieldAttendancePage = () => {
           check_in_location: w.checkInLocation || 'Validado por Residente', 
           observation: w.observation || '', validation_status: statusToSave,
           approval_status: w.approvalStatus || 'Aprobado', overtime_status: w.overtimeStatus || 'Ninguno'
-          // Nota: La evidencia no se sobrescribe aquí porque solo se actualizan status y observaciones.
         };
       });
 
@@ -299,7 +349,6 @@ const FieldAttendancePage = () => {
       if (action) action();
   };
 
-  // --- HELPERS DE UI ---
   const getTimeInputValue = (isoString) => {
     if (!isoString) return '';
     try {
@@ -382,22 +431,50 @@ const FieldAttendancePage = () => {
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto space-y-6 animate-in slide-in-from-right duration-300">
       
       {/* HEADER CONTEXTUAL */}
-      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-4 w-full md:w-auto">
+      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 relative overflow-hidden">
+        
+        <div className="flex items-center gap-4 w-full md:w-auto relative z-10">
           <button onClick={() => setSelectedProject(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-[#003366]"><ArrowLeft size={24} /></button>
           <div>
             <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-blue-600"/> {selectedProject.name}</h1>
-            <p className="text-xs text-slate-500 font-medium ml-7">Tareo del día: <span className="text-slate-800 font-bold">{date}</span></p>
+            <p className="text-xs text-slate-500 font-medium ml-7 mt-1">Tareo del día: <span className="text-slate-800 font-bold">{date}</span></p>
           </div>
         </div>
         
-        <div className="flex gap-2 md:gap-4 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto">
+        <div className="flex gap-2 md:gap-4 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto relative z-10">
             <div className="px-5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</span><span className="text-xl font-black text-slate-700">{stats.total}</span></div>
             <div className="px-5 py-2 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Presentes</span><span className="text-xl font-black text-emerald-700">{stats.presentes}</span></div>
             <div className="px-5 py-2 bg-amber-50 rounded-xl border border-amber-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Tardanzas</span><span className="text-xl font-black text-amber-700">{stats.tardanzas}</span></div>
             <div className="px-5 py-2 bg-red-50 rounded-xl border border-red-100 flex flex-col items-center min-w-[80px]"><span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Faltas</span><span className="text-xl font-black text-red-600">{stats.faltas}</span></div>
         </div>
       </div>
+
+      {/* --- BANNER DE ALERTA DE PERMISOS --- */}
+      {pendingAbsences.length > 0 && (
+        <div className="bg-gradient-to-r from-purple-700 to-purple-600 text-white rounded-2xl shadow-xl shadow-purple-600/20 p-5 flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden animate-in slide-in-from-top-4">
+           <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-10 -translate-y-10">
+              <FileText size={180} />
+           </div>
+           
+           <div className="flex items-center gap-4 relative z-10 w-full md:w-auto">
+               <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center animate-bounce shadow-inner shrink-0">
+                   <BellRing size={28} className="text-white"/>
+               </div>
+               <div>
+                   <h3 className="text-xl font-black tracking-wide">¡Atención Residente! Tienes {pendingAbsences.length} solicitud(es)</h3>
+                   <p className="text-purple-200 text-sm mt-1 font-medium">Hay permisos o descansos médicos esperando tu aprobación en esta obra.</p>
+               </div>
+           </div>
+
+           <button 
+              onClick={() => setShowAbsenceModal(true)} 
+              className="w-full md:w-auto px-8 py-3.5 bg-white text-purple-700 rounded-xl font-extrabold shadow-lg hover:bg-purple-50 transition-all active:scale-95 relative z-10 flex items-center justify-center gap-2 group"
+           >
+              Revisar Bandeja 
+              <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform"/>
+           </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden flex flex-col min-h-[600px]">
         
@@ -454,6 +531,7 @@ const FieldAttendancePage = () => {
                     </div>
                   </td>
 
+                  {/* COLUMNA DE ENTRADA CON BOTÓN DE EVALUACIÓN */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -469,9 +547,16 @@ const FieldAttendancePage = () => {
                         {worker.checkInLocation && worker.checkInLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkInLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
+                        {/* BOTÓN EVALUAR INGRESO ESPECÍFICO */}
+                        {worker.approvalStatus === 'Pendiente' && (
+                           <button onClick={() => setValidationModal({ isOpen: true, worker, evaluationType: 'ENTRY' })} className="mt-1 w-full justify-center inline-flex items-center gap-1 px-2 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold border border-amber-300 animate-pulse hover:bg-amber-200 shadow-sm transition-colors">
+                              <AlertTriangle size={12}/> Evaluar Entrada
+                           </button>
+                        )}
                     </div>
                   </td>
 
+                  {/* COLUMNA DE SALIDA CON BOTÓN DE EVALUACIÓN */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -487,6 +572,12 @@ const FieldAttendancePage = () => {
                         {worker.checkOutLocation && worker.checkOutLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkOutLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
+                        {/* BOTÓN EVALUAR SALIDA ESPECÍFICO */}
+                        {worker.overtimeStatus === 'Pendiente' && (
+                           <button onClick={() => setValidationModal({ isOpen: true, worker, evaluationType: 'EXIT' })} className="mt-1 w-full justify-center inline-flex items-center gap-1 px-2 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold border border-amber-300 animate-pulse hover:bg-amber-200 shadow-sm transition-colors">
+                              <AlertTriangle size={12}/> Evaluar Salida
+                           </button>
+                        )}
                       </div>
                   </td>
 
@@ -494,21 +585,18 @@ const FieldAttendancePage = () => {
                     <div className="flex flex-col items-center gap-2">
                         {(worker.checkInPhoto || worker.checkOutPhoto) && (
                         <button onClick={() => setPhotoModal({ isOpen: true, worker })} className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200 text-xs font-bold">
-                            <ImageIcon size={14}/> Fotos {worker.evidencePhoto && '(+Evidencia)'}
+                            <ImageIcon size={14}/> Fotos {worker.evidencePhoto && '(+Evid)'}
                         </button>
                         )}
-                        
-                        {(worker.approvalStatus === 'Pendiente' || worker.overtimeStatus === 'Pendiente') && (
-                           <button onClick={() => setValidationModal({ isOpen: true, worker })} className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-[10px] font-bold border border-purple-300 animate-pulse hover:bg-purple-200">
-                              <AlertTriangle size={12}/> {worker.checkOutTime ? 'Evaluar Salida' : 'Evaluar Ingreso'}
-                           </button>
-                        )}
 
-                        {worker.overtimeStatus === 'Aprobado' && <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200">H.E. Aprobadas</span>}
-                        {worker.justificationType === 'OLVIDO' && <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Cierre 17:00</span>}
-                        {worker.justificationType === 'TARDANZA_INJUSTIFICADA' && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200">Tardanza Injustif.</span>}
-                        {worker.justificationType === 'TARDANZA_JUSTIFICADA' && worker.approvalStatus === 'Aprobado' && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">Tardanza Justif.</span>}
-                        {worker.approvalStatus === 'Rechazado' && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200">Rechazado</span>}
+                        {worker.overtimeStatus === 'Aprobado' && <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded border border-green-200 shadow-sm">H.E. Aprobadas</span>}
+                        {worker.overtimeStatus === 'Rechazado' && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200 shadow-sm">H.E. Rechazadas</span>}
+                        
+                        {worker.justificationType === 'OLVIDO' && <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 shadow-sm">Cierre 17:00</span>}
+                        {worker.justificationType === 'TARDANZA_INJUSTIFICADA' && <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded border border-red-200 shadow-sm">Tardanza Injustif.</span>}
+                        {worker.justificationType === 'TARDANZA_JUSTIFICADA' && worker.approvalStatus === 'Aprobado' && <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 shadow-sm">Tardanza Justif.</span>}
+                        
+                        {worker.approvalStatus === 'Rechazado' && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-200 shadow-sm">Ingreso Rechazado</span>}
                     </div>
                   </td>
 
@@ -552,7 +640,75 @@ const FieldAttendancePage = () => {
         </div>
       </div>
 
-      {/* MODAL DE FOTOS */}
+      {/* --- MODAL DE BANDEJA DE PERMISOS (CASO 6) --- */}
+      <AnimatePresence>
+        {showAbsenceModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setShowAbsenceModal(false)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-purple-50 rounded-t-[2rem]">
+                 <div className="flex items-center gap-3">
+                     <div className="p-2 bg-purple-200 text-purple-700 rounded-xl"><FileText size={24}/></div>
+                     <div>
+                         <h3 className="text-xl font-bold text-purple-900">Bandeja de Permisos y Justificaciones</h3>
+                         <p className="text-xs font-medium text-purple-700">Requieren tu aprobación inicial antes de pasar a RRHH.</p>
+                     </div>
+                 </div>
+                 <button onClick={() => setShowAbsenceModal(false)} className="p-2 bg-white text-slate-400 hover:text-slate-700 rounded-full shadow-sm"><X size={24}/></button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
+                  {pendingAbsences.map(absence => (
+                      <div key={absence.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row gap-6">
+                          
+                          <div className="flex-1 space-y-4">
+                              <div className="flex items-start justify-between">
+                                  <div>
+                                      <h4 className="font-bold text-slate-800 text-lg">{absence.workers?.full_name}</h4>
+                                      <p className="text-xs text-slate-500 font-mono mt-0.5">DNI: {absence.workers?.document_number} | {absence.workers?.category}</p>
+                                  </div>
+                                  <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-lg text-xs font-bold border border-purple-200">{absence.absence_type || absence.type}</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                  <div>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase">Desde</p>
+                                      <p className="font-bold text-slate-700">{absence.start_date}</p>
+                                  </div>
+                                  <div>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase">Hasta</p>
+                                      <p className="font-bold text-slate-700">{absence.end_date}</p>
+                                  </div>
+                                  <div className="col-span-2">
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Motivo / Descripción</p>
+                                      <p className="text-sm text-slate-600 italic bg-white p-2 rounded border border-slate-200">"{absence.reason}"</p>
+                                  </div>
+                              </div>
+                          </div>
+
+                          <div className="w-full md:w-64 flex flex-col gap-3">
+                              {absence.evidence_photo ? (
+                                  <div className="flex-1 min-h-[120px] bg-slate-100 rounded-xl overflow-hidden relative group border border-slate-200">
+                                      <img src={absence.evidence_photo} className="w-full h-full object-cover"/>
+                                      <a href={absence.evidence_photo} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white font-bold text-sm gap-2"><ExternalLink size={16}/> Ver Documento</a>
+                                  </div>
+                              ) : (
+                                  <div className="flex-1 min-h-[120px] bg-slate-50 flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 text-xs text-slate-400">Sin Evidencia</div>
+                              )}
+                              
+                              <div className="flex gap-2">
+                                  <button onClick={() => handleAbsenceApproval(absence.id, false)} className="flex-1 py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"><XCircle size={14}/> Rechazar</button>
+                                  <button onClick={() => handleAbsenceApproval(absence.id, true)} className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-md shadow-emerald-500/20 transition-colors flex items-center justify-center gap-1"><CheckCircle size={14}/> Aprobar</button>
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL DE FOTOS (Diarias) */}
       <AnimatePresence>
         {photoModal.isOpen && photoModal.worker && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setPhotoModal({ isOpen: false, worker: null })}>
@@ -583,7 +739,6 @@ const FieldAttendancePage = () => {
                       ) : <div className="h-64 bg-slate-50 flex items-center justify-center text-xs text-slate-400 border-2 border-dashed rounded-lg">Sin foto</div>}
                   </div>
 
-                  {/* BLOQUE DE EVIDENCIA EXTRA SI EXISTE */}
                   {photoModal.worker.evidencePhoto && (
                       <div className="bg-white p-3 rounded-xl shadow-sm md:col-span-2 mt-2">
                           <p className="font-bold text-xs mb-2 text-amber-700 bg-amber-50 inline-block px-2 py-1 rounded">EVIDENCIA DE JUSTIFICACIÓN / HORAS EXTRAS</p>
@@ -599,16 +754,18 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* MODAL DE VALIDACIÓN DE SOLICITUDES */}
+      {/* MODAL DE VALIDACIÓN DE SOLICITUDES DIARIAS */}
       <AnimatePresence>
         {validationModal.isOpen && validationModal.worker && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setValidationModal({ isOpen: false, worker: null })}>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setValidationModal({ isOpen: false, worker: null, evaluationType: null })}>
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y:0 }} className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-               <div className="p-6 text-center border-b border-slate-100 relative bg-purple-50">
-                  <div className="w-16 h-16 bg-white text-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm"><AlertTriangle size={32} /></div>
-                  <h3 className="text-2xl font-bold text-purple-900">Evaluar Solicitud de {validationModal.worker.checkOutTime ? 'Salida' : 'Ingreso'}</h3>
-                  <p className="text-purple-700 font-medium text-sm mt-1">{validationModal.worker.full_name}</p>
-                  <button onClick={() => setValidationModal({isOpen:false, worker:null})} className="absolute top-4 right-4 p-2 text-purple-400 hover:bg-white rounded-full"><X size={20}/></button>
+               <div className="p-6 text-center border-b border-slate-100 relative bg-amber-50">
+                  <div className="w-16 h-16 bg-white text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm"><AlertTriangle size={32} /></div>
+                  <h3 className="text-2xl font-bold text-amber-900">
+                     Evaluar Solicitud de {validationModal.evaluationType === 'ENTRY' ? 'Ingreso' : 'Salida'}
+                  </h3>
+                  <p className="text-amber-700 font-medium text-sm mt-1">{validationModal.worker.full_name}</p>
+                  <button onClick={() => setValidationModal({isOpen:false, worker:null, evaluationType: null})} className="absolute top-4 right-4 p-2 text-amber-400 hover:bg-white rounded-full"><X size={20}/></button>
                </div>
                
                <div className="p-6 bg-slate-50 space-y-4 max-h-[50vh] overflow-y-auto">
@@ -620,8 +777,8 @@ const FieldAttendancePage = () => {
                   <div className="grid grid-cols-2 gap-4">
                       <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
                           <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo de Alerta</p>
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${validationModal.worker.justificationType === 'HORA_EXTRA' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Horas Extras' : 
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${validationModal.evaluationType === 'EXIT' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {validationModal.evaluationType === 'EXIT' ? 'Horas Extras / Salida' : 
                               (validationModal.worker.justificationType === 'UBICACION' ? 'Ubicación Incorrecta' : 
                               (validationModal.worker.justificationType === 'TARDANZA_JUSTIFICADA' ? 'Tardanza Justificada' : 'Tardanza / Fuera de Hora'))}
                           </span>
@@ -629,11 +786,12 @@ const FieldAttendancePage = () => {
                       <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
                           <Clock size={20} className="text-slate-400 mb-1"/>
                           <p className="text-[10px] font-bold text-slate-400 uppercase">Hora Marcada</p>
-                          <p className="text-lg font-bold text-slate-800">{getTimeInputValue(validationModal.worker.checkOutTime || validationModal.worker.checkInTime) || '--:--'}</p>
+                          <p className="text-lg font-bold text-slate-800">
+                             {getTimeInputValue(validationModal.evaluationType === 'ENTRY' ? validationModal.worker.checkInTime : validationModal.worker.checkOutTime) || '--:--'}
+                          </p>
                       </div>
                   </div>
 
-                  {/* BLOQUE PARA MOSTRAR LA EVIDENCIA AL RESIDENTE SI FUE ADJUNTA */}
                   {validationModal.worker.evidencePhoto && (
                       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mt-4">
                           <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Evidencia Adjunta</p>
@@ -647,13 +805,13 @@ const FieldAttendancePage = () => {
 
                <div className="p-6 flex gap-4 bg-white border-t border-slate-100">
                   <button 
-                     onClick={() => processJustification(validationModal.worker.id, false)}
+                     onClick={() => processJustification(validationModal.worker.id, false, validationModal.evaluationType)}
                      className="flex-1 py-3.5 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-100 transition-colors flex justify-center items-center gap-2"
                   >
-                     <UserX size={18}/> {validationModal.worker.justificationType === 'HORA_EXTRA' ? 'Rechazar H.E.' : 'Rechazar Solicitud'}
+                     <UserX size={18}/> {validationModal.evaluationType === 'EXIT' ? 'Rechazar Salida / H.E.' : 'Rechazar Ingreso'}
                   </button>
                   <button 
-                     onClick={() => processJustification(validationModal.worker.id, true)}
+                     onClick={() => processJustification(validationModal.worker.id, true, validationModal.evaluationType)}
                      className="flex-1 py-3.5 bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/30 hover:bg-emerald-600 transition-colors flex justify-center items-center gap-2"
                   >
                      <UserCheck size={18}/> Aprobar Solicitud

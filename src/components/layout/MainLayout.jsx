@@ -7,7 +7,7 @@ import {
   FileSpreadsheet, Menu, X, 
   DollarSign, ClipboardCheck,
   Truck, Wallet, ShieldCheck, Landmark,
-  CircleUser, BadgeCheck
+  CircleUser, BadgeCheck, Calendar // <-- ICONO DE CALENDARIO AGREGADO
 } from 'lucide-react';
 import logoFull from '../../assets/images/logo-lk-full.png';
 
@@ -48,6 +48,7 @@ const navItems = [
       { path: '/users', label: 'Personal y Contratos' },
       { path: '/planillas', label: 'Planillas y Pagos', icon: DollarSign },
       { path: '/documentacion', label: 'Legajos Digitales', icon: FolderOpen },
+      { path: '/ausencias', label: 'Permisos y Vacaciones', icon: Calendar }, // <-- NUEVO LINK A LA PÁGINA
       { path: '/reportes', icon: FileText, label: 'Reportes y KPI' } 
     ]
   },
@@ -255,6 +256,7 @@ const MainLayout = () => {
     if (location.pathname.includes('/dashboard')) return 'Dashboard General';
     if (location.pathname.includes('/users')) return 'Gestión de RR.HH.';
     if (location.pathname.includes('/finanzas')) return 'Contabilidad';
+    if (location.pathname.includes('/ausencias')) return 'Permisos y Vacaciones';
     return 'Constructora L&K';
   };
 

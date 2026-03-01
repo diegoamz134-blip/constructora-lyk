@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Clock, ChevronRight, MessageSquare, 
-  MapPin, Loader2, HardHat, LogIn, LogOut, CheckCircle
+  MapPin, Loader2, HardHat, LogIn, LogOut, CheckCircle, FileText
 } from 'lucide-react';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { supabase } from '../../services/supabase'; 
@@ -267,9 +267,30 @@ const WorkerDashboard = () => {
 
         <div className="grid grid-cols-2 gap-4">
           
-          {/* AQUÍ LLAMAMOS A NUESTRO BOTÓN MÁGICO */}
+          {/* BOTÓN MÁGICO DE ASISTENCIA (Ocupa las 2 columnas) */}
           {renderAttendanceButton()}
 
+          {/* NUEVO BOTÓN DE ACCESO RÁPIDO PARA PERMISOS (Ocupa las 2 columnas) */}
+          <motion.div 
+             variants={itemVariants}
+             whileHover={{ scale: 1.02 }}
+             whileTap={{ scale: 0.97 }}
+             onClick={() => goTo('/worker/asistencia')} 
+             className="col-span-2 bg-purple-50 p-5 rounded-[1.5rem] border border-purple-100 shadow-sm cursor-pointer flex justify-between items-center group hover:bg-purple-100 transition-colors"
+          >
+             <div className="flex items-center gap-4">
+               <div className="p-3 bg-white text-purple-600 rounded-2xl shadow-sm group-hover:scale-110 transition-transform">
+                   <FileText size={24} />
+               </div>
+               <div>
+                 <h4 className="font-bold text-slate-800 text-lg leading-tight">Permisos y Faltas</h4>
+                 <p className="text-slate-500 text-xs font-medium mt-0.5">Justificar o pedir días libres</p>
+               </div>
+             </div>
+             <ChevronRight size={22} className="text-purple-300 group-hover:text-purple-600 transition-colors"/>
+          </motion.div>
+
+          {/* BOTÓN BITÁCORA */}
           {canAccessLog && (
             <motion.div 
               variants={itemVariants}
@@ -286,6 +307,7 @@ const WorkerDashboard = () => {
             </motion.div>
           )}
 
+          {/* BOTÓN MI OBRA */}
           <motion.div 
             variants={itemVariants}
             whileHover={{ y: -5 }}
