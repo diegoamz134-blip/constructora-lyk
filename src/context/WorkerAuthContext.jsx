@@ -8,15 +8,25 @@ export const WorkerAuthProvider = ({ children }) => {
   const [worker, setWorker] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const SESSION_TIMEOUT = 8 * 60 * 60 * 1000; // 8 horas en milisegundos
+
   useEffect(() => {
-    // 1. Cargar sesión al iniciar
-    const storedSession = localStorage.getItem('lyk_worker_session');
+    // 1. Cargar sesión al iniciar (CAMBIO a sessionStorage)
+    const storedSession = sessionStorage.getItem('lyk_worker_session');
     if (storedSession) {
       const parsed = JSON.parse(storedSession);
       
+      // NUEVO: Verificamos si expiró por tiempo (ej. pestaña abierta desde ayer)
+      const now = new Date().getTime();
+      if (parsed.timestamp && (now - parsed.timestamp > SESSION_TIMEOUT)) {
+          sessionStorage.removeItem('lyk_worker_session');
+          setLoading(false);
+          return;
+      }
+
       // Validación extra al recargar: si cambió a inactivo, lo sacamos
       if (parsed.status && parsed.status !== 'Activo') {
-         localStorage.removeItem('lyk_worker_session');
+         sessionStorage.removeItem('lyk_worker_session');
       } else {
          setWorker(parsed);
       }
@@ -38,22 +48,21 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Obrero no encontrado o DNI incorrecto.' };
       }
 
-      // --- NUEVA VALIDACIÓN DE ESTADO (Para Modal de Acceso Denegado) ---
+      // --- VALIDACIÓN DE ESTADO ---
       if (workerData.status !== 'Activo') {
           return { 
               success: false, 
-              isStatusError: true, // Bandera para el Login Page
+              isStatusError: true,
               status: workerData.status,
-              user: workerData, // Datos para el modal
+              user: workerData,
               error: `Cuenta en estado: ${workerData.status}`
           };
       }
-      // ------------------------------------------------------------------
 
       // 2. Verificar contraseña
       let isValid = false;
       if (password === workerData.document_number) {
-          isValid = true; // Primer ingreso (DNI = Password)
+          isValid = true;
       } else if (workerData.password) {
           isValid = await bcrypt.compare(password, workerData.password);
       }
@@ -62,10 +71,17 @@ export const WorkerAuthProvider = ({ children }) => {
         return { success: false, error: 'Contraseña incorrecta.' };
       }
 
-      // 3. Guardar sesión
-      const sessionData = { ...workerData, role: 'worker' };
+      // 3. Guardar sesión con TIMESTAMP
+      const sessionData = { 
+          ...workerData, 
+          role: 'worker',
+          timestamp: new Date().getTime() 
+      };
+      
       setWorker(sessionData);
-      localStorage.setItem('lyk_worker_session', JSON.stringify(sessionData));
+      
+      // CAMBIO: Guardamos en sessionStorage
+      sessionStorage.setItem('lyk_worker_session', JSON.stringify(sessionData));
 
       return { success: true, data: sessionData };
 
@@ -89,15 +105,21 @@ export const WorkerAuthProvider = ({ children }) => {
       if (error) throw error;
       
       if (data) {
-        // Si le cambiaron el estado mientras estaba logueado, lo sacamos
         if (data.status !== 'Activo') {
             logoutWorker();
             return;
         }
 
-        const updatedSession = { ...data, role: 'worker' };
+        // Mantenemos el timestamp original para que no se reinicie el contador de 8 horas infinito
+        const currentSession = JSON.parse(sessionStorage.getItem('lyk_worker_session') || '{}');
+        const updatedSession = { 
+            ...data, 
+            role: 'worker',
+            timestamp: currentSession.timestamp || new Date().getTime()
+        };
+        
         setWorker(updatedSession);
-        localStorage.setItem('lyk_worker_session', JSON.stringify(updatedSession));
+        sessionStorage.setItem('lyk_worker_session', JSON.stringify(updatedSession));
       }
     } catch (error) {
       console.error("Error refrescando obrero:", error);
@@ -107,7 +129,7 @@ export const WorkerAuthProvider = ({ children }) => {
   // --- LOGOUT ---
   const logoutWorker = () => {
     setWorker(null);
-    localStorage.removeItem('lyk_worker_session');
+    sessionStorage.removeItem('lyk_worker_session'); // CAMBIO
   };
 
   return (

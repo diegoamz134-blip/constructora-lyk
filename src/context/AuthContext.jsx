@@ -15,19 +15,31 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const SESSION_TIMEOUT = 8 * 60 * 60 * 1000; // 8 horas en milisegundos
+
   useEffect(() => {
     // LOGIN AUTÓNOMO: Recuperar sesión al recargar
     const initSession = () => {
       try {
-        const storedSession = localStorage.getItem('lyk_session');
+        // CAMBIO: Usamos sessionStorage en lugar de localStorage
+        const storedSession = sessionStorage.getItem('lyk_session');
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
+          
+          // NUEVO: Verificamos si la sesión ya expiró por tiempo (8 horas)
+          const now = new Date().getTime();
+          if (parsedSession.timestamp && (now - parsedSession.timestamp > SESSION_TIMEOUT)) {
+              console.warn("Sesión expirada por inactividad.");
+              sessionStorage.removeItem('lyk_session');
+              setLoading(false);
+              return;
+          }
+
           if (parsedSession.user && parsedSession.role) {
-            
             // Si al recargar detectamos que ya no está activo, cerramos la sesión
             if (parsedSession.user.status && parsedSession.user.status !== 'Activo') {
                console.warn("Sesión terminada: Usuario no activo.");
-               localStorage.removeItem('lyk_session');
+               sessionStorage.removeItem('lyk_session');
                setLoading(false);
                return;
             }
@@ -39,7 +51,7 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (error) {
         console.error("Error recuperando sesión:", error);
-        localStorage.removeItem('lyk_session');
+        sessionStorage.removeItem('lyk_session');
       } finally {
         setLoading(false);
       }
@@ -60,7 +72,7 @@ export const AuthProvider = ({ children }) => {
 
     if (error) throw new Error('Error de conexión al buscar usuario.');
 
-    // 2. Si no es empleado, buscamos en 'workers' (Fallback por si un obrero intenta entrar aquí)
+    // 2. Si no es empleado, buscamos en 'workers'
     let isWorker = false;
     if (!emp) {
         const { data: wor } = await supabase
@@ -77,8 +89,7 @@ export const AuthProvider = ({ children }) => {
 
     if (!emp) throw new Error('Usuario no encontrado.');
 
-    // --- NUEVA VALIDACIÓN DE ESTADO (Para Modal de Acceso Denegado) ---
-    // Si el estado NO es Activo, lanzamos un objeto especial en lugar de un error simple
+    // --- VALIDACIÓN DE ESTADO ---
     if (emp.status !== 'Activo') {
         throw { 
             isStatusError: true, 
@@ -86,29 +97,33 @@ export const AuthProvider = ({ children }) => {
             user: emp 
         };
     }
-    // ------------------------------------------------------------------
 
     // 3. Verificamos contraseña
     if (!emp.password) {
-        // Backdoor temporal: DNI como contraseña si no tiene una establecida
         if (password !== emp.document_number) {
            throw new Error('Contraseña no establecida. Intente con su DNI.');
         }
     } else {
-        // Comparación segura con bcrypt
         const isValid = await bcrypt.compare(password, emp.password);
         if (!isValid) throw new Error('Contraseña incorrecta.');
     }
 
-    // 4. DEFINIR ROL Y GUARDAR
+    // 4. DEFINIR ROL Y GUARDAR CON TIMESTAMP
     const userRole = isWorker ? 'worker' : (emp.role || 'staff');
-    
     const userWithRole = { ...emp, role: userRole };
-    const sessionData = { user: userWithRole, role: userRole };
+    
+    // Agregamos la hora exacta del login
+    const sessionData = { 
+        user: userWithRole, 
+        role: userRole, 
+        timestamp: new Date().getTime() 
+    };
 
     setUser(userWithRole);
     setRole(userRole);
-    localStorage.setItem('lyk_session', JSON.stringify(sessionData));
+    
+    // CAMBIO: Guardamos en sessionStorage
+    sessionStorage.setItem('lyk_session', JSON.stringify(sessionData));
 
     return { user: userWithRole, role: userRole };
   };
@@ -116,7 +131,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setUser(null);
     setRole(null);
-    localStorage.removeItem('lyk_session');
+    sessionStorage.removeItem('lyk_session'); // CAMBIO
     await supabase.auth.signOut().catch(() => {}); 
   };
 
