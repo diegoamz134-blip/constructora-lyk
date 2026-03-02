@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, CalendarDays, FileText, Loader2, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, FileText, Loader2, X, Download } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { startOfWeek, endOfWeek, subWeeks, format, addDays, getISOWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
 import logoFull from '../../assets/images/logo-lk-full.png';
+
+// Importaciones para generar el PDF Real en Vite
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const WorkerMyAttendances = () => {
   const { worker } = useWorkerAuth();
@@ -69,7 +73,6 @@ const WorkerMyAttendances = () => {
     }
   };
 
-  // Helper para extraer horas HH:mm:ss de fechas ISO exacto como el PDF
   const extractTime = (isoString) => {
       if (!isoString) return '--:--:--';
       const d = new Date(isoString);
@@ -78,12 +81,12 @@ const WorkerMyAttendances = () => {
 
   // --- LÓGICA PRINCIPAL: GENERAR TABLA Y CALCULAR TOTALES ---
   const generateReportData = () => {
-      if (!selectedWeek) return { rows: [], stats: {} };
+      if (!selectedWeek) return { rows: [], rawData: [], stats: {} };
       
       const rows = [];
+      const rawData = []; // Guardará los datos puros para exportar al PDF
       let currentDate = selectedWeek.startObj;
 
-      // Variables Acumuladoras para el Resumen del Cliente
       let stats = {
           totalHN: 0, totalHE60: 0, totalHE100: 0,
           diasTrabajados: 0, inasistencias: 0,
@@ -111,7 +114,6 @@ const WorkerMyAttendances = () => {
 
           if (record) {
               if (record.status === 'Falta') {
-                  // Lógica de Faltas
                   if (record.justification_type === 'Descanso Médico' || record.approval_status === 'Aprobado') {
                       obsArr.push("MARCA INGRESO COMO FALTA JUSTIFICADA");
                   } else {
@@ -120,13 +122,11 @@ const WorkerMyAttendances = () => {
                   }
                   if (!isSunday) { jornadaIn = '07:30:00'; jornadaOut = '17:00:00'; }
               } else {
-                  // Asistió
                   stats.diasTrabajados++;
                   checkIn = extractTime(record.check_in_time);
                   checkOut = extractTime(record.check_out_time);
                   obra = record.project_name || obra;
                   
-                  // GPS Logic
                   if (record.is_location_valid) {
                       stats.asistenciasDentro++;
                   } else {
@@ -138,7 +138,6 @@ const WorkerMyAttendances = () => {
                       }
                   }
 
-                  // Tardanza Logic
                   if (record.status === 'Tardanza' || record.justification_type === 'TARDANZA_INJUSTIFICADA') {
                       stats.tardanzasNoJustificadas++;
                       obsArr.push("TARDANZA NO JUSTIFICADA");
@@ -147,27 +146,24 @@ const WorkerMyAttendances = () => {
                       obsArr.push("TARDANZA JUSTIFICADA");
                   }
 
-                  // Cálculo de Horas
                   if (record.check_in_time && record.check_out_time) {
                       const dIn = new Date(record.check_in_time);
                       const dOut = new Date(record.check_out_time);
                       let diffHours = (dOut - dIn) / (1000 * 60 * 60);
                       
-                      let workedHours = diffHours > 1 ? diffHours - 1 : diffHours; // Resta 1 hora de almuerzo
+                      let workedHours = diffHours > 1 ? diffHours - 1 : diffHours; 
                       
                       if (isSunday) {
-                          // Si trabaja domingo, todo es 100%
                           he100 = parseFloat(workedHours.toFixed(2));
                           obsArr.push("TRABAJO DOMINICAL / FERIADO AL 100%");
                       } else {
-                          // Lunes a Sábado: Tope de 8.5 horas normales
                           if (workedHours > 8.5) {
                               hn = 8.5;
                               if (record.overtime_status === 'Aprobado') {
                                   he60 = parseFloat((workedHours - 8.5).toFixed(2));
-                                  obsArr.push("MARCÓ DESPUÉS DEL HORARIO ESTABLECIDO Y JUSTIFICÓ HORAS EXTRAS");
+                                  obsArr.push("MARCÓ DESPUÉS DEL HORARIO Y JUSTIFICÓ HORAS EXTRAS");
                               } else {
-                                  obsArr.push("MARCÓ DESPUÉS DEL HORARIO ESTABLECIDO PERO NO JUSTIFICÓ HORAS EXTRAS");
+                                  obsArr.push("MARCÓ DESPUÉS DEL HORARIO PERO NO JUSTIFICÓ HORAS EXTRAS");
                               }
                           } else {
                               hn = parseFloat(workedHours.toFixed(2));
@@ -180,18 +176,30 @@ const WorkerMyAttendances = () => {
               }
           }
 
-          // Sumamos a los totales
           stats.totalHN += hn;
           stats.totalHE60 += he60;
           stats.totalHE100 += he100;
 
-          // Observación final unida
           let finalObs = obsArr.length > 0 ? obsArr.join(' | ') : '';
-          // Si el admin escribió algo manual, lo agregamos al final
           if (record && record.observation && !finalObs.includes(record.observation)) {
               finalObs += finalObs ? ` | ${record.observation}` : record.observation;
           }
 
+          // Guardar datos puros para el jsPDF
+          rawData.push({
+              fecha: displayDate,
+              jornadaIn,
+              jornadaOut,
+              checkIn: checkIn !== '--:--:--' ? checkIn : '',
+              checkOut: checkOut !== '--:--:--' ? checkOut : '',
+              hn: hn > 0 ? hn.toString() : '',
+              he60: he60 > 0 ? he60.toString() : '',
+              he100: he100 > 0 ? he100.toString() : '',
+              obs: finalObs,
+              obra: obra
+          });
+
+          // Renderizar las filas HTML
           rows.push(
               <tr key={i} className="border-b border-gray-200 hover:bg-blue-50/30 transition-colors text-[10px] sm:text-[11px] group">
                   <td className="p-2 border-r border-gray-200 capitalize font-medium text-slate-800 break-words">{displayDate}</td>
@@ -210,10 +218,206 @@ const WorkerMyAttendances = () => {
           currentDate = addDays(currentDate, 1);
       }
 
-      return { rows, stats };
+      return { rows, rawData, stats };
   };
 
   const reportData = generateReportData();
+
+  // --- FUNCIÓN MÁGICA: DESCARGAR PDF IDÉNTICO A LA PANTALLA ---
+  const handleDownloadPDF = () => {
+    if (!selectedWeek || reportData.rawData.length === 0) return;
+
+    // Crear PDF en formato Horizontal (Landscape) tamaño A4
+    const doc = new jsPDF('l', 'pt', 'a4');
+
+    // ENCABEZADOS DE EMPRESA
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 51, 102); 
+    doc.text("CONSTRUCTORA E INVERSIONES L&K S.A.C.", 40, 50);
+    
+    doc.setFontSize(14);
+    doc.text("REPORTE OFICIAL DE ASISTENCIA", 40, 70);
+
+    // LÍNEA DECORATIVA AMARILLA
+    doc.setFillColor(240, 196, 25);
+    doc.roundedRect(40, 75, 80, 3, 1, 1, 'F');
+
+    // DATOS DEL TRABAJADOR
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    
+    doc.text(`Nombre: ${worker?.full_name}`, 40, 100);
+    doc.text(`DNI: ${worker?.document_number}`, 40, 115);
+    doc.text(`Obra asignada: ${worker?.project_assigned || 'S/N'}`, 40, 130);
+
+    // DATOS DE LA SEMANA (A la derecha con diseño)
+    doc.setFillColor(240, 244, 248); // bg-slate-50
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(620, 85, 180, 50, 4, 4, 'FD');
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 51, 102);
+    doc.text(`SEMANA ${selectedWeek.weekNumber}`, 670, 100);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Del: ${format(selectedWeek.startObj, 'dd/MM/yyyy')}  Al: ${format(selectedWeek.endObj, 'dd/MM/yyyy')}`, 630, 120);
+
+    // PREPARAR DATOS DE LA TABLA
+    const tableBody = reportData.rawData.map(row => [
+        row.fecha,
+        row.jornadaIn, row.jornadaOut,
+        row.checkIn, row.checkOut,
+        row.hn, row.he60, row.he100,
+        row.obs, row.obra
+    ]);
+
+    // INYECTAR TABLA COLOREADA
+    autoTable(doc, {
+        startY: 150,
+        head: [
+            [
+                { content: 'Fecha', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+                { content: 'Jornada', colSpan: 2, styles: { halign: 'center', fillColor: [30, 64, 175] } },
+                { content: 'Marcaciones', colSpan: 2, styles: { halign: 'center', fillColor: [29, 78, 216] } },
+                { content: 'H.N.', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+                { content: 'H.E. 60%', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+                { content: 'H.E. 100%', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+                { content: 'Observaciones', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+                { content: 'Obra', rowSpan: 2, styles: { halign: 'center', valign: 'middle' } },
+            ],
+            [
+                { content: 'Ingreso', styles: { halign: 'center', fillColor: [30, 64, 175] } },
+                { content: 'Salida', styles: { halign: 'center', fillColor: [30, 64, 175] } },
+                { content: 'Ingreso', styles: { halign: 'center', fillColor: [29, 78, 216] } },
+                { content: 'Salida', styles: { halign: 'center', fillColor: [29, 78, 216] } },
+            ]
+        ],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [0, 51, 102], textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold', lineColor: [0, 34, 68], lineWidth: 0.1 },
+        bodyStyles: { fontSize: 7, textColor: [51, 65, 85], lineColor: [226, 232, 240] },
+        columnStyles: {
+            0: { fontStyle: 'bold', textColor: [15, 23, 42] },
+            1: { halign: 'center', textColor: [100, 116, 139] },
+            2: { halign: 'center', textColor: [100, 116, 139] },
+            3: { halign: 'center', fontStyle: 'bold', textColor: [0, 51, 102] },
+            4: { halign: 'center', fontStyle: 'bold', textColor: [0, 51, 102] },
+            // COLORES PASTEL IDÉNTICOS AL HTML PARA LAS HORAS
+            5: { halign: 'center', fontStyle: 'bold', textColor: [4, 120, 87], fillColor: [236, 253, 245] },   // Emerald
+            6: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9], fillColor: [255, 251, 235] },   // Amber
+            7: { halign: 'center', fontStyle: 'bold', textColor: [126, 34, 206], fillColor: [250, 245, 255] }, // Purple
+            8: { cellWidth: 160 },
+            9: { halign: 'center', cellWidth: 60 }
+        }
+    });
+
+    // --- RESUMEN INFERIOR DIBUJADO EXACTAMENTE COMO LA WEB ---
+    let finalY = doc.lastAutoTable.finalY + 20;
+
+    // Caja de fondo Gris Claro
+    doc.setFillColor(248, 250, 252); // bg-slate-50
+    doc.setDrawColor(226, 232, 240); // border-slate-200
+    doc.roundedRect(40, finalY, 760, 120, 8, 8, 'FD');
+
+    // Título del Resumen
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 51, 102);
+    doc.text("RESUMEN DE LA SEMANA", 55, finalY + 20);
+
+    // Línea punteada divisora
+    doc.setDrawColor(203, 213, 225); // slate-300
+    doc.setLineDashPattern([2, 2], 0);
+    doc.line(55, finalY + 28, 780, finalY + 28);
+    doc.setLineDashPattern([], 0); // resetear línea
+
+    doc.setFontSize(9);
+    
+    // --- COLUMNA 1: HORAS ---
+    let col1X = 55;
+    let r1 = finalY + 45; let r2 = finalY + 65; let r3 = finalY + 85;
+
+    doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'bold');
+    doc.text("JORNAL NORMAL (H.N.):", col1X, r1);
+    doc.setFillColor(209, 250, 229); doc.roundedRect(col1X + 130, r1 - 10, 45, 14, 3, 3, 'F');
+    doc.setTextColor(4, 120, 87); doc.text(`${reportData.stats.totalHN} H`, col1X + 135, r1);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("HORAS EXTRAS AL 60%:", col1X, r2);
+    doc.setFillColor(254, 243, 199); doc.roundedRect(col1X + 130, r2 - 10, 45, 14, 3, 3, 'F');
+    doc.setTextColor(180, 83, 9); doc.text(`${reportData.stats.totalHE60} H`, col1X + 135, r2);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("HORAS EXTRAS AL 100%:", col1X, r3);
+    doc.setFillColor(243, 232, 255); doc.roundedRect(col1X + 130, r3 - 10, 45, 14, 3, 3, 'F');
+    doc.setTextColor(126, 34, 206); doc.text(`${reportData.stats.totalHE100} H`, col1X + 135, r3);
+
+    // Caja Fuerte Total
+    doc.setFillColor(0, 51, 102); doc.roundedRect(col1X, r3 + 10, 175, 18, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.text("TOTAL REALIZADO:", col1X + 5, r3 + 22);
+    doc.text(`${(reportData.stats.totalHN + reportData.stats.totalHE60 + reportData.stats.totalHE100).toFixed(2)} H`, col1X + 130, r3 + 22);
+
+    // --- COLUMNA 2: DÍAS Y FALTAS ---
+    let col2X = 320;
+    doc.setTextColor(71, 85, 105);
+    doc.text("DÍAS TRABAJADOS:", col2X, r1);
+    doc.setTextColor(29, 78, 216); doc.text(`${reportData.stats.diasTrabajados} DÍA(S)`, col2X + 140, r1);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("INASISTENCIAS:", col2X, r2);
+    doc.setTextColor(220, 38, 38); doc.text(`${reportData.stats.inasistencias} DÍA(S)`, col2X + 140, r2);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("TARDANZAS JUSTIFICADAS:", col2X, r3);
+    doc.setTextColor(15, 23, 42); doc.text(`${reportData.stats.tardanzasJustificadas}`, col2X + 160, r3);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("TARDANZAS NO JUSTIF.:", col2X, r3 + 20);
+    doc.setTextColor(220, 38, 38); doc.text(`${reportData.stats.tardanzasNoJustificadas}`, col2X + 160, r3 + 20);
+
+    // --- COLUMNA 3: GPS ---
+    let col3X = 550;
+    doc.setTextColor(71, 85, 105);
+    doc.text("ASISTENCIAS DENTRO (GPS):", col3X, r1);
+    doc.setTextColor(5, 150, 105); doc.text(`${reportData.stats.asistenciasDentro}`, col3X + 165, r1);
+
+    doc.setTextColor(71, 85, 105);
+    doc.text("ASISTENCIAS FUERA (GPS):", col3X, r2);
+    doc.setTextColor(239, 68, 68); doc.text(`${reportData.stats.asistenciasFuera}`, col3X + 165, r2);
+
+    // --- ZONA DE FIRMAS ---
+    finalY += 180;
+    
+    doc.setDrawColor(100, 100, 100);
+    
+    // Firma Obrero
+    doc.line(150, finalY, 320, finalY);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text("FIRMA DEL TRABAJADOR", 170, finalY + 15);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`DNI: ${worker?.document_number}`, 200, finalY + 25);
+
+    // Firma RRHH
+    doc.line(520, finalY, 690, finalY);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text("V° B° RECURSOS HUMANOS", 535, finalY + 15);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Constructora L&K", 565, finalY + 25);
+
+    // Descargar Documento
+    doc.save(`Reporte_Asistencia_L&K_Semana${selectedWeek.weekNumber}.pdf`);
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans relative overflow-hidden">
@@ -260,7 +464,7 @@ const WorkerMyAttendances = () => {
          ))}
       </div>
 
-      {/* MODAL DEL REPORTE TIPO PDF (CON SCROLL CORREGIDO) */}
+      {/* MODAL DEL REPORTE TIPO PDF */}
       <AnimatePresence>
           {selectedWeek && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/90 backdrop-blur-sm">
@@ -270,15 +474,35 @@ const WorkerMyAttendances = () => {
                      exit={{ opacity: 0, y: "100%" }}
                      className="bg-slate-200 sm:rounded-2xl w-full h-full sm:h-auto sm:max-h-[95vh] max-w-6xl flex flex-col shadow-2xl overflow-hidden"
                   >
-                     {/* CABECERA DEL MODAL (Controles fijos arriba) */}
+                     {/* CABECERA DEL MODAL */}
                      <div className="flex justify-between items-center p-4 border-b border-slate-300 bg-white shadow-sm z-10 shrink-0">
                          <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm sm:text-base">
                              <FileText size={20} className="text-[#003366]"/> Documento Oficial de Asistencia
                          </h3>
-                         <button onClick={() => setSelectedWeek(null)} className="p-2 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors active:scale-90"><X size={20}/></button>
+                         <div className="flex items-center gap-3">
+                             <button 
+                                 onClick={handleDownloadPDF}
+                                 disabled={loading}
+                                 className="hidden sm:flex items-center gap-2 bg-[#003366] hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md transition-all active:scale-95 disabled:opacity-50"
+                             >
+                                 <Download size={18} />
+                                 Descargar PDF
+                             </button>
+                             <button 
+                                 onClick={handleDownloadPDF}
+                                 disabled={loading}
+                                 className="sm:hidden flex items-center justify-center bg-[#003366] text-white p-2.5 rounded-xl shadow-md active:scale-95 disabled:opacity-50"
+                             >
+                                 <Download size={20} />
+                             </button>
+
+                             <div className="w-px h-8 bg-slate-200 mx-1"></div>
+                             
+                             <button onClick={() => setSelectedWeek(null)} className="p-2 bg-slate-100 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors active:scale-90"><X size={20}/></button>
+                         </div>
                      </div>
 
-                     {/* CONTENEDOR DESLIZABLE (SCROLL VERTICAL HABILITADO) */}
+                     {/* CONTENEDOR DESLIZABLE */}
                      <div className="flex-1 overflow-y-auto p-2 sm:p-6 pb-20">
                          {loading ? (
                              <div className="h-full flex flex-col items-center justify-center text-slate-500 mt-20">
@@ -286,7 +510,6 @@ const WorkerMyAttendances = () => {
                                  <p className="font-bold">Calculando horas y totales...</p>
                              </div>
                          ) : (
-                             // DISEÑO DEL "PAPEL" BLANCO
                              <div className="bg-white w-full max-w-5xl mx-auto shadow-md rounded-xl border-t-[12px] border-[#003366] p-4 sm:p-10 text-black font-sans relative">
                                  
                                  {/* LOGO EMPRESA */}
@@ -319,7 +542,7 @@ const WorkerMyAttendances = () => {
                                      </div>
                                  </div>
 
-                                 {/* TABLA PRINCIPAL (CON SCROLL HORIZONTAL PROPIO PARA NO ROMPER EL CELULAR) */}
+                                 {/* TABLA PRINCIPAL */}
                                  <div className="w-full overflow-x-auto shadow-sm rounded-lg border border-gray-300 mb-8 pb-1">
                                      <table className="w-full border-collapse bg-white text-left min-w-[700px]">
                                          <thead className="bg-[#003366] text-white text-[10px] sm:text-xs tracking-wider">
@@ -346,7 +569,7 @@ const WorkerMyAttendances = () => {
                                      </table>
                                  </div>
 
-                                 {/* NUEVO: SECCIÓN DE TOTALES Y RESUMEN */}
+                                 {/* SECCIÓN DE TOTALES Y RESUMEN */}
                                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 sm:p-6 mb-10 shadow-inner">
                                      <h4 className="text-[#003366] font-black uppercase text-sm mb-4 border-b border-slate-200 pb-2">Resumen de la Semana</h4>
                                      
@@ -405,7 +628,7 @@ const WorkerMyAttendances = () => {
                                      </div>
                                  </div>
 
-                                 {/* ZONA DE FIRMAS (Adaptado para móvil) */}
+                                 {/* ZONA DE FIRMAS */}
                                  <div className="mt-12 sm:mt-24 mb-6 flex flex-col sm:flex-row justify-around px-4 sm:px-10 gap-12 sm:gap-0">
                                      <div className="w-full sm:w-56 text-center">
                                          <div className="border-t border-slate-400 pt-2">
