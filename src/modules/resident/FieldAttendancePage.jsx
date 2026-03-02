@@ -5,7 +5,7 @@ import {
   AlertCircle, Search, Users, ClipboardCheck, Loader2,
   Building2, ArrowLeft, Image as ImageIcon,
   ExternalLink, Eye, X, ChevronDown, ChevronRight, Coffee, Send, Clock,
-  CheckSquare, AlertTriangle, UserCheck, UserX, FileText, BellRing
+  CheckSquare, AlertTriangle, UserCheck, UserX, FileText, BellRing, HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -28,11 +28,11 @@ const FieldAttendancePage = () => {
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // ESTADOS DE BANDEJA DE PERMISOS (Caso 6)
+  // ESTADOS DE BANDEJA DE PERMISOS / REGULARIZACIONES
   const [pendingAbsences, setPendingAbsences] = useState([]);
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
 
-  // Estados de Modales (Modificado para saber qué estamos evaluando: 'ENTRY' o 'EXIT')
+  // Estados de Modales
   const [photoModal, setPhotoModal] = useState({ isOpen: false, worker: null });
   const [validationModal, setValidationModal] = useState({ isOpen: false, worker: null, evaluationType: null });
   const [confirmActionType, setConfirmActionType] = useState(null); 
@@ -86,7 +86,7 @@ const FieldAttendancePage = () => {
         
         if (attendanceError) throw attendanceError;
 
-        // C) CARGAR PERMISOS PENDIENTES DEL RESIDENTE
+        // C) CARGAR PERMISOS Y REGULARIZACIONES PENDIENTES DEL RESIDENTE
         const { data: absencesData, error: absencesError } = await supabase
           .from('absences')
           .select(`*, workers ( full_name, document_number, category )`)
@@ -138,10 +138,11 @@ const FieldAttendancePage = () => {
     loadData();
   }, [selectedProject, date]);
 
-  // --- LÓGICA DE APROBACIÓN DE PERMISOS (CASO 6) ---
+  // --- LÓGICA DE APROBACIÓN DE PERMISOS Y REGULARIZACIONES (CASO 6 y 7) ---
   const handleAbsenceApproval = async (absenceId, isApproved) => {
       try {
           const newBossStatus = isApproved ? 'Aprobado' : 'Rechazado';
+          // Si el residente rechaza, se rechaza de inmediato. Si aprueba, queda pendiente para RRHH.
           const overallStatus = isApproved ? 'Pendiente' : 'Rechazado'; 
 
           const { error } = await supabase
@@ -154,7 +155,7 @@ const FieldAttendancePage = () => {
           setPendingAbsences(prev => prev.filter(a => a.id !== absenceId));
           if (pendingAbsences.length === 1) setShowAbsenceModal(false);
 
-          setStatusModal({ isOpen: true, type: 'success', title: 'Evaluado', message: 'La solicitud fue procesada con éxito.' });
+          setStatusModal({ isOpen: true, type: 'success', title: 'Evaluado', message: 'La solicitud fue procesada con éxito y enviada a RRHH.' });
       } catch (err) {
           console.error(err);
           setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo procesar la solicitud.' });
@@ -230,7 +231,6 @@ const FieldAttendancePage = () => {
                 w.observation += ` [H.E. RECHAZADAS: Ajustado a 17:00]`;
                 w.checkOutTime = `${date}T17:00:00-05:00`;
              }
-             // Solo mandamos actualizar lo relacionado a la salida
              updatePayload = { overtime_status: w.overtimeStatus, observation: w.observation, check_out_time: w.checkOutTime };
          } 
          // 2. EVALUAR INGRESO (Tardanzas o Ubicación)
@@ -240,11 +240,9 @@ const FieldAttendancePage = () => {
                  w.attendanceStatus = 'Presente';
                  w.observation += ` [INGRESO APROBADO]`;
 
-                 // MAGIA 7:30 AM
                  if (w.justificationType === 'TARDANZA_JUSTIFICADA') {
                      w.checkInTime = `${date}T07:30:00-05:00`;
                  }
-                 // Solo mandamos actualizar lo relacionado a la entrada
                  updatePayload = { approval_status: w.approvalStatus, status: w.attendanceStatus, observation: w.observation, check_in_time: w.checkInTime };
              } else {
                  w.approvalStatus = 'Rechazado';
@@ -260,7 +258,6 @@ const FieldAttendancePage = () => {
              }
          }
 
-         // GUARDADO INMEDIATO EN LA BASE DE DATOS
          if (w.attendanceId) {
              try {
                  const { error } = await supabase
@@ -272,7 +269,7 @@ const FieldAttendancePage = () => {
              } catch (error) {
                  console.error("Error al auto-guardar la evaluación:", error);
                  alert("Hubo un error al guardar en la base de datos. Por favor intenta de nuevo.");
-                 return; // Detener ejecución si falla
+                 return; 
              }
          }
      }
@@ -449,9 +446,9 @@ const FieldAttendancePage = () => {
         </div>
       </div>
 
-      {/* --- BANNER DE ALERTA DE PERMISOS --- */}
+      {/* --- BANNER DE ALERTA DE PERMISOS Y REGULARIZACIONES (Modificado para abarcar a ambos) --- */}
       {pendingAbsences.length > 0 && (
-        <div className="bg-gradient-to-r from-purple-700 to-purple-600 text-white rounded-2xl shadow-xl shadow-purple-600/20 p-5 flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden animate-in slide-in-from-top-4">
+        <div className="bg-gradient-to-r from-purple-700 to-indigo-700 text-white rounded-2xl shadow-xl shadow-purple-600/20 p-5 flex flex-col md:flex-row items-center justify-between gap-5 relative overflow-hidden animate-in slide-in-from-top-4">
            <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-10 -translate-y-10">
               <FileText size={180} />
            </div>
@@ -462,7 +459,7 @@ const FieldAttendancePage = () => {
                </div>
                <div>
                    <h3 className="text-xl font-black tracking-wide">¡Atención Residente! Tienes {pendingAbsences.length} solicitud(es)</h3>
-                   <p className="text-purple-200 text-sm mt-1 font-medium">Hay permisos o descansos médicos esperando tu aprobación en esta obra.</p>
+                   <p className="text-purple-200 text-sm mt-1 font-medium">Hay permisos médicos u olvidos de marcación esperando tu aprobación.</p>
                </div>
            </div>
 
@@ -531,7 +528,6 @@ const FieldAttendancePage = () => {
                     </div>
                   </td>
 
-                  {/* COLUMNA DE ENTRADA CON BOTÓN DE EVALUACIÓN */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -547,7 +543,6 @@ const FieldAttendancePage = () => {
                         {worker.checkInLocation && worker.checkInLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkInLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
-                        {/* BOTÓN EVALUAR INGRESO ESPECÍFICO */}
                         {worker.approvalStatus === 'Pendiente' && (
                            <button onClick={() => setValidationModal({ isOpen: true, worker, evaluationType: 'ENTRY' })} className="mt-1 w-full justify-center inline-flex items-center gap-1 px-2 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold border border-amber-300 animate-pulse hover:bg-amber-200 shadow-sm transition-colors">
                               <AlertTriangle size={12}/> Evaluar Entrada
@@ -556,7 +551,6 @@ const FieldAttendancePage = () => {
                     </div>
                   </td>
 
-                  {/* COLUMNA DE SALIDA CON BOTÓN DE EVALUACIÓN */}
                   <td className="px-4 py-4 text-center">
                     <div className="flex flex-col items-center gap-1">
                         <div className="relative group/time">
@@ -572,7 +566,6 @@ const FieldAttendancePage = () => {
                         {worker.checkOutLocation && worker.checkOutLocation.includes(',') && (
                            <button onClick={() => openMap(worker.checkOutLocation)} className="flex items-center gap-1 text-[10px] text-blue-600 hover:underline"><MapPin size={10}/> Ver Mapa</button>
                         )}
-                        {/* BOTÓN EVALUAR SALIDA ESPECÍFICO */}
                         {worker.overtimeStatus === 'Pendiente' && (
                            <button onClick={() => setValidationModal({ isOpen: true, worker, evaluationType: 'EXIT' })} className="mt-1 w-full justify-center inline-flex items-center gap-1 px-2 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold border border-amber-300 animate-pulse hover:bg-amber-200 shadow-sm transition-colors">
                               <AlertTriangle size={12}/> Evaluar Salida
@@ -640,33 +633,42 @@ const FieldAttendancePage = () => {
         </div>
       </div>
 
-      {/* --- MODAL DE BANDEJA DE PERMISOS (CASO 6) --- */}
+      {/* --- MODAL DE BANDEJA DE PERMISOS Y OLVIDOS (CASO 6 Y CASO 7) --- */}
       <AnimatePresence>
         {showAbsenceModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setShowAbsenceModal(false)}>
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-[2rem] w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-purple-50 rounded-t-[2rem]">
+               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-[2rem]">
                  <div className="flex items-center gap-3">
-                     <div className="p-2 bg-purple-200 text-purple-700 rounded-xl"><FileText size={24}/></div>
+                     <div className="p-2 bg-[#003366] text-white rounded-xl"><FileText size={24}/></div>
                      <div>
-                         <h3 className="text-xl font-bold text-purple-900">Bandeja de Permisos y Justificaciones</h3>
-                         <p className="text-xs font-medium text-purple-700">Requieren tu aprobación inicial antes de pasar a RRHH.</p>
+                         <h3 className="text-xl font-bold text-slate-800">Bandeja de Solicitudes</h3>
+                         <p className="text-xs font-medium text-slate-500">Permisos, Descansos y Regularizaciones pendientes de tu aprobación.</p>
                      </div>
                  </div>
                  <button onClick={() => setShowAbsenceModal(false)} className="p-2 bg-white text-slate-400 hover:text-slate-700 rounded-full shadow-sm"><X size={24}/></button>
                </div>
                
-               <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
+               <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-100">
                   {pendingAbsences.map(absence => (
-                      <div key={absence.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row gap-6">
+                      <div key={absence.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row gap-6 relative overflow-hidden">
                           
-                          <div className="flex-1 space-y-4">
+                          {/* DECORACIÓN VISUAL SEGÚN EL TIPO */}
+                          <div className={`absolute left-0 top-0 bottom-0 w-1 ${absence.type === 'Regularización' ? 'bg-amber-500' : 'bg-purple-500'}`}></div>
+
+                          <div className="flex-1 space-y-4 ml-2">
                               <div className="flex items-start justify-between">
                                   <div>
                                       <h4 className="font-bold text-slate-800 text-lg">{absence.workers?.full_name}</h4>
                                       <p className="text-xs text-slate-500 font-mono mt-0.5">DNI: {absence.workers?.document_number} | {absence.workers?.category}</p>
                                   </div>
-                                  <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-lg text-xs font-bold border border-purple-200">{absence.absence_type || absence.type}</span>
+                                  
+                                  {/* ETIQUETA DINÁMICA: CASO 7 vs CASO 6 */}
+                                  {absence.type === 'Regularización' ? (
+                                      <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-lg text-xs font-bold border border-amber-200 flex items-center gap-1"><HelpCircle size={14}/> Olvido de Marcación</span>
+                                  ) : (
+                                      <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-lg text-xs font-bold border border-purple-200">{absence.absence_type || absence.type}</span>
+                                  )}
                               </div>
                               
                               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
@@ -679,7 +681,7 @@ const FieldAttendancePage = () => {
                                       <p className="font-bold text-slate-700">{absence.end_date}</p>
                                   </div>
                                   <div className="col-span-2">
-                                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Motivo / Descripción</p>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Motivo / Informe</p>
                                       <p className="text-sm text-slate-600 italic bg-white p-2 rounded border border-slate-200">"{absence.reason}"</p>
                                   </div>
                               </div>
@@ -708,7 +710,7 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* MODAL DE FOTOS (Diarias) */}
+      {/* --- LOS OTROS MODALES (FOTOS Y VALIDACIÓN DIARIA) SIGUEN INTACTOS --- */}
       <AnimatePresence>
         {photoModal.isOpen && photoModal.worker && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setPhotoModal({ isOpen: false, worker: null })}>
@@ -754,7 +756,6 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* MODAL DE VALIDACIÓN DE SOLICITUDES DIARIAS */}
       <AnimatePresence>
         {validationModal.isOpen && validationModal.worker && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" onClick={() => setValidationModal({ isOpen: false, worker: null, evaluationType: null })}>
@@ -822,7 +823,6 @@ const FieldAttendancePage = () => {
         )}
       </AnimatePresence>
 
-      {/* MODAL CONFIRMACIÓN GLOBAL */}
       <AnimatePresence>
         {showConfirmModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

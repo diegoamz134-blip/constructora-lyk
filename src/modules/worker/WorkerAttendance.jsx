@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CheckCircle, LogIn, LogOut, ArrowLeft, 
-  MapPin, AlertTriangle, Lock, Loader2, Clock, Upload, Camera, Calendar, FileText
+  MapPin, AlertTriangle, Lock, Loader2, Clock, Upload, Camera, Calendar, FileText, HelpCircle
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { compressImage } from '../../utils/imageCompressor';
@@ -42,9 +42,10 @@ const ABSENCE_TYPES = [
 const WorkerAttendance = () => {
   const { worker, loading: authLoading } = useWorkerAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Estados de flujo
-  const [step, setStep] = useState('confirm'); // 'confirm' | 'camera' | 'justification' | 'evidence_camera' | 'absence_form' | 'success'
+  const [step, setStep] = useState('confirm'); // 'confirm' | 'camera' | 'justification' | 'evidence_camera' | 'absence_form' | 'regularization_form' | 'success'
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [returnStep, setReturnStep] = useState('justification'); 
@@ -65,7 +66,7 @@ const WorkerAttendance = () => {
   const [lateReasonType, setLateReasonType] = useState('HORA_EXTRA'); 
   const [lateCheckInType, setLateCheckInType] = useState('JUSTIFICADA'); 
   
-  // Estados de FALTAS JUSTIFICADAS (Caso 6)
+  // Estados de FALTAS JUSTIFICADAS (Caso 6) y REGULARIZACIÓN (Caso 7)
   const [absenceType, setAbsenceType] = useState('Descanso Médico');
   const [absenceStartDate, setAbsenceStartDate] = useState('');
   const [absenceEndDate, setAbsenceEndDate] = useState('');
@@ -84,8 +85,13 @@ const WorkerAttendance = () => {
     if (worker) {
       checkAttendanceStatus(worker.id);
       loadProjectCoordinates(worker.project_assigned);
+
+      // Si viene desde el Dashboard con el botón de "Olvidé Marcar"
+      if (location.state?.autoStart === 'REGULARIZATION') {
+          startRegularizationProcess();
+      }
     }
-  }, [worker]);
+  }, [worker, location]);
 
   useEffect(() => {
     return () => stopCameraStream();
@@ -212,6 +218,18 @@ const WorkerAttendance = () => {
     setEvidenceBlob(null);
     setErrorMsg('');
     setStep('absence_form');
+  };
+
+  // --- INICIO DE FLUJO: REGULARIZACIÓN POR OLVIDO (CASO 7) ---
+  const startRegularizationProcess = () => {
+    setActionType('REGULARIZATION');
+    setAbsenceType('Regularización'); // Tipo interno para saber que es un olvido
+    setAbsenceStartDate('');
+    setAbsenceEndDate(''); // En regularización será el mismo día
+    setAbsenceReason('');
+    setEvidenceBlob(null);
+    setErrorMsg('');
+    setStep('regularization_form');
   };
 
   // --- CÁMARAS ---
@@ -433,10 +451,10 @@ const WorkerAttendance = () => {
     }
   };
 
-  // --- GUARDADO: FALTAS JUSTIFICADAS (NUEVO) ---
+  // --- GUARDADO UNIFICADO PARA PERMISOS (CASO 6) Y REGULARIZACIONES (CASO 7) ---
   const executeAbsenceSave = async () => {
     if (!evidenceBlob) {
-        setErrorMsg('Es obligatorio adjuntar la evidencia del permiso o descanso.');
+        setErrorMsg('Es obligatorio adjuntar la evidencia.');
         return;
     }
     setLoading(true);
@@ -444,22 +462,21 @@ const WorkerAttendance = () => {
     try {
       const timestamp = Date.now();
       const docNum = worker.document_number || 'sin_dni';
-      const evFileName = `${docNum}_absence_${timestamp}.jpg`;
+      const evFileName = `${docNum}_${actionType}_${timestamp}.jpg`;
       
       const { error: evUploadError } = await supabase.storage.from('attendance_photos').upload(evFileName, evidenceBlob, { contentType: 'image/jpeg', upsert: false });
       if (evUploadError) throw evUploadError;
       
       const { data: { publicUrl: evidenceUrl } } = supabase.storage.from('attendance_photos').getPublicUrl(evFileName);
 
-      // --- LA SOLUCIÓN AL ERROR ESTÁ AQUÍ ---
-      // Guardamos en "absence_type" y también en "type" para respetar la tabla antigua.
+      // Usamos la misma tabla "absences" para enviar a la misma bandeja del Residente.
       const { error: insertError } = await supabase.from('absences').insert([{
           worker_id: worker.id,
           project_name: worker.project_assigned,
-          type: absenceType,          // <-- Columna antigua obligatoria
-          absence_type: absenceType,  // <-- Columna nueva
+          type: absenceType,          
+          absence_type: absenceType,  
           start_date: absenceStartDate,
-          end_date: absenceEndDate || absenceStartDate,
+          end_date: actionType === 'REGULARIZATION' ? absenceStartDate : (absenceEndDate || absenceStartDate),
           reason: absenceReason,
           evidence_photo: evidenceUrl,
           boss_approval: 'Pendiente',
@@ -471,7 +488,7 @@ const WorkerAttendance = () => {
       setStep('success');
     } catch (error) {
       console.error(error);
-      setErrorMsg('Error al guardar la solicitud: ' + error.message);
+      setErrorMsg('Error al enviar la solicitud: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -560,10 +577,15 @@ const WorkerAttendance = () => {
                 </div>
               )}
 
-              {/* NUEVO BOTON PARA JUSTIFICAR FALTAS / PERMISOS */}
-              <div className="pt-4 border-t border-slate-100">
-                  <button onClick={startAbsenceProcess} className="w-full py-4 bg-purple-50 text-purple-700 rounded-2xl border border-purple-200 font-bold hover:bg-purple-100 transition-colors flex justify-center items-center gap-2 active:scale-95">
-                      <FileText size={20}/> Solicitar Permiso / Justificación
+              {/* OPCIONES SECUNDARIAS (Permisos y Olvidos) */}
+              <div className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+                  <button onClick={startAbsenceProcess} className="w-full py-3.5 bg-purple-50 text-purple-700 rounded-2xl border border-purple-100 font-bold hover:bg-purple-100 transition-colors flex justify-center items-center gap-2 active:scale-95 text-sm">
+                      <FileText size={18}/> Solicitar Permiso Médico/Día Libre
+                  </button>
+                  
+                  {/* BOTÓN NUEVO: CASO 7 */}
+                  <button onClick={startRegularizationProcess} className="w-full py-3.5 bg-amber-50 text-amber-700 rounded-2xl border border-amber-200 font-bold hover:bg-amber-100 transition-colors flex justify-center items-center gap-2 active:scale-95 text-sm">
+                      <HelpCircle size={18}/> Olvidé marcar mi Asistencia
                   </button>
               </div>
             </div>
@@ -731,6 +753,63 @@ const WorkerAttendance = () => {
            </motion.div>
         )}
 
+        {/* --- NUEVO PASO: FORMULARIO REGULARIZACIÓN DE OLVIDO (CASO 7) --- */}
+        {step === 'regularization_form' && (
+           <motion.div 
+             key="regularization_form" initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }}
+             className="w-full max-w-sm bg-white p-8 rounded-[2.5rem] relative z-10 mt-10 shadow-xl overflow-y-auto max-h-[85vh] scrollbar-hide"
+           >
+             <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <HelpCircle size={32} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">Regularizar Asistencia</h2>
+                <p className="text-slate-500 text-xs mt-2">¿Olvidaste marcar? Completa este informe. Será validado por tu Residente y por Recursos Humanos.</p>
+             </div>
+
+             <div className="space-y-4 mb-6">
+                 <div>
+                     <label className="block text-xs font-bold text-slate-700 mb-1">Fecha que olvidaste marcar</label>
+                     <input type="date" value={absenceStartDate} onChange={(e) => setAbsenceStartDate(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-amber-500"/>
+                 </div>
+                 
+                 <div>
+                     <label className="block text-xs font-bold text-slate-700 mb-1">Descripción Breve (Motivo)</label>
+                     <textarea rows="3" value={absenceReason} onChange={(e) => setAbsenceReason(e.target.value)} placeholder="Ej. Soy nuevo en la empresa y no sé cómo usar la plataforma..." className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-amber-500 resize-none"></textarea>
+                 </div>
+
+                 {/* CÁMARA EVIDENCIA OLVIDO */}
+                 <div>
+                     <label className="block text-xs font-bold text-slate-700 mb-1">Documento o Evidencia Probatoria</label>
+                     <p className="text-[10px] text-slate-500 mb-2 leading-tight">Ej. Foto tuya de ese día en la obra, algún registro escrito, etc.</p>
+                     {evidenceBlob ? (
+                         <div className="relative w-full h-32 rounded-xl overflow-hidden border-2 border-amber-500 shadow-sm group">
+                             <img src={URL.createObjectURL(evidenceBlob)} className="w-full h-full object-cover" alt="Evidencia" />
+                             <button onClick={() => startEvidenceCamera('regularization_form')} className="absolute inset-0 bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity font-bold text-sm backdrop-blur-sm"><Camera className="mb-1" size={20} /> Cambiar Foto</button>
+                         </div>
+                     ) : (
+                         <button onClick={() => startEvidenceCamera('regularization_form')} className="w-full py-5 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500 flex flex-col items-center justify-center hover:bg-slate-100 hover:border-amber-400 transition-colors group">
+                             <div className="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"><Camera size={20} className="text-amber-500" /></div>
+                             <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Adjuntar Informe / Foto</span>
+                         </button>
+                     )}
+                 </div>
+             </div>
+
+             <div className="flex gap-3 mt-6 border-t border-slate-100 pt-6">
+                 <button onClick={() => setStep('confirm')} className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Cancelar</button>
+                 <button 
+                    onClick={executeAbsenceSave} 
+                    disabled={!absenceStartDate || absenceReason.trim().length < 5 || !evidenceBlob || loading}
+                    className="flex-1 py-3.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-lg disabled:opacity-50 transition-colors flex justify-center items-center"
+                 >
+                    {loading ? <Loader2 className="animate-spin" size={18} /> : 'Enviar Informe'}
+                 </button>
+             </div>
+             {errorMsg && <p className="text-xs text-red-500 text-center font-bold mt-3">{errorMsg}</p>}
+           </motion.div>
+        )}
+
         {/* --- PASO 3: MODAL DE JUSTIFICACIÓN DIARIA (Tardanza/GPS) --- */}
         {step === 'justification' && (
            <motion.div 
@@ -825,7 +904,13 @@ const WorkerAttendance = () => {
         {/* --- PASO 4: ÉXITO --- */}
         {step === 'success' && (
           <motion.div key="success" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="w-full max-w-sm bg-white p-10 rounded-[2.5rem] text-center relative z-20 mt-20 shadow-xl">
-            {actionType === 'ABSENCE' ? (
+            {actionType === 'REGULARIZATION' ? (
+                <>
+                  <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-amber-50 text-amber-600"><CheckCircle size={48} strokeWidth={2} /></div>
+                  <h2 className="text-2xl font-bold text-slate-800 mb-2">Informe Enviado</h2>
+                  <p className="text-slate-500 text-sm mb-8 leading-relaxed">Tu informe por olvido de marcación será evaluado primero por tu Residente y luego por Recursos Humanos. Si ambos lo validan, se te registrará la asistencia.</p>
+                </>
+            ) : actionType === 'ABSENCE' ? (
                 <>
                   <div className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-purple-50 text-purple-600"><FileText size={48} strokeWidth={2} /></div>
                   <h2 className="text-2xl font-bold text-slate-800 mb-2">Solicitud Enviada</h2>

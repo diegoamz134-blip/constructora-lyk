@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Clock, ChevronRight, MessageSquare, 
-  MapPin, Loader2, HardHat, LogIn, LogOut, CheckCircle, FileText
+  MapPin, Loader2, HardHat, LogIn, LogOut, CheckCircle, FileText,
+  HelpCircle, CalendarDays 
 } from 'lucide-react';
 import { useWorkerAuth } from '../../context/WorkerAuthContext';
 import { supabase } from '../../services/supabase'; 
@@ -29,7 +30,7 @@ const itemVariants = {
 const WorkerDashboard = () => {
   const { worker } = useWorkerAuth();
   const navigate = useNavigate();
-  const location = useLocation(); // <-- IMPORTANTE: Detecta cuando volvemos a la pantalla
+  const location = useLocation(); 
 
   // ESTADOS PARA ASISTENCIA DINÁMICA
   const [attendanceToday, setAttendanceToday] = useState(null);
@@ -40,10 +41,10 @@ const WorkerDashboard = () => {
     if (worker) {
       checkAttendanceStatus();
     }
-  }, [worker, location.key]); // El location.key fuerza la recarga al volver de marcar asistencia
+  }, [worker, location.key]); 
 
   const checkAttendanceStatus = async () => {
-    setLoadingAttendance(true); // Reinicia el loader al consultar
+    setLoadingAttendance(true);
     try {
       const today = new Date().toISOString().split('T')[0];
       const { data, error } = await supabase
@@ -66,7 +67,7 @@ const WorkerDashboard = () => {
      return <div className="p-10 flex justify-center h-full items-center"><Loader2 className="animate-spin text-[#003366]" size={40}/></div>;
   }
 
-  const goTo = (path) => navigate(path);
+  const goTo = (path, state = {}) => navigate(path, { state });
   const canAccessLog = ['Capataz', 'Operario'].includes(worker.category);
 
   const formatCurrency = (amount) => {
@@ -84,7 +85,7 @@ const WorkerDashboard = () => {
   // --- RENDERIZADO DEL BOTÓN DINÁMICO DE ASISTENCIA ---
   const renderAttendanceButton = () => {
     
-    // CASO 0: ESTÁ CARGANDO (Skeleton Loader Ultra Rápido)
+    // CASO 0: ESTÁ CARGANDO
     if (loadingAttendance) {
         return (
            <motion.div variants={itemVariants} className="col-span-2 bg-slate-200/70 animate-pulse p-6 rounded-[1.8rem] flex justify-between items-center h-[110px]">
@@ -97,15 +98,20 @@ const WorkerDashboard = () => {
         );
     }
 
-    // CASO 1: JORNADA COMPLETADA (Tiene entrada y salida)
+    // CASO 1: JORNADA COMPLETADA
     if (attendanceToday && attendanceToday.check_out_time) {
         let hrs = 0; let mins = 0;
         
-        // Matemáticas seguras para las horas
         if (attendanceToday.check_in_time) {
             const dIn = new Date(attendanceToday.check_in_time);
             const dOut = new Date(attendanceToday.check_out_time);
-            const diffMs = dOut - dIn;
+            let diffMs = dOut - dIn;
+            
+            // LÓGICA DE REFRIGERIO: Si el tiempo transcurrido es mayor a 1 hora, le restamos 1 hora (3,600,000 ms) de almuerzo.
+            if (diffMs > 3600000) {
+                diffMs -= 3600000; 
+            }
+
             if (diffMs > 0) {
                 hrs = Math.floor(diffMs / (1000 * 60 * 60));
                 mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -147,7 +153,7 @@ const WorkerDashboard = () => {
         );
     }
 
-    // CASO 2: MARCAR SALIDA (Tiene entrada pero no salida)
+    // CASO 2: MARCAR SALIDA
     if (attendanceToday && !attendanceToday.check_out_time) {
         return (
            <motion.div
@@ -169,7 +175,7 @@ const WorkerDashboard = () => {
         );
     }
 
-    // CASO 3: MARCAR ENTRADA (No hay registro hoy)
+    // CASO 3: MARCAR ENTRADA
     return (
        <motion.div
           variants={itemVariants}
@@ -192,7 +198,7 @@ const WorkerDashboard = () => {
 
   return (
     <motion.div 
-      className="p-6 space-y-8 min-h-full"
+      className="p-6 space-y-8 min-h-full pb-20"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -267,10 +273,51 @@ const WorkerDashboard = () => {
 
         <div className="grid grid-cols-2 gap-4">
           
-          {/* BOTÓN MÁGICO DE ASISTENCIA (Ocupa las 2 columnas) */}
+          {/* BOTÓN MÁGICO DE ASISTENCIA */}
           {renderAttendanceButton()}
 
-          {/* NUEVO BOTÓN DE ACCESO RÁPIDO PARA PERMISOS (Ocupa las 2 columnas) */}
+          {/* NUEVO BOTÓN: VER MIS ASISTENCIAS (Módulo PDF) */}
+          <motion.div 
+             variants={itemVariants}
+             whileHover={{ scale: 1.02 }}
+             whileTap={{ scale: 0.97 }}
+             onClick={() => goTo('/worker/mis-asistencias')} 
+             className="col-span-2 bg-slate-800 p-5 rounded-[1.5rem] border border-slate-700 shadow-lg cursor-pointer flex justify-between items-center group hover:bg-slate-900 transition-colors relative overflow-hidden"
+          >
+             <div className="absolute right-0 bottom-0 opacity-5 transform translate-x-2 translate-y-2"><CalendarDays size={80} /></div>
+             <div className="flex items-center gap-4 relative z-10">
+               <div className="p-3 bg-slate-700 text-white rounded-2xl shadow-inner group-hover:scale-110 transition-transform">
+                   <CalendarDays size={24} />
+               </div>
+               <div>
+                 <h4 className="font-bold text-white text-lg leading-tight">Ver mis Asistencias</h4>
+                 <p className="text-slate-400 text-xs font-medium mt-0.5">Reportes de las últimas 4 semanas</p>
+               </div>
+             </div>
+             <ChevronRight size={22} className="text-slate-500 group-hover:text-white transition-colors relative z-10"/>
+          </motion.div>
+
+          {/* BOTÓN ACCESO DIRECTO: OLVIDÉ MARCAR */}
+          <motion.div 
+             variants={itemVariants}
+             whileHover={{ scale: 1.02 }}
+             whileTap={{ scale: 0.97 }}
+             onClick={() => goTo('/worker/asistencia', { autoStart: 'REGULARIZATION' })} 
+             className="col-span-2 bg-amber-50 p-5 rounded-[1.5rem] border border-amber-200 shadow-sm cursor-pointer flex justify-between items-center group hover:bg-amber-100 transition-colors"
+          >
+             <div className="flex items-center gap-4">
+               <div className="p-3 bg-white text-amber-500 rounded-2xl shadow-sm group-hover:scale-110 transition-transform">
+                   <HelpCircle size={24} />
+               </div>
+               <div>
+                 <h4 className="font-bold text-amber-900 text-lg leading-tight">Olvidé marcar hoy</h4>
+                 <p className="text-amber-700/80 text-xs font-medium mt-0.5">Enviar reporte al residente</p>
+               </div>
+             </div>
+             <ChevronRight size={22} className="text-amber-300 group-hover:text-amber-600 transition-colors"/>
+          </motion.div>
+
+          {/* BOTÓN: PERMISOS Y FALTAS */}
           <motion.div 
              variants={itemVariants}
              whileHover={{ scale: 1.02 }}
@@ -324,7 +371,6 @@ const WorkerDashboard = () => {
 
         </div>
       </motion.div>
-
     </motion.div>
   );
 };

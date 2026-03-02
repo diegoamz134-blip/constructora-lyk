@@ -20,7 +20,7 @@ const ProjectsPage = React.lazy(() => import('./modules/projects/ProjectsPage'))
 const SedesPage = React.lazy(() => import('./modules/projects/SedesPage'));
 const HumanResourcesPage = React.lazy(() => import('./modules/hr/HumanResourcesPage'));
 const PayrollPage = React.lazy(() => import('./modules/hr/PayrollPage'));
-const AbsenceManagementPage = React.lazy(() => import('./modules/hr/AbsenceManagementPage')); // <-- NUEVO: PÁGINA DE AUSENCIAS
+const AbsenceManagementPage = React.lazy(() => import('./modules/hr/AbsenceManagementPage')); 
 const ReportsPage = React.lazy(() => import('./modules/admin-control/ReportsPage'));
 const ConfigurationPage = React.lazy(() => import('./modules/admin-control/ConfigurationPage'));
 const UserProfilePage = React.lazy(() => import('./modules/admin-control/UserProfilePage'));
@@ -42,6 +42,7 @@ const MaintenancePage = React.lazy(() => import('./components/common/Maintenance
 // Worker Pages
 const WorkerDashboard = React.lazy(() => import('./modules/worker/WorkerDashboard'));
 const WorkerAttendance = React.lazy(() => import('./modules/worker/WorkerAttendance'));
+const WorkerMyAttendances = React.lazy(() => import('./modules/worker/WorkerMyAttendances')); // <-- NUEVO: RUTA PARA EL PDF
 const WorkerProjectView = React.lazy(() => import('./modules/worker/WorkerProjectView'));
 const WorkerProjectLog = React.lazy(() => import('./modules/worker/WorkerProjectLog'));
 const WorkerProfilePage = React.lazy(() => import('./modules/worker/WorkerProfilePage'));
@@ -137,7 +138,7 @@ function App() {
                <Route path="/users" element={<HumanResourcesPage />} />
                <Route path="/planillas" element={<PayrollPage />} />
                <Route path="/documentacion" element={<DocumentationPage />} />
-               <Route path="/ausencias" element={<AbsenceManagementPage />} /> {/* NUEVO: PÁGINA DE AUSENCIAS */}
+               <Route path="/ausencias" element={<AbsenceManagementPage />} /> 
             </Route>
           </Route>
 
@@ -157,6 +158,7 @@ function App() {
           <Route path="/worker" element={<WorkerLayout />}>
             <Route path="dashboard" element={<WorkerDashboard />} />
             <Route path="asistencia" element={<WorkerAttendance />} />
+            <Route path="mis-asistencias" element={<WorkerMyAttendances />} /> {/* <-- NUEVO: RUTA PARA EL PDF */}
             <Route path="bitacora" element={<WorkerProjectLog />} />
             <Route path="proyecto" element={<WorkerProjectView />} />
             <Route path="profile" element={<WorkerProfilePage />} />
